@@ -11,16 +11,13 @@ datasource db {
 }
 
 model Account {
-  id          String        @id @default(cuid())
-  code        String        @unique // e.g., "1000", "2000" for chart of accounts
-  name        String
-  type        AccountType
-  balance     Decimal       @default(0) @db.Decimal(15, 2)
-  description String?
-  isActive    Boolean       @default(true)
-  journalLines JournalLine[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
+  id        String   @id @default(cuid())
+  code      String   @unique  // e.g., "1000", "2000" for chart of accounts
+  name      String
+  type      AccountType
+  balance   Decimal  @default(0) @db.Decimal(15, 2)
+  createdAt DateTime @default(now())
+  updatedAt DateTime @updatedAt
 }
 
 enum AccountType {
@@ -29,36 +26,4 @@ enum AccountType {
   EQUITY
   REVENUE
   EXPENSE
-}
-
-model JournalEntry {
-  id          String        @id @default(cuid())
-  date        DateTime
-  description String
-  referenceNo String?
-  status      Status        @default(DRAFT)
-  journalLines JournalLine[]
-  createdAt   DateTime      @default(now())
-  updatedAt   DateTime      @updatedAt
-}
-
-model JournalLine {
-  id             String       @id @default(cuid())
-  journalEntryId String
-  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
-  accountId      String
-  account        Account      @relation(fields: [accountId], references: [id], onDelete: Restrict)
-  debit          Decimal      @default(0) @db.Decimal(15, 2)
-  credit         Decimal      @default(0) @db.Decimal(15, 2)
-  description    String?
-  createdAt      DateTime     @default(now())
-
-  @@index([journalEntryId])
-  @@index([accountId])
-}
-
-enum Status {
-  DRAFT
-  POSTED
-  ARCHIVED
 }
