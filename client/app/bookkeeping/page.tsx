@@ -3,7 +3,9 @@
 import { useState, useEffect } from 'react';
 import { getAccounts, getJournalEntries, type Account, type JournalEntry } from '@/lib/api';
 import CreateAccountForm from '@/app/components/CreateAccountForm';
-import { Plus, BookOpen, FileText } from 'lucide-react';
+import EditAccountForm from '@/app/components/EditAccountForm';
+import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
+import { Plus, BookOpen, FileText, Edit2 } from 'lucide-react';
 
 export default function BookkeepingPage() {
   const [activeTab, setActiveTab] = useState<'accounts' | 'journal'>('accounts');
@@ -12,6 +14,8 @@ export default function BookkeepingPage() {
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
+  const [showCreateJournalForm, setShowCreateJournalForm] = useState(false);
+  const [editingAccount, setEditingAccount] = useState<Account | null>(null);
 
   useEffect(() => {
     loadData();
@@ -109,7 +113,27 @@ export default function BookkeepingPage() {
             {/* Create Form */}
             {showCreateForm && (
               <div className="mb-8">
-                <CreateAccountForm />
+                <CreateAccountForm
+                  onSuccess={() => {
+                    setShowCreateForm(false);
+                    loadData();
+                  }}
+                  onCancel={() => setShowCreateForm(false)}
+                />
+              </div>
+            )}
+
+            {/* Edit Form */}
+            {editingAccount && (
+              <div className="mb-8">
+                <EditAccountForm
+                  account={editingAccount}
+                  onSuccess={() => {
+                    setEditingAccount(null);
+                    loadData();
+                  }}
+                  onCancel={() => setEditingAccount(null)}
+                />
               </div>
             )}
 
@@ -160,6 +184,9 @@ export default function BookkeepingPage() {
                         <th className="px-6 py-3 text-left text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
                           Status
                         </th>
+                        <th className="px-6 py-3 text-right text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wider">
+                          Actions
+                        </th>
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
@@ -194,6 +221,14 @@ export default function BookkeepingPage() {
                               {account.isActive ? 'Active' : 'Inactive'}
                             </span>
                           </td>
+                          <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium">
+                            <button
+                              onClick={() => setEditingAccount(account)}
+                              className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
+                            >
+                              <Edit2 className="h-4 w-4" />
+                            </button>
+                          </td>
                         </tr>
                       ))}
                     </tbody>
@@ -210,13 +245,26 @@ export default function BookkeepingPage() {
                 Journal Entries ({journalEntries.length})
               </h2>
               <button
+                onClick={() => setShowCreateJournalForm(!showCreateJournalForm)}
                 className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors text-sm font-medium"
-                disabled
               >
                 <Plus className="h-4 w-4" />
-                New Entry
+                {showCreateJournalForm ? 'Cancel' : 'New Entry'}
               </button>
             </div>
+
+            {/* Create Journal Entry Form */}
+            {showCreateJournalForm && (
+              <div className="mb-8">
+                <CreateJournalEntryForm
+                  onSuccess={() => {
+                    setShowCreateJournalForm(false);
+                    loadData();
+                  }}
+                  onCancel={() => setShowCreateJournalForm(false)}
+                />
+              </div>
+            )}
 
             {/* Journal Entries List */}
             {loading ? (
