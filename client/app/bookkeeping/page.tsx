@@ -5,7 +5,7 @@ import { getAccounts, getJournalEntries, type Account, type JournalEntry } from 
 import CreateAccountForm from '@/app/components/CreateAccountForm';
 import EditAccountForm from '@/app/components/EditAccountForm';
 import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
-import { Plus, BookOpen, FileText, Edit2 } from 'lucide-react';
+import { Plus, BookOpen, FileText, Edit2, Search, Filter, X } from 'lucide-react';
 
 export default function BookkeepingPage() {
   const [activeTab, setActiveTab] = useState<'accounts' | 'journal'>('accounts');
@@ -16,6 +16,17 @@ export default function BookkeepingPage() {
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showCreateJournalForm, setShowCreateJournalForm] = useState(false);
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
+  
+  // Account filters
+  const [accountSearch, setAccountSearch] = useState('');
+  const [accountTypeFilter, setAccountTypeFilter] = useState<string>('all');
+  const [accountStatusFilter, setAccountStatusFilter] = useState<string>('all');
+  
+  // Journal entry filters
+  const [journalSearch, setJournalSearch] = useState('');
+  const [journalStatusFilter, setJournalStatusFilter] = useState<string>('all');
+  const [journalStartDate, setJournalStartDate] = useState('');
+  const [journalEndDate, setJournalEndDate] = useState('');
 
   useEffect(() => {
     loadData();
@@ -42,6 +53,58 @@ export default function BookkeepingPage() {
   useEffect(() => {
     loadData();
   }, [activeTab]);
+
+  // Filter accounts
+  const filteredAccounts = accounts.filter((account) => {
+    // Search filter
+    const matchesSearch = 
+      accountSearch === '' ||
+      account.name.toLowerCase().includes(accountSearch.toLowerCase()) ||
+      account.code.toLowerCase().includes(accountSearch.toLowerCase()) ||
+      (account.description || '').toLowerCase().includes(accountSearch.toLowerCase());
+    
+    // Type filter
+    const matchesType = accountTypeFilter === 'all' || account.type === accountTypeFilter;
+    
+    // Status filter
+    const matchesStatus = accountStatusFilter === 'all' || 
+      (accountStatusFilter === 'active' && account.isActive) ||
+      (accountStatusFilter === 'inactive' && !account.isActive);
+    
+    return matchesSearch && matchesType && matchesStatus;
+  });
+
+  // Filter journal entries
+  const filteredJournalEntries = journalEntries.filter((entry) => {
+    // Search filter
+    const matchesSearch = 
+      journalSearch === '' ||
+      entry.description.toLowerCase().includes(journalSearch.toLowerCase()) ||
+      (entry.referenceNo || '').toLowerCase().includes(journalSearch.toLowerCase());
+    
+    // Status filter
+    const matchesStatus = journalStatusFilter === 'all' || entry.status === journalStatusFilter;
+    
+    // Date range filter
+    const entryDate = new Date(entry.date);
+    const matchesStartDate = !journalStartDate || entryDate >= new Date(journalStartDate);
+    const matchesEndDate = !journalEndDate || entryDate <= new Date(journalEndDate);
+    
+    return matchesSearch && matchesStatus && matchesStartDate && matchesEndDate;
+  });
+
+  const clearAccountFilters = () => {
+    setAccountSearch('');
+    setAccountTypeFilter('all');
+    setAccountStatusFilter('all');
+  };
+
+  const clearJournalFilters = () => {
+    setJournalSearch('');
+    setJournalStatusFilter('all');
+    setJournalStartDate('');
+    setJournalEndDate('');
+  };
 
   const handleAccountCreated = () => {
     setShowCreateForm(false);
@@ -99,7 +162,7 @@ export default function BookkeepingPage() {
             {/* Accounts Header */}
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-                Accounts ({accounts.length})
+                Accounts ({filteredAccounts.length} {filteredAccounts.length !== accounts.length ? `of ${accounts.length}` : ''})
               </h2>
               <button
                 onClick={() => setShowCreateForm(!showCreateForm)}
@@ -108,6 +171,65 @@ export default function BookkeepingPage() {
                 <Plus className="h-4 w-4" />
                 {showCreateForm ? 'Cancel' : 'New Account'}
               </button>
+            </div>
+
+            {/* Account Filters */}
+            <div className="mb-6 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+              <div className="flex flex-col md:flex-row gap-4">
+                {/* Search */}
+                <div className="flex-1">
+                  <div className="relative">
+                    <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                    <input
+                      type="text"
+                      placeholder="Search by name, code, or description..."
+                      value={accountSearch}
+                      onChange={(e) => setAccountSearch(e.target.value)}
+                      className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                    />
+                  </div>
+                </div>
+                
+                {/* Type Filter */}
+                <div className="w-full md:w-48">
+                  <select
+                    value={accountTypeFilter}
+                    onChange={(e) => setAccountTypeFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                  >
+                    <option value="all">All Types</option>
+                    <option value="ASSET">Asset</option>
+                    <option value="LIABILITY">Liability</option>
+                    <option value="EQUITY">Equity</option>
+                    <option value="REVENUE">Revenue</option>
+                    <option value="EXPENSE">Expense</option>
+                  </select>
+                </div>
+                
+                {/* Status Filter */}
+                <div className="w-full md:w-40">
+                  <select
+                    value={accountStatusFilter}
+                    onChange={(e) => setAccountStatusFilter(e.target.value)}
+                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                  >
+                    <option value="all">All Status</option>
+                    <option value="active">Active</option>
+                    <option value="inactive">Inactive</option>
+                  </select>
+                </div>
+                
+                {/* Clear Filters */}
+                {(accountSearch || accountTypeFilter !== 'all' || accountStatusFilter !== 'all') && (
+                  <button
+                    onClick={clearAccountFilters}
+                    className="flex items-center gap-2 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
+                  >
+                    <X className="h-4 w-4" />
+                    Clear
+                  </button>
+                )}
+              </div>
             </div>
 
             {/* Create Form */}
@@ -146,14 +268,16 @@ export default function BookkeepingPage() {
               <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                 <p className="text-red-800 dark:text-red-200">{error}</p>
               </div>
-            ) : accounts.length === 0 ? (
+            ) : filteredAccounts.length === 0 ? (
               <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-12 text-center">
                 <BookOpen className="h-12 w-12 text-zinc-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-50 mb-2">
-                  No accounts yet
+                  {accounts.length === 0 ? 'No accounts yet' : 'No accounts match your filters'}
                 </h3>
                 <p className="text-zinc-600 dark:text-zinc-400 mb-4">
-                  Get started by creating your first account.
+                  {accounts.length === 0 
+                    ? 'Get started by creating your first account.'
+                    : 'Try adjusting your search or filter criteria.'}
                 </p>
                 <button
                   onClick={() => setShowCreateForm(true)}
@@ -190,7 +314,7 @@ export default function BookkeepingPage() {
                       </tr>
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
-                      {accounts.map((account) => (
+                      {filteredAccounts.map((account) => (
                         <tr
                           key={account.id}
                           className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
@@ -242,7 +366,7 @@ export default function BookkeepingPage() {
             {/* Journal Entries Header */}
             <div className="flex justify-between items-center mb-6">
               <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
-                Journal Entries ({journalEntries.length})
+                Journal Entries ({filteredJournalEntries.length} {filteredJournalEntries.length !== journalEntries.length ? `of ${journalEntries.length}` : ''})
               </h2>
               <button
                 onClick={() => setShowCreateJournalForm(!showCreateJournalForm)}
@@ -251,6 +375,84 @@ export default function BookkeepingPage() {
                 <Plus className="h-4 w-4" />
                 {showCreateJournalForm ? 'Cancel' : 'New Entry'}
               </button>
+            </div>
+
+            {/* Journal Entry Filters */}
+            <div className="mb-6 bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+              <div className="flex flex-col gap-4">
+                {/* First Row: Search and Status */}
+                <div className="flex flex-col md:flex-row gap-4">
+                  {/* Search */}
+                  <div className="flex-1">
+                    <div className="relative">
+                      <Search className="absolute left-3 top-1/2 transform -translate-y-1/2 h-4 w-4 text-zinc-400" />
+                      <input
+                        type="text"
+                        placeholder="Search by description or reference number..."
+                        value={journalSearch}
+                        onChange={(e) => setJournalSearch(e.target.value)}
+                        className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                      />
+                    </div>
+                  </div>
+                  
+                  {/* Status Filter */}
+                  <div className="w-full md:w-48">
+                    <select
+                      value={journalStatusFilter}
+                      onChange={(e) => setJournalStatusFilter(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                    >
+                      <option value="all">All Status</option>
+                      <option value="DRAFT">Draft</option>
+                      <option value="POSTED">Posted</option>
+                      <option value="ARCHIVED">Archived</option>
+                    </select>
+                  </div>
+                </div>
+                
+                {/* Second Row: Date Range */}
+                <div className="flex flex-col md:flex-row gap-4">
+                  {/* Start Date */}
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                      Start Date
+                    </label>
+                    <input
+                      type="date"
+                      value={journalStartDate}
+                      onChange={(e) => setJournalStartDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                    />
+                  </div>
+                  
+                  {/* End Date */}
+                  <div className="flex-1">
+                    <label className="block text-xs font-medium text-zinc-600 dark:text-zinc-400 mb-1">
+                      End Date
+                    </label>
+                    <input
+                      type="date"
+                      value={journalEndDate}
+                      onChange={(e) => setJournalEndDate(e.target.value)}
+                      className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
+                    />
+                  </div>
+                  
+                  {/* Clear Filters */}
+                  {(journalSearch || journalStatusFilter !== 'all' || journalStartDate || journalEndDate) && (
+                    <div className="flex items-end">
+                      <button
+                        onClick={clearJournalFilters}
+                        className="flex items-center gap-2 px-4 py-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
+                      >
+                        <X className="h-4 w-4" />
+                        Clear
+                      </button>
+                    </div>
+                  )}
+                </div>
+              </div>
             </div>
 
             {/* Create Journal Entry Form */}
@@ -275,19 +477,21 @@ export default function BookkeepingPage() {
               <div className="bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 rounded-lg p-4">
                 <p className="text-red-800 dark:text-red-200">{error}</p>
               </div>
-            ) : journalEntries.length === 0 ? (
+            ) : filteredJournalEntries.length === 0 ? (
               <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-12 text-center">
                 <FileText className="h-12 w-12 text-zinc-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-50 mb-2">
-                  No journal entries yet
+                  {journalEntries.length === 0 ? 'No journal entries yet' : 'No journal entries match your filters'}
                 </h3>
                 <p className="text-zinc-600 dark:text-zinc-400">
-                  Journal entry creation coming soon.
+                  {journalEntries.length === 0 
+                    ? 'Get started by creating your first journal entry.'
+                    : 'Try adjusting your search or filter criteria.'}
                 </p>
               </div>
             ) : (
               <div className="space-y-4">
-                {journalEntries.map((entry) => (
+                {filteredJournalEntries.map((entry) => (
                   <div
                     key={entry.id}
                     className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6"
