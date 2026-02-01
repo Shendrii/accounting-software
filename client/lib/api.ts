@@ -248,3 +248,96 @@ export async function deleteJournalEntry(id: string): Promise<void> {
   return handleResponse<void>(response);
 }
 
+// ==================== RECEIPTS API ====================
+
+export interface ReceiptLineItem {
+  description: string;
+  amount: number;
+}
+
+export interface ReceiptExtractedData {
+  vendor?: string;
+  date?: string;
+  amount?: number;
+  invoiceDate?: string;
+  dueDate?: string;
+  invoiceNumber?: string;
+  total?: number;
+  amountPaid?: number;
+  balanceDue?: number;
+  items?: ReceiptLineItem[];
+  category?: string;
+  confidence?: number;
+  rawText?: string;
+}
+
+export interface Receipt {
+  id: string;
+  imageUrl: string;
+  extractedData: ReceiptExtractedData;
+  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  journalEntryId: string | null;
+  createdAt: string;
+  updatedAt: string;
+  journalEntry?: JournalEntry | null;
+}
+
+export function getReceiptImageUrl(imageUrl: string): string {
+  if (!imageUrl) return '';
+  if (imageUrl.startsWith('http')) return imageUrl;
+  return `${API_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+}
+
+export async function uploadReceipt(file: File): Promise<Receipt> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const response = await fetch(`${API_URL}/api/receipts/upload`, {
+    method: 'POST',
+    body: formData,
+  });
+  return handleResponse<Receipt>(response);
+}
+
+export async function getReceipts(status?: string): Promise<Receipt[]> {
+  const params = status ? `?status=${encodeURIComponent(status)}` : '';
+  const response = await fetch(`${API_URL}/api/receipts${params}`);
+  return handleResponse<Receipt[]>(response);
+}
+
+export async function getReceipt(id: string): Promise<Receipt> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}`);
+  return handleResponse<Receipt>(response);
+}
+
+export async function updateReceipt(
+  id: string,
+  data: { extractedData?: ReceiptExtractedData; status?: string }
+): Promise<Receipt> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Receipt>(response);
+}
+
+export async function approveReceipt(
+  id: string,
+  expenseAccountId: string,
+  paymentAccountId: string
+): Promise<{ receipt: Receipt; journalEntry: JournalEntry }> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}/approve`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ expenseAccountId, paymentAccountId }),
+  });
+  return handleResponse<{ receipt: Receipt; journalEntry: JournalEntry }>(response);
+}
+
+export async function rejectReceipt(id: string): Promise<Receipt> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}/reject`, {
+    method: 'POST',
+  });
+  return handleResponse<Receipt>(response);
+}
+

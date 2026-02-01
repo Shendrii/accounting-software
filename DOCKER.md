@@ -1,6 +1,6 @@
 # Docker setup – step-by-step
 
-This project runs in Docker with three services: **PostgreSQL**, **Node API (server)**, and **Next.js (client)**.
+This project runs in Docker with four services: **PostgreSQL**, **OCR (PaddleOCR)**, **Node API (server)**, and **Next.js (client)**.
 
 ---
 
@@ -28,6 +28,7 @@ Default values in `docker-compose.yml` are fine for local use:
 
 - DB: `postgres` / `postgres` / `accounting`
 - API URL for the browser: `http://localhost:8000`
+- **Receipt scanning:** Set `OPENAI_API_KEY` in `.env` for GPT-3.5 parsing of OCR text (optional; OCR still runs without it).
 
 ---
 
@@ -39,7 +40,7 @@ From the project root:
 docker compose up --build
 ```
 
-- First run builds the **server** and **client** images and starts **db**, **server**, and **client**.
+- First run builds the **ocr**, **server**, and **client** images and starts **db**, **ocr**, **server**, and **client**.
 - **Server** runs Prisma migrations on startup (`prisma migrate deploy`).
 - **Client** is built with `NEXT_PUBLIC_API_URL` so the browser can call the API.
 
@@ -71,11 +72,12 @@ docker compose down -v
 | Service  | Image / build      | Port | Role                          |
 |----------|--------------------|------|-------------------------------|
 | **db**   | `postgres:16-alpine` | 5432 | PostgreSQL                    |
+| **ocr**  | `./ocr` Dockerfile | 5000 | PaddleOCR (receipt text extraction) |
 | **server** | `./server` Dockerfile | 8000 | Express + Prisma, runs migrations on start |
 | **client** | `./client` Dockerfile | 3000 | Next.js (standalone build)   |
 
 - **db** has a healthcheck; **server** starts only after DB is healthy.
-- **client** depends on **server** (start order only; the browser talks to the API via `NEXT_PUBLIC_API_URL`).
+- **server** calls **ocr** for receipt scanning; **client** depends on **server** (browser uses `NEXT_PUBLIC_API_URL`).
 
 ---
 
@@ -117,3 +119,6 @@ docker compose exec server npx prisma studio
 
 4. **Reset database**  
    `docker compose down -v` then `docker compose up --build`.
+
+5. **Receipt OCR / GPT parsing**  
+   Receipts tab uses the **ocr** service (PaddleOCR) and optional **OPENAI_API_KEY** for GPT-3.5. If OCR fails, check the **ocr** container is running (`docker compose logs ocr`). If parsing is empty, set `OPENAI_API_KEY` in `.env` and restart the server.

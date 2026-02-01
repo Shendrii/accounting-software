@@ -32,6 +32,24 @@ model JournalEntry {
   createdAt    DateTime     @default(now())
   updatedAt    DateTime     @updatedAt
   journalLines JournalLine[]
+  receipt      Receipt?
+}
+
+model Receipt {
+  id              String       @id @default(cuid())
+  imageUrl        String
+  extractedData   Json         // { vendor, date, amount, category, confidence }
+  status          ReceiptStatus @default(PENDING)
+  journalEntryId  String?      @unique
+  createdAt       DateTime     @default(now())
+  updatedAt       DateTime     @updatedAt
+  journalEntry    JournalEntry? @relation(fields: [journalEntryId], references: [id])
+}
+
+enum ReceiptStatus {
+  PENDING
+  APPROVED
+  REJECTED
 }
 
 model JournalLine {

@@ -16,6 +16,14 @@ services:
       timeout: 5s
       retries: 5
 
+  ocr:
+    build:
+      context: ./ocr
+      dockerfile: Dockerfile
+    restart: unless-stopped
+    ports:
+      - "5050:5000"   # Host 5050 to avoid conflict with macOS AirPlay (5000)
+
   server:
     build:
       context: ./server
@@ -25,11 +33,18 @@ services:
       NODE_ENV: production
       PORT: 8000
       DATABASE_URL: postgresql://${POSTGRES_USER:-postgres}:${POSTGRES_PASSWORD:-postgres}@db:5432/${POSTGRES_DB:-accounting}
+      # 5000 = OCR container's internal port (host uses 5050 to avoid AirPlay conflict)
+      OCR_SERVICE_URL: http://ocr:5000
+      OPENAI_API_KEY: ${OPENAI_API_KEY:-}
     ports:
       - "8000:8000"
+    volumes:
+      - receipt_uploads:/app/uploads
     depends_on:
       db:
         condition: service_healthy
+      ocr:
+        condition: service_started
 
   client:
     build:
@@ -45,3 +60,4 @@ services:
 
 volumes:
   postgres_data:
+  receipt_uploads:

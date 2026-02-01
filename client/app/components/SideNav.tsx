@@ -2,13 +2,14 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { Home, BookOpen, Menu, X } from 'lucide-react';
+import { Home, BookOpen, Receipt, Menu, X } from 'lucide-react';
 import { useState } from 'react';
 import { cn } from '@/lib/utils';
 
 const navigation = [
   { name: 'Home', href: '/', icon: Home },
   { name: 'Bookkeeping', href: '/bookkeeping', icon: BookOpen },
+  { name: 'Receipts', href: '/receipts', icon: Receipt },
 ];
 
 export default function SideNav() {

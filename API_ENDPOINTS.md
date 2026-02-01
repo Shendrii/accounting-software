@@ -391,6 +391,62 @@ Delete a journal entry.
 
 ---
 
+## 📷 Receipts Endpoints
+
+Receipt scanning: upload image → PaddleOCR extracts text → GPT-3.5 parses to JSON (vendor, date, amount, category, confidence). Review, edit, then approve to create a journal entry (debit expense, credit payment).
+
+### POST `/api/receipts/upload`
+Upload a receipt image. Server runs OCR and optional GPT parsing, then creates a receipt with status `PENDING`.
+
+**Request:** `multipart/form-data` with field `image` (file).
+
+**Response:**
+```json
+{
+  "id": "clx...",
+  "imageUrl": "/uploads/receipt-xxx.jpg",
+  "extractedData": {
+    "vendor": "Store Name",
+    "date": "2024-12-03",
+    "amount": 42.50,
+    "category": "Office Supplies",
+    "confidence": 0.9,
+    "rawText": "..."
+  },
+  "status": "PENDING",
+  "journalEntryId": null,
+  "createdAt": "...",
+  "updatedAt": "..."
+}
+```
+
+### GET `/api/receipts`
+List receipts. Optional query: `?status=PENDING` or `APPROVED` or `REJECTED`.
+
+### GET `/api/receipts/:id`
+Get one receipt (includes linked journal entry if any).
+
+### PUT `/api/receipts/:id`
+Update extracted data and/or status. Body: `{ "extractedData": { ... }, "status": "PENDING" }`.
+
+### POST `/api/receipts/:id/approve`
+Create journal entry from receipt (debit expense, credit payment) and link receipt.
+
+**Request Body:**
+```json
+{
+  "expenseAccountId": "account-id",
+  "paymentAccountId": "account-id"
+}
+```
+
+**Response:** `{ "receipt": { ... }, "journalEntry": { ... } }`
+
+### POST `/api/receipts/:id/reject`
+Set receipt status to `REJECTED`.
+
+---
+
 ## 🔍 Testing Your Endpoints
 
 ### Using curl
