@@ -1,7 +1,7 @@
 # API Endpoints Reference
 
 Complete guide to all available API endpoints for your bookkeeping system.
-
+##   GCP_API_KEY=AIzaSyBRIKFbdz7x_EqB8MOIwaT07E6AQiYBrh8
 ## Base URL
 
 - **Development**: `http://localhost:8000`

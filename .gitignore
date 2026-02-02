@@ -8,6 +8,10 @@ node_modules/
 .env.local
 .env.*.local
 
+# GCP service account key (do not commit)
+gcp-key.json
+*-gcp-key.json
+
 # Build outputs
 /.next
 /out

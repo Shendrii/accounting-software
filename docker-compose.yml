@@ -21,6 +21,11 @@ services:
       context: ./ocr
       dockerfile: Dockerfile
     restart: unless-stopped
+    environment:
+      # Option 1 (easiest): API key from Credentials → API keys → Show key
+      GCP_API_KEY: ${GCP_API_KEY:-}
+      # Option 2: Service account JSON path (mount file via volumes in override)
+      GOOGLE_APPLICATION_CREDENTIALS: ${GOOGLE_APPLICATION_CREDENTIALS:-}
     ports:
       - "5050:5000"   # Host 5050 to avoid conflict with macOS AirPlay (5000)
 

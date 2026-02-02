@@ -2,11 +2,7 @@ FROM python:3.11-slim
 
 WORKDIR /app
 
-# Tesseract OCR (English); Pillow works on slim without extra libs
-RUN apt-get update && apt-get install -y --no-install-recommends \
-    tesseract-ocr \
-    tesseract-ocr-eng \
-    && rm -rf /var/lib/apt/lists/*
+# No system OCR packages needed; Cloud Vision is API-only
 
 COPY requirements.txt .
 RUN pip install --no-cache-dir -r requirements.txt

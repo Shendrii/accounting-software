@@ -165,12 +165,13 @@ router.post('/:id/approve', async (req, res) => {
       return res.status(400).json({ error: 'Receipt already approved' });
     }
     const data = receipt.extractedData;
+    const parsedAmount = parseFloat(data?.amount ?? data?.total ?? data?.balanceDue ?? data?.amountPaid);
     const amount =
       (typeof data?.amount === 'number' ? data.amount : null) ??
       (typeof data?.total === 'number' ? data.total : null) ??
       (typeof data?.balanceDue === 'number' ? data.balanceDue : null) ??
       (typeof data?.amountPaid === 'number' ? data.amountPaid : null) ??
-      parseFloat(data?.amount ?? data?.total ?? data?.balanceDue ?? data?.amountPaid) || 0;
+      (isNaN(parsedAmount) ? 0 : parsedAmount);
     if (amount <= 0) {
       return res.status(400).json({ error: 'Invalid or missing amount in receipt data' });
     }
