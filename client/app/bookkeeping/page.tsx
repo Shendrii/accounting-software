@@ -550,7 +550,7 @@ export default function BookkeepingPage() {
                       onChange={(e) => setJournalStatusFilter(e.target.value)}
                       className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
                     >
-                      <option value="all">All Status</option>
+                      <option value="ALL">All Status</option>
                       <option value="DRAFT">Draft</option>
                       <option value="POSTED">Posted</option>
                       <option value="ARCHIVED">Archived</option>
