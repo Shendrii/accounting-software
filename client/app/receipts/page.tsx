@@ -9,15 +9,21 @@ import {
   approveReceipt,
   rejectReceipt,
   getReceiptImageUrl,
+  getVendors,
+  getBills,
   type Receipt,
   type ReceiptExtractedData,
   type Account,
+  type Vendor,
+  type Bill,
 } from '@/lib/api';
 import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
+  const [vendors, setVendors] = useState<Vendor[]>([]);
+  const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -37,12 +43,16 @@ export default function ReceiptsPage() {
     setLoading(true);
     setError(null);
     try {
-      const [receiptsData, accountsData] = await Promise.all([
+      const [receiptsData, accountsData, vendorsData, billsData] = await Promise.all([
         getReceipts(statusFilter === 'all' ? undefined : statusFilter),
         getAccounts(),
+        getVendors({ isActive: true }),
+        getBills({ status: 'RECEIVED' }),
       ]);
       setReceipts(receiptsData);
       setAccounts(accountsData.filter((a) => a.isActive));
+      setVendors(vendorsData);
+      setBills(billsData);
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Failed to load data');
     } finally {
@@ -222,6 +232,12 @@ export default function ReceiptsPage() {
                 onApprove={() => setApproveModal({ receipt })}
                 onReject={() => handleReject(receipt.id)}
                 canApprove={receipt.status === 'PENDING'}
+                vendors={vendors}
+                bills={bills}
+                onUpdateMeta={async (vendorId, category, billId) => {
+                  await updateReceipt(receipt.id, { vendorId, category, billId });
+                  await loadData();
+                }}
               />
             ))}
           </div>
@@ -307,6 +323,8 @@ export default function ReceiptsPage() {
   );
 }
 
+const CATEGORY_SUGGESTIONS = ['Office Supplies', 'Travel', 'Meals', 'Utilities', 'Software', 'Other'];
+
 function ReceiptCard({
   receipt,
   isEditing,
@@ -316,6 +334,9 @@ function ReceiptCard({
   onApprove,
   onReject,
   canApprove,
+  vendors,
+  bills,
+  onUpdateMeta,
 }: {
   receipt: Receipt;
   isEditing: boolean;
@@ -325,6 +346,9 @@ function ReceiptCard({
   onApprove: () => void;
   onReject: () => void;
   canApprove: boolean;
+  vendors: Vendor[];
+  bills: Bill[];
+  onUpdateMeta: (vendorId: string | null, category: string | null, billId: string | null) => Promise<void>;
 }) {
   // Normalize so old receipts (date, amount) show in new fields (invoiceDate, total)
   const normalizeForEdit = (raw: Receipt['extractedData']): ReceiptExtractedData => {
@@ -344,10 +368,28 @@ function ReceiptCard({
   };
 
   const [editData, setEditData] = useState<ReceiptExtractedData>(() => normalizeForEdit(receipt.extractedData));
+  const [metaVendorId, setMetaVendorId] = useState<string>((receipt as Receipt & { vendorId?: string }).vendorId ?? '');
+  const [metaCategory, setMetaCategory] = useState<string>((receipt as Receipt & { category?: string }).category ?? '');
+  const [metaBillId, setMetaBillId] = useState<string>((receipt as Receipt & { billId?: string }).billId ?? '');
+  const [metaSaving, setMetaSaving] = useState(false);
 
   useEffect(() => {
     setEditData(normalizeForEdit(receipt.extractedData));
+    setMetaVendorId((receipt as Receipt & { vendorId?: string }).vendorId ?? '');
+    setMetaCategory((receipt as Receipt & { category?: string }).category ?? '');
+    setMetaBillId((receipt as Receipt & { billId?: string }).billId ?? '');
   }, [receipt.extractedData]);
+
+  async function saveMeta() {
+    setMetaSaving(true);
+    try {
+      await onUpdateMeta(metaVendorId || null, metaCategory || null, metaBillId || null);
+    } finally {
+      setMetaSaving(false);
+    }
+  }
+
+  const vendorBills = bills.filter((b) => !metaVendorId || b.vendorId === metaVendorId);
 
   const d = receipt.extractedData || {};
   const items = d.items ?? [];
@@ -557,6 +599,56 @@ function ReceiptCard({
               </div>
             </div>
           )}
+          {/* Vendor / Category / Bill metadata */}
+          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Expense Details</p>
+            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Vendor</label>
+                <select
+                  value={metaVendorId}
+                  onChange={(e) => { setMetaVendorId(e.target.value); setMetaBillId(''); }}
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                >
+                  <option value="">None</option>
+                  {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
+                </select>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Category</label>
+                <input
+                  list={`cat-list-${receipt.id}`}
+                  value={metaCategory}
+                  onChange={(e) => setMetaCategory(e.target.value)}
+                  placeholder="e.g. Travel"
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                />
+                <datalist id={`cat-list-${receipt.id}`}>
+                  {CATEGORY_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
+                </datalist>
+              </div>
+              <div>
+                <label className="block text-xs text-zinc-500 mb-1">Link to Bill</label>
+                <select
+                  value={metaBillId}
+                  onChange={(e) => setMetaBillId(e.target.value)}
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                >
+                  <option value="">None</option>
+                  {vendorBills.map((b) => <option key={b.id} value={b.id}>{b.billNo} ({b.vendor?.name ?? ''})</option>)}
+                </select>
+              </div>
+            </div>
+            <button
+              onClick={saveMeta}
+              disabled={metaSaving}
+              className="mt-2 px-3 py-1.5 text-xs font-medium rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 flex items-center gap-1"
+            >
+              {metaSaving && <Loader2 className="h-3 w-3 animate-spin" />}
+              Save details
+            </button>
+          </div>
+
           <div className="mt-4 flex flex-wrap gap-2">
             {!isEditing ? (
               <>

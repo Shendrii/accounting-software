@@ -1,83 +1,156 @@
+'use client';
+
 import Link from 'next/link';
-import { BookOpen, TrendingUp, FileText, BarChart3 } from 'lucide-react';
+import { BookOpen, TrendingUp, TrendingDown, DollarSign, FileText, BarChart3, Users, Building2 } from 'lucide-react';
+import { useEffect, useState } from 'react';
+import { fetchDashboard, type DashboardData } from '@/lib/api';
+
+function formatCurrency(value: string | number): string {
+  const num = typeof value === 'string' ? parseFloat(value) : value;
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
+}
+
+function KpiCard({
+  label,
+  value,
+  icon: Icon,
+  loading,
+  highlight,
+}: {
+  label: string;
+  value: string;
+  icon: React.ElementType;
+  loading: boolean;
+  highlight?: 'green' | 'red' | 'blue' | 'default';
+}) {
+  const colorMap = {
+    green: 'text-emerald-600 dark:text-emerald-400',
+    red: 'text-red-600 dark:text-red-400',
+    blue: 'text-blue-600 dark:text-blue-400',
+    default: 'text-zinc-900 dark:text-zinc-50',
+  };
+  const valueColor = colorMap[highlight ?? 'default'];
+
+  return (
+    <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
+      <div className="flex items-center justify-between mb-2">
+        <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">{label}</h3>
+        <Icon className="h-5 w-5 text-zinc-400" />
+      </div>
+      {loading ? (
+        <div className="h-8 w-28 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />
+      ) : (
+        <p className={`text-2xl font-semibold ${valueColor}`}>{value}</p>
+      )}
+    </div>
+  );
+}
 
 export default function Home() {
+  const [data, setData] = useState<DashboardData | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [error, setError] = useState<string | null>(null);
+
+  useEffect(() => {
+    fetchDashboard()
+      .then(setData)
+      .catch((e) => setError(e.message))
+      .finally(() => setLoading(false));
+  }, []);
+
+  const netIncome = data ? parseFloat(data.netIncome) : 0;
+
   return (
     <div className="lg:pl-64 min-h-screen">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
         {/* Hero Section */}
-        <div className="mb-16">
-          <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-4">
-            Welcome to Your Accounting System
+        <div className="mb-10">
+          <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
+            Financial Overview
           </h1>
-          <p className="text-lg text-zinc-600 dark:text-zinc-400 max-w-2xl">
-            Manage your finances with ease. Track accounts, create journal entries, and maintain accurate records.
+          <p className="text-lg text-zinc-600 dark:text-zinc-400">
+            Your business at a glance.
           </p>
         </div>
 
-        {/* Quick Stats */}
-        <div className="grid grid-cols-1 md:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Total Accounts</h3>
-              <BookOpen className="h-5 w-5 text-zinc-400" />
-            </div>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">-</p>
+        {error && (
+          <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+            Could not load dashboard data: {error}
           </div>
+        )}
 
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Journal Entries</h3>
-              <FileText className="h-5 w-5 text-zinc-400" />
-            </div>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">-</p>
-          </div>
-
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">This Month</h3>
-              <TrendingUp className="h-5 w-5 text-zinc-400" />
-            </div>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">-</p>
-          </div>
-
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
-            <div className="flex items-center justify-between mb-2">
-              <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">Reports</h3>
-              <BarChart3 className="h-5 w-5 text-zinc-400" />
-            </div>
-            <p className="text-2xl font-semibold text-zinc-900 dark:text-zinc-50">-</p>
-          </div>
+        {/* KPI Cards */}
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6 mb-12">
+          <KpiCard
+            label="Cash Balance"
+            value={data ? formatCurrency(data.cashBalance) : '$0.00'}
+            icon={DollarSign}
+            loading={loading}
+            highlight="blue"
+          />
+          <KpiCard
+            label="Total Income"
+            value={data ? formatCurrency(data.totalIncome) : '$0.00'}
+            icon={TrendingUp}
+            loading={loading}
+            highlight="green"
+          />
+          <KpiCard
+            label="Total Expenses"
+            value={data ? formatCurrency(data.totalExpenses) : '$0.00'}
+            icon={TrendingDown}
+            loading={loading}
+            highlight="red"
+          />
+          <KpiCard
+            label="Net Income"
+            value={data ? formatCurrency(data.netIncome) : '$0.00'}
+            icon={BarChart3}
+            loading={loading}
+            highlight={netIncome >= 0 ? 'green' : 'red'}
+          />
         </div>
 
-        {/* Quick Actions */}
-        <div className="grid grid-cols-1 md:grid-cols-2 gap-6">
-          <Link
-            href="/bookkeeping"
-            className="group bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-8 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 hover:shadow-md"
-          >
-            <div className="flex items-start justify-between mb-4">
-              <BookOpen className="h-8 w-8 text-zinc-600 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-50 transition-colors" />
+        {/* Outstanding Invoices Banner */}
+        {!loading && data && parseInt(String(data.outstandingInvoicesCount)) > 0 && (
+          <div className="mb-10 p-4 rounded-lg bg-amber-50 dark:bg-amber-900/20 border border-amber-200 dark:border-amber-800 flex items-center justify-between">
+            <div className="flex items-center gap-3">
+              <FileText className="h-5 w-5 text-amber-600" />
+              <span className="text-sm font-medium text-amber-800 dark:text-amber-300">
+                {data.outstandingInvoicesCount} outstanding invoice{data.outstandingInvoicesCount !== 1 ? 's' : ''} totalling{' '}
+                {formatCurrency(data.outstandingInvoicesTotal)}
+              </span>
             </div>
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
-              Bookkeeping
-            </h2>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              Manage accounts and create journal entries for your financial transactions.
-            </p>
-          </Link>
-
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-8 opacity-50">
-            <div className="flex items-start justify-between mb-4">
-              <BarChart3 className="h-8 w-8 text-zinc-400" />
-            </div>
-            <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50 mb-2">
-              Reports
-            </h2>
-            <p className="text-zinc-600 dark:text-zinc-400">
-              View financial reports and analytics. Coming soon.
-            </p>
+            <Link
+              href="/invoices?status=SENT"
+              className="text-sm font-medium text-amber-700 dark:text-amber-400 hover:underline"
+            >
+              View invoices →
+            </Link>
           </div>
+        )}
+
+        {/* Quick Actions */}
+        <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Quick Access</h2>
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+          {[
+            { href: '/bookkeeping', icon: BookOpen, label: 'Bookkeeping', desc: 'Manage accounts and journal entries.' },
+            { href: '/invoices', icon: FileText, label: 'Invoices', desc: 'Create and manage customer invoices.' },
+            { href: '/bills', icon: Building2, label: 'Bills', desc: 'Track vendor bills and payments.' },
+            { href: '/customers', icon: Users, label: 'Customers', desc: 'Manage your customer list.' },
+            { href: '/vendors', icon: Building2, label: 'Vendors', desc: 'Manage your vendor list.' },
+            { href: '/reports', icon: BarChart3, label: 'Reports', desc: 'P&L, Balance Sheet, Trial Balance.' },
+          ].map(({ href, icon: Icon, label, desc }) => (
+            <Link
+              key={href}
+              href={href}
+              className="group bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 hover:border-zinc-300 dark:hover:border-zinc-700 transition-all duration-200 hover:shadow-md"
+            >
+              <Icon className="h-7 w-7 text-zinc-500 dark:text-zinc-400 group-hover:text-zinc-900 dark:group-hover:text-zinc-50 transition-colors mb-3" />
+              <p className="font-semibold text-zinc-900 dark:text-zinc-50 mb-1">{label}</p>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400">{desc}</p>
+            </Link>
+          ))}
         </div>
       </div>
     </div>

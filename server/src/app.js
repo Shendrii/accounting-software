@@ -6,6 +6,13 @@ import dotenv from 'dotenv';
 import accountsRouter from './routes/accounts.js';
 import journalEntriesRouter from './routes/journalEntries.js';
 import receiptsRouter from './routes/receipts.js';
+import dashboardRouter from './routes/dashboard.js';
+import customersRouter from './routes/customers.js';
+import vendorsRouter from './routes/vendors.js';
+import invoicesRouter from './routes/invoices.js';
+import billsRouter from './routes/bills.js';
+import reconciliationRouter from './routes/reconciliation.js';
+import reportsRouter from './routes/reports.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
@@ -30,6 +37,13 @@ app.get('/api/health', (req, res) => {
 app.use('/api/accounts', accountsRouter);
 app.use('/api/journal-entries', journalEntriesRouter);
 app.use('/api/receipts', receiptsRouter);
+app.use('/api/dashboard', dashboardRouter);
+app.use('/api/customers', customersRouter);
+app.use('/api/vendors', vendorsRouter);
+app.use('/api/invoices', invoicesRouter);
+app.use('/api/bills', billsRouter);
+app.use('/api/reconciliation', reconciliationRouter);
+app.use('/api/reports', reportsRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

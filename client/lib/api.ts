@@ -311,7 +311,7 @@ export async function getReceipt(id: string): Promise<Receipt> {
 
 export async function updateReceipt(
   id: string,
-  data: { extractedData?: ReceiptExtractedData; status?: string }
+  data: { extractedData?: ReceiptExtractedData; status?: string; vendorId?: string | null; category?: string | null; billId?: string | null }
 ): Promise<Receipt> {
   const response = await fetch(`${API_URL}/api/receipts/${id}`, {
     method: 'PUT',
@@ -339,5 +339,464 @@ export async function rejectReceipt(id: string): Promise<Receipt> {
     method: 'POST',
   });
   return handleResponse<Receipt>(response);
+}
+
+// ==================== DASHBOARD API ====================
+
+export interface DashboardData {
+  cashBalance: string;
+  totalIncome: string;
+  totalExpenses: string;
+  netIncome: string;
+  outstandingInvoicesCount: number;
+  outstandingInvoicesTotal: string;
+}
+
+export async function fetchDashboard(): Promise<DashboardData> {
+  const response = await fetch(`${API_URL}/api/dashboard`);
+  return handleResponse<DashboardData>(response);
+}
+
+// ==================== CUSTOMERS API ====================
+
+export interface Customer {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  city?: string | null;
+  country?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateCustomerInput {
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+  city?: string;
+  country?: string;
+}
+
+export async function getCustomers(params?: { search?: string; isActive?: boolean }): Promise<Customer[]> {
+  const q = new URLSearchParams();
+  if (params?.search) q.append('search', params.search);
+  if (params?.isActive !== undefined) q.append('isActive', String(params.isActive));
+  const response = await fetch(`${API_URL}/api/customers${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<Customer[]>(response);
+}
+
+export async function getCustomer(id: string): Promise<Customer> {
+  const response = await fetch(`${API_URL}/api/customers/${id}`);
+  return handleResponse<Customer>(response);
+}
+
+export async function createCustomer(data: CreateCustomerInput): Promise<Customer> {
+  const response = await fetch(`${API_URL}/api/customers`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Customer>(response);
+}
+
+export async function updateCustomer(id: string, data: Partial<CreateCustomerInput> & { isActive?: boolean }): Promise<Customer> {
+  const response = await fetch(`${API_URL}/api/customers/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Customer>(response);
+}
+
+export async function deleteCustomer(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/customers/${id}`, { method: 'DELETE' });
+  return handleResponse<void>(response);
+}
+
+// ==================== VENDORS API ====================
+
+export interface Vendor {
+  id: string;
+  name: string;
+  email?: string | null;
+  phone?: string | null;
+  address?: string | null;
+  isActive: boolean;
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface CreateVendorInput {
+  name: string;
+  email?: string;
+  phone?: string;
+  address?: string;
+}
+
+export async function getVendors(params?: { search?: string; isActive?: boolean }): Promise<Vendor[]> {
+  const q = new URLSearchParams();
+  if (params?.search) q.append('search', params.search);
+  if (params?.isActive !== undefined) q.append('isActive', String(params.isActive));
+  const response = await fetch(`${API_URL}/api/vendors${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<Vendor[]>(response);
+}
+
+export async function getVendor(id: string): Promise<Vendor> {
+  const response = await fetch(`${API_URL}/api/vendors/${id}`);
+  return handleResponse<Vendor>(response);
+}
+
+export async function createVendor(data: CreateVendorInput): Promise<Vendor> {
+  const response = await fetch(`${API_URL}/api/vendors`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Vendor>(response);
+}
+
+export async function updateVendor(id: string, data: Partial<CreateVendorInput> & { isActive?: boolean }): Promise<Vendor> {
+  const response = await fetch(`${API_URL}/api/vendors/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Vendor>(response);
+}
+
+export async function deleteVendor(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/vendors/${id}`, { method: 'DELETE' });
+  return handleResponse<void>(response);
+}
+
+// ==================== INVOICES API ====================
+
+export type InvoiceStatus = 'DRAFT' | 'SENT' | 'PAID' | 'VOID';
+
+export interface InvoiceLine {
+  id: string;
+  invoiceId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+  accountId?: string | null;
+  account?: { id: string; name: string; code: string } | null;
+}
+
+export interface Invoice {
+  id: string;
+  invoiceNo: string;
+  customerId: string;
+  customer?: Customer;
+  date: string;
+  dueDate: string;
+  status: InvoiceStatus;
+  subtotal: string;
+  tax: string;
+  total: string;
+  notes?: string | null;
+  journalEntryId?: string | null;
+  lines?: InvoiceLine[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface InvoiceLineInput {
+  description: string;
+  quantity: number | string;
+  unitPrice: number | string;
+  amount: number | string;
+  accountId?: string;
+}
+
+export interface CreateInvoiceInput {
+  customerId: string;
+  date: string;
+  dueDate: string;
+  lines: InvoiceLineInput[];
+  notes?: string;
+  tax?: number;
+}
+
+export async function getInvoices(params?: {
+  status?: InvoiceStatus;
+  customerId?: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<Invoice[]> {
+  const q = new URLSearchParams();
+  if (params?.status) q.append('status', params.status);
+  if (params?.customerId) q.append('customerId', params.customerId);
+  if (params?.startDate) q.append('startDate', params.startDate);
+  if (params?.endDate) q.append('endDate', params.endDate);
+  const response = await fetch(`${API_URL}/api/invoices${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<Invoice[]>(response);
+}
+
+export async function getInvoice(id: string): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}`);
+  return handleResponse<Invoice>(response);
+}
+
+export async function createInvoice(data: CreateInvoiceInput): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Invoice>(response);
+}
+
+export async function updateInvoice(id: string, data: Partial<CreateInvoiceInput>): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Invoice>(response);
+}
+
+export async function sendInvoice(id: string): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/send`, { method: 'POST' });
+  return handleResponse<Invoice>(response);
+}
+
+export async function recordInvoicePayment(id: string, paymentAccountId: string): Promise<{ invoice: Invoice; journalEntry: JournalEntry }> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/record-payment`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paymentAccountId }),
+  });
+  return handleResponse<{ invoice: Invoice; journalEntry: JournalEntry }>(response);
+}
+
+export async function voidInvoice(id: string): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/void`, { method: 'POST' });
+  return handleResponse<Invoice>(response);
+}
+
+export async function deleteInvoice(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}`, { method: 'DELETE' });
+  return handleResponse<void>(response);
+}
+
+// ==================== BILLS API ====================
+
+export type BillStatus = 'DRAFT' | 'RECEIVED' | 'PAID' | 'VOID';
+
+export interface BillLine {
+  id: string;
+  billId: string;
+  description: string;
+  quantity: string;
+  unitPrice: string;
+  amount: string;
+  accountId?: string | null;
+  account?: { id: string; name: string; code: string } | null;
+}
+
+export interface Bill {
+  id: string;
+  billNo: string;
+  vendorId: string;
+  vendor?: Vendor;
+  date: string;
+  dueDate: string;
+  status: BillStatus;
+  total: string;
+  notes?: string | null;
+  journalEntryId?: string | null;
+  lines?: BillLine[];
+  createdAt: string;
+  updatedAt: string;
+}
+
+export interface BillLineInput {
+  description: string;
+  quantity: number | string;
+  unitPrice: number | string;
+  amount: number | string;
+  accountId?: string;
+}
+
+export interface CreateBillInput {
+  vendorId: string;
+  date: string;
+  dueDate: string;
+  lines: BillLineInput[];
+  notes?: string;
+}
+
+export async function getBills(params?: {
+  status?: BillStatus;
+  vendorId?: string;
+  startDate?: string;
+  endDate?: string;
+}): Promise<Bill[]> {
+  const q = new URLSearchParams();
+  if (params?.status) q.append('status', params.status);
+  if (params?.vendorId) q.append('vendorId', params.vendorId);
+  if (params?.startDate) q.append('startDate', params.startDate);
+  if (params?.endDate) q.append('endDate', params.endDate);
+  const response = await fetch(`${API_URL}/api/bills${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<Bill[]>(response);
+}
+
+export async function getBill(id: string): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}`);
+  return handleResponse<Bill>(response);
+}
+
+export async function createBill(data: CreateBillInput): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Bill>(response);
+}
+
+export async function updateBill(id: string, data: Partial<CreateBillInput>): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}`, {
+    method: 'PUT',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Bill>(response);
+}
+
+export async function receiveBill(id: string): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}/receive`, { method: 'POST' });
+  return handleResponse<Bill>(response);
+}
+
+export async function payBill(id: string, paymentAccountId: string): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}/pay`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ paymentAccountId }),
+  });
+  return handleResponse<Bill>(response);
+}
+
+export async function voidBill(id: string): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}/void`, { method: 'POST' });
+  return handleResponse<Bill>(response);
+}
+
+export async function deleteBill(id: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/bills/${id}`, { method: 'DELETE' });
+  return handleResponse<void>(response);
+}
+
+// ==================== RECONCILIATION API ====================
+
+export interface BankTransaction {
+  id: string;
+  accountId: string;
+  date: string;
+  description: string;
+  amount: string;
+  isMatched: boolean;
+  matchedLineId?: string | null;
+  createdAt: string;
+}
+
+export interface ReconciliationData {
+  bankTransactions: BankTransaction[];
+  journalLines: (JournalLine & { journalEntry: { date: string; description: string; referenceNo?: string | null } })[];
+}
+
+export async function importBankTransactions(accountId: string, transactions: { date: string; description: string; amount: number }[]): Promise<{ imported: number }> {
+  const response = await fetch(`${API_URL}/api/reconciliation/import`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId, transactions }),
+  });
+  return handleResponse<{ imported: number }>(response);
+}
+
+export async function getReconciliationData(accountId: string): Promise<ReconciliationData> {
+  const response = await fetch(`${API_URL}/api/reconciliation/${accountId}`);
+  return handleResponse<ReconciliationData>(response);
+}
+
+export async function matchTransaction(bankTransactionId: string, journalLineId: string): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_URL}/api/reconciliation/match`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bankTransactionId, journalLineId }),
+  });
+  return handleResponse<{ success: boolean }>(response);
+}
+
+export async function unmatchTransaction(bankTransactionId: string): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_URL}/api/reconciliation/unmatch`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ bankTransactionId }),
+  });
+  return handleResponse<{ success: boolean }>(response);
+}
+
+export async function completeReconciliation(accountId: string, statementDate: string, statementBalance: number): Promise<{ id: string }> {
+  const response = await fetch(`${API_URL}/api/reconciliation/complete`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ accountId, statementDate, statementBalance }),
+  });
+  return handleResponse<{ id: string }>(response);
+}
+
+// ==================== REPORTS API ====================
+
+export interface ProfitLossReport {
+  revenue: { accountId: string; accountName: string; accountCode: string; balance: string }[];
+  expenses: { accountId: string; accountName: string; accountCode: string; balance: string }[];
+  totalRevenue: string;
+  totalExpenses: string;
+  netIncome: string;
+}
+
+export interface BalanceSheetReport {
+  assets: { accountId: string; accountName: string; accountCode: string; balance: string }[];
+  liabilities: { accountId: string; accountName: string; accountCode: string; balance: string }[];
+  equity: { accountId: string; accountName: string; accountCode: string; balance: string }[];
+  totalAssets: string;
+  totalLiabilities: string;
+  totalEquity: string;
+}
+
+export interface TrialBalanceReport {
+  rows: { accountId: string; accountCode: string; accountName: string; accountType: string; debitTotal: string; creditTotal: string }[];
+  totals: { debitTotal: string; creditTotal: string };
+}
+
+export async function getProfitLoss(params?: { startDate?: string; endDate?: string }): Promise<ProfitLossReport> {
+  const q = new URLSearchParams();
+  if (params?.startDate) q.append('startDate', params.startDate);
+  if (params?.endDate) q.append('endDate', params.endDate);
+  const response = await fetch(`${API_URL}/api/reports/profit-loss${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<ProfitLossReport>(response);
+}
+
+export async function getBalanceSheet(params?: { asOf?: string }): Promise<BalanceSheetReport> {
+  const q = new URLSearchParams();
+  if (params?.asOf) q.append('asOf', params.asOf);
+  const response = await fetch(`${API_URL}/api/reports/balance-sheet${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<BalanceSheetReport>(response);
+}
+
+export async function getTrialBalance(params?: { startDate?: string; endDate?: string }): Promise<TrialBalanceReport> {
+  const q = new URLSearchParams();
+  if (params?.startDate) q.append('startDate', params.startDate);
+  if (params?.endDate) q.append('endDate', params.endDate);
+  const response = await fetch(`${API_URL}/api/reports/trial-balance${q.toString() ? `?${q}` : ''}`);
+  return handleResponse<TrialBalanceReport>(response);
 }
 

@@ -1,7 +1,5 @@
 import type { NextConfig } from "next";
 
-const nextConfig: NextConfig = {
-  output: "standalone", // Required for optimized Docker image
-};
+const nextConfig: NextConfig = {};
 
 export default nextConfig;

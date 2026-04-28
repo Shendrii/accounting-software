@@ -111,7 +111,11 @@ router.get('/', async (req, res) => {
     const receipts = await prisma.receipt.findMany({
       where,
       orderBy: { createdAt: 'desc' },
-      include: { journalEntry: { include: { journalLines: { include: { account: true } } } } },
+      include: {
+        journalEntry: { include: { journalLines: { include: { account: true } } } },
+        vendor: { select: { id: true, name: true } },
+        bill: { select: { id: true, billNo: true } },
+      },
     });
     res.json(receipts);
   } catch (error) {
@@ -124,7 +128,11 @@ router.get('/:id', async (req, res) => {
   try {
     const receipt = await prisma.receipt.findUnique({
       where: { id: req.params.id },
-      include: { journalEntry: { include: { journalLines: { include: { account: true } } } } },
+      include: {
+        journalEntry: { include: { journalLines: { include: { account: true } } } },
+        vendor: { select: { id: true, name: true } },
+        bill: { select: { id: true, billNo: true } },
+      },
     });
     if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
     res.json(receipt);
@@ -133,17 +141,25 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/receipts/:id - update extractedData and/or status
+// PUT /api/receipts/:id - update extractedData, status, vendor, category, bill
 router.put('/:id', async (req, res) => {
   try {
-    const { extractedData, status } = req.body;
+    const { extractedData, status, vendorId, category, billId } = req.body;
     const update = {};
     if (extractedData != null) update.extractedData = extractedData;
     if (status != null) update.status = status;
+    if (vendorId !== undefined) update.vendorId = vendorId || null;
+    if (category !== undefined) update.category = category || null;
+    if (billId !== undefined) update.billId = billId || null;
+
     const receipt = await prisma.receipt.update({
       where: { id: req.params.id },
       data: update,
-      include: { journalEntry: { include: { journalLines: { include: { account: true } } } } },
+      include: {
+        journalEntry: { include: { journalLines: { include: { account: true } } } },
+        vendor: { select: { id: true, name: true } },
+        bill: { select: { id: true, billNo: true } },
+      },
     });
     res.json(receipt);
   } catch (error) {
@@ -164,6 +180,46 @@ router.post('/:id/approve', async (req, res) => {
     if (receipt.status === 'APPROVED') {
       return res.status(400).json({ error: 'Receipt already approved' });
     }
+
+    // If the receipt is linked to a bill, mark the bill as PAID instead
+    if (receipt.billId) {
+      const bill = await prisma.bill.findUnique({ where: { id: receipt.billId } });
+      if (bill && bill.status === 'RECEIVED') {
+        const apAccount = await prisma.account.findFirst({
+          where: { name: { contains: 'payable', mode: 'insensitive' } },
+        });
+        if (!apAccount) {
+          return res.status(400).json({ error: 'No Accounts Payable account found.' });
+        }
+        const amount = parseFloat(bill.total.toString());
+        await prisma.$transaction(async (tx) => {
+          const entry = await tx.journalEntry.create({
+            data: {
+              date: new Date(),
+              description: `Payment for Bill ${bill.billNo} via receipt`,
+              referenceNo: bill.billNo,
+              status: 'POSTED',
+              journalLines: {
+                create: [
+                  { accountId: apAccount.id, debit: amount, credit: 0 },
+                  { accountId: paymentAccountId, debit: 0, credit: amount },
+                ],
+              },
+            },
+          });
+          await tx.account.update({ where: { id: apAccount.id }, data: { balance: { decrement: amount } } });
+          await tx.account.update({ where: { id: paymentAccountId }, data: { balance: { decrement: amount } } });
+          await tx.bill.update({ where: { id: bill.id }, data: { status: 'PAID', journalEntryId: entry.id } });
+          await tx.receipt.update({ where: { id: receipt.id }, data: { status: 'APPROVED' } });
+        });
+        const updatedReceipt = await prisma.receipt.findUnique({
+          where: { id: req.params.id },
+          include: { vendor: { select: { id: true, name: true } }, bill: { select: { id: true, billNo: true } } },
+        });
+        return res.json({ receipt: updatedReceipt });
+      }
+    }
+
     const data = receipt.extractedData;
     const parsedAmount = parseFloat(data?.amount ?? data?.total ?? data?.balanceDue ?? data?.amountPaid);
     const amount =
@@ -201,7 +257,6 @@ router.post('/:id/approve', async (req, res) => {
         where: { id: receipt.id },
         data: { status: 'APPROVED', journalEntryId: entry.id },
       });
-      // Update account balances (debit expense +amount, credit payment -amount)
       await tx.account.update({
         where: { id: expenseAccountId },
         data: { balance: { increment: amount } },
