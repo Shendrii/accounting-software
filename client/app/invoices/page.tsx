@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
-import { Plus, Search, FileText, Loader2 } from 'lucide-react';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { Plus, Search, FileText, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { getInvoices, type Invoice, type InvoiceStatus } from '@/lib/api';
 
 const STATUS_COLORS: Record<InvoiceStatus, string> = {
@@ -20,23 +21,43 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
 }
 
-export default function InvoicesPage() {
+function InvoicesContent() {
+  const searchParams = useSearchParams();
+  const router = useRouter();
+
+  const initialStatus = (searchParams.get('status') as InvoiceStatus | null) ?? '';
+
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>('');
+  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>(initialStatus);
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await getInvoices(statusFilter ? { status: statusFilter } : undefined);
       setInvoices(data);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load invoices');
     } finally {
       setLoading(false);
     }
   }
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => {
+    load();
+    // Sync URL param
+    const params = new URLSearchParams(searchParams.toString());
+    if (statusFilter) {
+      params.set('status', statusFilter);
+    } else {
+      params.delete('status');
+    }
+    router.replace(`/invoices?${params.toString()}`, { scroll: false });
+  // eslint-disable-next-line react-hooks/exhaustive-deps
+  }, [statusFilter]);
 
   const filtered = invoices.filter(
     (inv) =>
@@ -45,7 +66,7 @@ export default function InvoicesPage() {
   );
 
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
@@ -60,6 +81,16 @@ export default function InvoicesPage() {
             New Invoice
           </Link>
         </div>
+
+        {loadError && (
+          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{loadError}</span>
+            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
@@ -140,5 +171,17 @@ export default function InvoicesPage() {
         </div>
       </div>
     </div>
+  );
+}
+
+export default function InvoicesPage() {
+  return (
+    <Suspense fallback={
+      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+        <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
+      </div>
+    }>
+      <InvoicesContent />
+    </Suspense>
   );
 }

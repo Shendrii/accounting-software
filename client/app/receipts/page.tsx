@@ -18,6 +18,7 @@ import {
   type Bill,
 } from '@/lib/api';
 import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
+import { toast } from '@/lib/toast';
 
 export default function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
@@ -69,8 +70,13 @@ export default function ReceiptsPage() {
     setUploading(true);
     setError(null);
     try {
-      await uploadReceipt(file);
+      const receipt = await uploadReceipt(file);
       await loadData();
+      if (receipt.extractedData?.ocrError) {
+        toast.info('Receipt uploaded, but OCR failed. You can fill the fields manually.');
+      } else {
+        toast.success('Receipt uploaded and parsed');
+      }
       e.target.value = '';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -109,6 +115,7 @@ export default function ReceiptsPage() {
       setApproveExpenseId('');
       setApprovePaymentId('');
       await loadData();
+      toast.success('Receipt approved and journal entry created');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Approve failed');
     } finally {
@@ -120,8 +127,9 @@ export default function ReceiptsPage() {
     try {
       await rejectReceipt(id);
       await loadData();
+      toast.success('Receipt rejected');
     } catch (err) {
-      setError(err instanceof Error ? err.message : 'Reject failed');
+      toast.error(err instanceof Error ? err.message : 'Reject failed');
     }
   };
 

@@ -2,18 +2,21 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2, Building2,
+  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2, Building2, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import {
   getVendors, createVendor, updateVendor, deleteVendor,
   type Vendor, type CreateVendorInput,
 } from '@/lib/api';
+import { toast } from '@/lib/toast';
+import PhoneInput from '@/app/components/PhoneInput';
 
 const emptyForm: CreateVendorInput = { name: '', email: '', phone: '', address: '' };
 
 export default function VendorsPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -24,9 +27,12 @@ export default function VendorsPage() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await getVendors(showInactive ? {} : { isActive: true });
       setVendors(data);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load vendors');
     } finally {
       setLoading(false);
     }
@@ -62,8 +68,10 @@ export default function VendorsPage() {
     try {
       if (editTarget) {
         await updateVendor(editTarget.id, form);
+        toast.success('Vendor updated successfully');
       } else {
         await createVendor(form);
+        toast.success('Vendor created successfully');
       }
       setFormOpen(false);
       load();
@@ -78,17 +86,19 @@ export default function VendorsPage() {
     try {
       if (vendor.isActive) {
         await deleteVendor(vendor.id);
+        toast.success(`${vendor.name} deactivated`);
       } else {
         await updateVendor(vendor.id, { isActive: true });
+        toast.success(`${vendor.name} activated`);
       }
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to update vendor');
+      toast.error(err instanceof Error ? err.message : 'Failed to update vendor');
     }
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
@@ -103,6 +113,16 @@ export default function VendorsPage() {
             New Vendor
           </button>
         </div>
+
+        {loadError && (
+          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{loadError}</span>
+            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">
@@ -174,7 +194,11 @@ export default function VendorsPage() {
                         <button onClick={() => openEdit(vendor)} className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-500" title="Edit">
                           <Pencil className="h-4 w-4" />
                         </button>
-                        <button onClick={() => toggleActive(vendor)} className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-500">
+                        <button
+                          onClick={() => toggleActive(vendor)}
+                          className="p-1.5 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-500"
+                          title={vendor.isActive ? 'Deactivate' : 'Activate'}
+                        >
                           {vendor.isActive ? <ToggleRight className="h-4 w-4 text-emerald-500" /> : <ToggleLeft className="h-4 w-4" />}
                         </button>
                       </div>
@@ -207,24 +231,48 @@ export default function VendorsPage() {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {(
-                  [
-                    { key: 'name', label: 'Name *', type: 'text' },
-                    { key: 'email', label: 'Email', type: 'email' },
-                    { key: 'phone', label: 'Phone', type: 'tel' },
-                    { key: 'address', label: 'Address', type: 'text' },
-                  ] as const
-                ).map(({ key, label, type }) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">{label}</label>
-                    <input
-                      type={type}
-                      value={form[key]}
-                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    />
-                  </div>
-                ))}
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Name *</label>
+                  <input
+                    type="text"
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Email</label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Phone</label>
+                  <PhoneInput
+                    value={form.phone ?? ''}
+                    onChange={(v) => setForm((f) => ({ ...f, phone: v }))}
+                  />
+                </div>
+
+                {/* Address */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Address</label>
+                  <input
+                    type="text"
+                    value={form.address}
+                    onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
 
                 <div className="flex gap-3 pt-2">
                   <button

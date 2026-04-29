@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { getCustomers, getAccounts, createInvoice, type Customer, type Account, type InvoiceLineInput } from '@/lib/api';
+import { toast } from '@/lib/toast';
 
 interface LineItem {
   description: string;
@@ -37,13 +38,14 @@ export default function NewInvoicePage() {
   const [notes, setNotes] = useState('');
   const [tax, setTax] = useState('0.00');
   const [saving, setSaving] = useState(false);
+  const [initLoading, setInitLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([getCustomers({ isActive: true }), getAccounts()]).then(([c, a]) => {
       setCustomers(c);
       setAccounts(a.filter((acc) => acc.isActive));
-    });
+    }).finally(() => setInitLoading(false));
   }, []);
 
   function updateLine(index: number, field: keyof LineItem, value: string) {
@@ -84,6 +86,7 @@ export default function NewInvoicePage() {
           accountId: l.accountId || undefined,
         })),
       });
+      toast.success('Invoice created');
       router.push(`/invoices/${invoice.id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create invoice');
@@ -93,8 +96,26 @@ export default function NewInvoicePage() {
 
   const revenueAccounts = accounts.filter((a) => a.type === 'REVENUE');
 
+  if (initLoading) {
+    return (
+      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-9 h-9 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+            <div className="h-8 w-40 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+          </div>
+          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6 space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-10 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center gap-3 mb-8">
           <Link href="/invoices" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">

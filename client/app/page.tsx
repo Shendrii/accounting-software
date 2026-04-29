@@ -1,7 +1,7 @@
 'use client';
 
 import Link from 'next/link';
-import { BookOpen, TrendingUp, TrendingDown, DollarSign, FileText, BarChart3, Users, Building2 } from 'lucide-react';
+import { BookOpen, TrendingUp, TrendingDown, DollarSign, FileText, BarChart3, Users, Building2, Receipt, RefreshCw } from 'lucide-react';
 import { useEffect, useState } from 'react';
 import { fetchDashboard, type DashboardData } from '@/lib/api';
 
@@ -132,14 +132,16 @@ export default function Home() {
 
         {/* Quick Actions */}
         <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Quick Access</h2>
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-3 gap-5">
+        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-5">
           {[
             { href: '/bookkeeping', icon: BookOpen, label: 'Bookkeeping', desc: 'Manage accounts and journal entries.' },
             { href: '/invoices', icon: FileText, label: 'Invoices', desc: 'Create and manage customer invoices.' },
-            { href: '/bills', icon: Building2, label: 'Bills', desc: 'Track vendor bills and payments.' },
+            { href: '/bills', icon: FileText, label: 'Bills', desc: 'Track vendor bills and payments.' },
             { href: '/customers', icon: Users, label: 'Customers', desc: 'Manage your customer list.' },
             { href: '/vendors', icon: Building2, label: 'Vendors', desc: 'Manage your vendor list.' },
             { href: '/reports', icon: BarChart3, label: 'Reports', desc: 'P&L, Balance Sheet, Trial Balance.' },
+            { href: '/receipts', icon: Receipt, label: 'Receipts', desc: 'Upload and approve expense receipts.' },
+            { href: '/reconciliation', icon: RefreshCw, label: 'Reconciliation', desc: 'Match bank transactions to journal entries.' },
           ].map(({ href, icon: Icon, label, desc }) => (
             <Link
               key={href}

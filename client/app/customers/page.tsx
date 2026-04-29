@@ -2,12 +2,16 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2, Users,
+  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2, Users, AlertCircle, RefreshCw,
 } from 'lucide-react';
 import {
   getCustomers, createCustomer, updateCustomer, deleteCustomer,
   type Customer, type CreateCustomerInput,
 } from '@/lib/api';
+import { toast } from '@/lib/toast';
+import ComboBox from '@/app/components/ComboBox';
+import PhoneInput from '@/app/components/PhoneInput';
+import { COUNTRY_NAMES, getCities } from '@/lib/countries';
 
 const emptyForm: CreateCustomerInput = {
   name: '', email: '', phone: '', address: '', city: '', country: '',
@@ -16,6 +20,7 @@ const emptyForm: CreateCustomerInput = {
 export default function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [showInactive, setShowInactive] = useState(false);
   const [formOpen, setFormOpen] = useState(false);
@@ -26,9 +31,12 @@ export default function CustomersPage() {
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await getCustomers(showInactive ? {} : { isActive: true });
       setCustomers(data);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load customers');
     } finally {
       setLoading(false);
     }
@@ -70,8 +78,10 @@ export default function CustomersPage() {
     try {
       if (editTarget) {
         await updateCustomer(editTarget.id, form);
+        toast.success('Customer updated successfully');
       } else {
         await createCustomer(form);
+        toast.success('Customer created successfully');
       }
       setFormOpen(false);
       load();
@@ -86,17 +96,19 @@ export default function CustomersPage() {
     try {
       if (customer.isActive) {
         await deleteCustomer(customer.id);
+        toast.success(`${customer.name} deactivated`);
       } else {
         await updateCustomer(customer.id, { isActive: true });
+        toast.success(`${customer.name} activated`);
       }
       load();
     } catch (err: unknown) {
-      alert(err instanceof Error ? err.message : 'Failed to update customer');
+      toast.error(err instanceof Error ? err.message : 'Failed to update customer');
     }
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         {/* Header */}
         <div className="flex items-center justify-between mb-8">
@@ -112,6 +124,16 @@ export default function CustomersPage() {
             New Customer
           </button>
         </div>
+
+        {loadError && (
+          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{loadError}</span>
+            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        )}
 
         {/* Filters */}
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
@@ -226,28 +248,89 @@ export default function CustomersPage() {
               )}
 
               <form onSubmit={handleSubmit} className="space-y-4">
-                {(
-                  [
-                    { key: 'name', label: 'Name *', type: 'text', required: true },
-                    { key: 'email', label: 'Email', type: 'email' },
-                    { key: 'phone', label: 'Phone', type: 'tel' },
-                    { key: 'address', label: 'Address', type: 'text' },
-                    { key: 'city', label: 'City', type: 'text' },
-                    { key: 'country', label: 'Country', type: 'text' },
-                  ] as const
-                ).map(({ key, label, type }) => (
-                  <div key={key}>
-                    <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                      {label}
-                    </label>
-                    <input
-                      type={type}
-                      value={form[key]}
-                      onChange={(e) => setForm((f) => ({ ...f, [key]: e.target.value }))}
-                      className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                    />
-                  </div>
-                ))}
+                {/* Name */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Name *
+                  </label>
+                  <input
+                    type="text"
+                    required
+                    value={form.name}
+                    onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
+
+                {/* Email */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Email
+                  </label>
+                  <input
+                    type="email"
+                    value={form.email}
+                    onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
+
+                {/* Phone */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Phone
+                  </label>
+                  <PhoneInput
+                    value={form.phone ?? ''}
+                    onChange={(v) => setForm((f) => ({ ...f, phone: v }))}
+                    country={form.country ?? ''}
+                  />
+                </div>
+
+                {/* Address */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Address
+                  </label>
+                  <input
+                    type="text"
+                    value={form.address}
+                    onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  />
+                </div>
+
+                {/* Country */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    Country
+                  </label>
+                  <ComboBox
+                    options={COUNTRY_NAMES}
+                    value={form.country ?? ''}
+                    onChange={(v) => setForm((f) => ({ ...f, country: v, city: '' }))}
+                    placeholder="Search country…"
+                    allowFreeText
+                  />
+                </div>
+
+                {/* City */}
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
+                    City
+                  </label>
+                  <ComboBox
+                    options={getCities(form.country ?? '')}
+                    value={form.city ?? ''}
+                    onChange={(v) => setForm((f) => ({ ...f, city: v }))}
+                    placeholder={
+                      form.country && getCities(form.country ?? '').length > 0
+                        ? 'Search city…'
+                        : 'Enter city'
+                    }
+                    allowFreeText
+                  />
+                </div>
 
                 <div className="flex gap-3 pt-2">
                   <button

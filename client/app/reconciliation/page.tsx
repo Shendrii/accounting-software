@@ -7,6 +7,7 @@ import {
   unmatchTransaction, completeReconciliation,
   type Account, type BankTransaction, type ReconciliationData,
 } from '@/lib/api';
+import { toast } from '@/lib/toast';
 
 type JournalLineWithEntry = ReconciliationData['journalLines'][number];
 
@@ -92,7 +93,7 @@ export default function ReconciliationPage() {
     setCompleting(true);
     try {
       await completeReconciliation(selectedAccountId, statementDate, parseFloat(statementBalance));
-      alert('Reconciliation completed successfully!');
+      toast.success('Reconciliation completed successfully!');
       setStep(1);
       setData(null);
       setSelectedBank(null);
@@ -118,6 +119,7 @@ export default function ReconciliationPage() {
       setImportRows([{ date: '', description: '', amount: '' }]);
       const rec = await getReconciliationData(selectedAccountId);
       setData(rec);
+      toast.success(`${valid.length} transaction${valid.length !== 1 ? 's' : ''} imported`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to import transactions');
     } finally {

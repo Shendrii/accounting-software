@@ -11,7 +11,6 @@ import {
   Users,
   Building2,
   FileText,
-  ShoppingCart,
   BarChart3,
   RefreshCw,
 } from 'lucide-react';
@@ -31,7 +30,7 @@ const receivablesNav = [
 
 const payablesNav = [
   { name: 'Vendors', href: '/vendors', icon: Building2 },
-  { name: 'Bills', href: '/bills', icon: ShoppingCart },
+  { name: 'Bills', href: '/bills', icon: FileText },
 ];
 
 const toolsNav = [
@@ -159,7 +158,7 @@ export default function SideNav() {
 
           {/* Footer */}
           <div className="px-6 py-4 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
-            <p className="text-xs text-zinc-500 dark:text-zinc-500">© 2024 Accounting System</p>
+            <p className="text-xs text-zinc-500 dark:text-zinc-500">© 2026 Accounting System</p>
           </div>
         </div>
       </aside>

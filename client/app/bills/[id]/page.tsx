@@ -8,6 +8,7 @@ import {
   getBill, receiveBill, payBill, voidBill, getAccounts,
   type Bill, type Account,
 } from '@/lib/api';
+import { toast } from '@/lib/toast';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -54,6 +55,7 @@ export default function BillDetailPage() {
     try {
       const updated = await receiveBill(bill.id);
       setBill(updated);
+      toast.success('Bill marked as received');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to receive bill');
     } finally {
@@ -69,6 +71,7 @@ export default function BillDetailPage() {
       const updated = await payBill(bill.id, payAccountId);
       setBill(updated);
       setPayModalOpen(false);
+      toast.success('Bill paid successfully');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to pay bill');
     } finally {
@@ -84,6 +87,7 @@ export default function BillDetailPage() {
     try {
       const updated = await voidBill(bill.id);
       setBill(updated);
+      toast.success('Bill voided');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to void bill');
     } finally {
@@ -93,7 +97,7 @@ export default function BillDetailPage() {
 
   if (loading) {
     return (
-      <div className="lg:pl-64 min-h-screen flex items-center justify-center">
+      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
         <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
       </div>
     );
@@ -101,14 +105,14 @@ export default function BillDetailPage() {
 
   if (!bill) {
     return (
-      <div className="lg:pl-64 min-h-screen flex items-center justify-center">
+      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
         <p className="text-zinc-500">Bill not found.</p>
       </div>
     );
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center gap-3 mb-8">
           <Link href="/bills" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
@@ -216,7 +220,7 @@ export default function BillDetailPage() {
             <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-sm mx-4">
               <div className="flex items-center justify-between mb-4">
                 <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Pay Bill</h3>
-                <button onClick={() => setPayModalOpen(false)}>
+                <button onClick={() => setPayModalOpen(false)} aria-label="Close">
                   <X className="h-5 w-5 text-zinc-400" />
                 </button>
               </div>

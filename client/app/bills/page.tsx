@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, ShoppingCart, Loader2 } from 'lucide-react';
+import { Plus, Search, FileText, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { getBills, type Bill, type BillStatus } from '@/lib/api';
 
 const STATUS_COLORS: Record<BillStatus, string> = {
@@ -23,14 +23,18 @@ function formatDate(d: string) {
 export default function BillsPage() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
+  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const [statusFilter, setStatusFilter] = useState<BillStatus | ''>('');
 
   async function load() {
     setLoading(true);
+    setLoadError(null);
     try {
       const data = await getBills(statusFilter ? { status: statusFilter } : undefined);
       setBills(data);
+    } catch (err: unknown) {
+      setLoadError(err instanceof Error ? err.message : 'Failed to load bills');
     } finally {
       setLoading(false);
     }
@@ -45,11 +49,11 @@ export default function BillsPage() {
   );
 
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center justify-between mb-8">
           <div className="flex items-center gap-3">
-            <ShoppingCart className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
+            <FileText className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
             <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Bills</h1>
           </div>
           <Link
@@ -60,6 +64,16 @@ export default function BillsPage() {
             New Bill
           </Link>
         </div>
+
+        {loadError && (
+          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
+            <AlertCircle className="h-4 w-4 shrink-0" />
+            <span className="flex-1">{loadError}</span>
+            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
+              <RefreshCw className="h-3.5 w-3.5" /> Retry
+            </button>
+          </div>
+        )}
 
         <div className="flex flex-col sm:flex-row gap-3 mb-6">
           <div className="relative flex-1">

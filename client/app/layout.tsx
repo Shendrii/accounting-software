@@ -2,7 +2,8 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SideNav from "./components/SideNav";
-//    GCP_API_KEY=AIzaSyBRIKFbdz7x_EqB8MOIwaT07E6AQiYBrh8
+import { ToastProvider } from "./components/Toast";
+
 const geistSans = Geist({
   variable: "--font-geist-sans",
   subsets: ["latin"],
@@ -32,6 +33,7 @@ export default function RootLayout({
         <main className="min-h-screen">
           {children}
         </main>
+        <ToastProvider />
       </body>
     </html>
   );

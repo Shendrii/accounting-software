@@ -269,6 +269,7 @@ export interface ReceiptExtractedData {
   category?: string;
   confidence?: number;
   rawText?: string;
+  ocrError?: string | null;
 }
 
 export interface Receipt {

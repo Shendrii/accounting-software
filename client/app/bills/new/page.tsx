@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { getVendors, getAccounts, createBill, type Vendor, type Account, type BillLineInput } from '@/lib/api';
+import { toast } from '@/lib/toast';
 
 interface LineItem {
   description: string;
@@ -36,13 +37,14 @@ export default function NewBillPage() {
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [notes, setNotes] = useState('');
   const [saving, setSaving] = useState(false);
+  const [initLoading, setInitLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
 
   useEffect(() => {
     Promise.all([getVendors({ isActive: true }), getAccounts()]).then(([v, a]) => {
       setVendors(v);
       setAccounts(a.filter((acc) => acc.isActive));
-    });
+    }).finally(() => setInitLoading(false));
   }, []);
 
   function updateLine(index: number, field: keyof LineItem, value: string) {
@@ -80,6 +82,7 @@ export default function NewBillPage() {
           accountId: l.accountId || undefined,
         })),
       });
+      toast.success('Bill created');
       router.push(`/bills/${bill.id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create bill');
@@ -89,8 +92,26 @@ export default function NewBillPage() {
 
   const expenseAccounts = accounts.filter((a) => a.type === 'EXPENSE');
 
+  if (initLoading) {
+    return (
+      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
+        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+          <div className="flex items-center gap-3 mb-8">
+            <div className="w-9 h-9 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+            <div className="h-8 w-32 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
+          </div>
+          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6 space-y-4">
+            {[1, 2, 3].map((i) => (
+              <div key={i} className="h-10 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
+            ))}
+          </div>
+        </div>
+      </div>
+    );
+  }
+
   return (
-    <div className="lg:pl-64 min-h-screen">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center gap-3 mb-8">
           <Link href="/bills" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
