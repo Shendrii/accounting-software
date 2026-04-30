@@ -28,17 +28,20 @@ model Account {
 }
 
 model JournalEntry {
-  id           String        @id @default(cuid())
-  date         DateTime
-  description  String
-  referenceNo  String?
-  status       Status        @default(DRAFT)
-  createdAt    DateTime      @default(now())
-  updatedAt    DateTime      @updatedAt
-  journalLines JournalLine[]
-  receipt      Receipt?
-  invoices     Invoice[]
-  bills        Bill[]
+  id                 String        @id @default(cuid())
+  date               DateTime
+  description        String
+  referenceNo        String?
+  status             Status        @default(DRAFT)
+  isRecurring        Boolean       @default(false)
+  recurrenceInterval String?
+  nextDueDate        DateTime?
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+  journalLines       JournalLine[]
+  receipt            Receipt?
+  invoices           Invoice[]
+  bills              Bill[]
 }
 
 model Receipt {
@@ -128,21 +131,24 @@ model InvoiceLine {
 }
 
 model Bill {
-  id             String     @id @default(cuid())
-  billNo         String     @unique
-  vendorId       String
-  vendor         Vendor     @relation(fields: [vendorId], references: [id])
-  date           DateTime
-  dueDate        DateTime
-  status         BillStatus @default(DRAFT)
-  total          Decimal    @db.Decimal(15, 2)
-  notes          String?
-  journalEntryId String?    @unique
-  journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
-  lines          BillLine[]
-  receipt        Receipt?
-  createdAt      DateTime   @default(now())
-  updatedAt      DateTime   @updatedAt
+  id                 String     @id @default(cuid())
+  billNo             String     @unique
+  vendorId           String
+  vendor             Vendor     @relation(fields: [vendorId], references: [id])
+  date               DateTime
+  dueDate            DateTime
+  status             BillStatus @default(DRAFT)
+  total              Decimal    @db.Decimal(15, 2)
+  notes              String?
+  isRecurring        Boolean    @default(false)
+  recurrenceInterval String?
+  nextDueDate        DateTime?
+  journalEntryId     String?    @unique
+  journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  lines              BillLine[]
+  receipt            Receipt?
+  createdAt          DateTime   @default(now())
+  updatedAt          DateTime   @updatedAt
 }
 
 model BillLine {

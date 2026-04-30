@@ -36,6 +36,8 @@ export default function NewBillPage() {
   });
   const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
   const [notes, setNotes] = useState('');
+  const [isRecurring, setIsRecurring] = useState(false);
+  const [recurrenceInterval, setRecurrenceInterval] = useState('monthly');
   const [saving, setSaving] = useState(false);
   const [initLoading, setInitLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,6 +76,9 @@ export default function NewBillPage() {
         date,
         dueDate,
         notes,
+        isRecurring,
+        recurrenceInterval: isRecurring ? recurrenceInterval : undefined,
+        nextDueDate: isRecurring ? dueDate : undefined,
         lines: lines.map((l): BillLineInput => ({
           description: l.description,
           quantity: parseFloat(l.quantity) || 0,
@@ -261,14 +266,48 @@ export default function NewBillPage() {
             </div>
           </div>
 
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
-            <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Notes</label>
-            <textarea
-              value={notes}
-              onChange={(e) => setNotes(e.target.value)}
-              rows={3}
-              className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 resize-none"
-            />
+          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6 space-y-4">
+            <div>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Notes</label>
+              <textarea
+                value={notes}
+                onChange={(e) => setNotes(e.target.value)}
+                rows={3}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 resize-none"
+              />
+            </div>
+
+            {/* Recurring */}
+            <div className="flex items-center gap-3 pt-2 border-t border-zinc-100 dark:border-zinc-800">
+              <input
+                type="checkbox"
+                id="isRecurring"
+                checked={isRecurring}
+                onChange={(e) => setIsRecurring(e.target.checked)}
+                className="h-4 w-4 rounded border-zinc-300 text-blue-600 focus:ring-blue-500"
+              />
+              <label htmlFor="isRecurring" className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
+                Make this a recurring bill
+              </label>
+            </div>
+            {isRecurring && (
+              <div>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Repeat Frequency</label>
+                <select
+                  value={recurrenceInterval}
+                  onChange={(e) => setRecurrenceInterval(e.target.value)}
+                  className="w-full sm:w-auto px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                >
+                  <option value="weekly">Weekly</option>
+                  <option value="monthly">Monthly</option>
+                  <option value="quarterly">Quarterly</option>
+                  <option value="yearly">Yearly</option>
+                </select>
+                <p className="text-xs text-zinc-500 mt-1">
+                  A new draft bill will be auto-created on each due date using the same lines and vendor.
+                </p>
+              </div>
+            )}
           </div>
 
           <div className="flex justify-end gap-3">

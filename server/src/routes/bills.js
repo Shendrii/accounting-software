@@ -56,7 +56,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const { vendorId, date, dueDate, lines, notes } = req.body;
+    const { vendorId, date, dueDate, lines, notes, isRecurring, recurrenceInterval, nextDueDate } = req.body;
     if (!vendorId || !date || !dueDate || !lines?.length) {
       return res.status(400).json({ error: 'vendorId, date, dueDate, and lines are required' });
     }
@@ -72,6 +72,9 @@ router.post('/', async (req, res) => {
         dueDate: new Date(dueDate),
         total,
         notes,
+        isRecurring: Boolean(isRecurring),
+        recurrenceInterval: isRecurring ? (recurrenceInterval ?? 'monthly') : null,
+        nextDueDate: isRecurring && nextDueDate ? new Date(nextDueDate) : null,
         lines: {
           create: lines.map((l) => ({
             description: l.description,

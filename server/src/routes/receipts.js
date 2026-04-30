@@ -25,7 +25,7 @@ const storage = multer.diskStorage({
 const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
 
 const router = express.Router();
-const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:5000';
+const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:5001';
 
 async function extractTextFromImage(filePath) {
   const buffer = await readFile(filePath);
@@ -54,14 +54,10 @@ router.post('/upload', upload.single('image'), async (req, res) => {
     const imageUrl = `/uploads/${req.file.filename}`;
 
     let ocrText = '';
-    let ocrError = null;
     try {
       ocrText = await extractTextFromImage(filePath);
     } catch (err) {
-      // Do not block uploads when OCR provider is unavailable/unauthorized.
-      // Users can still review/edit fields manually in the receipt UI.
-      ocrError = err?.message || 'OCR unavailable';
-      console.error('OCR error during upload:', ocrError);
+      return res.status(502).json({ error: `OCR failed: ${err.message}` });
     }
 
     let extractedData = {
@@ -76,7 +72,6 @@ router.post('/upload', upload.single('image'), async (req, res) => {
       category: '',
       confidence: 0,
       rawText: ocrText,
-      ocrError,
     };
     if (ocrText.trim()) {
       try {

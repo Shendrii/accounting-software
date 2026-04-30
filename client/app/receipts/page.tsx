@@ -70,13 +70,8 @@ export default function ReceiptsPage() {
     setUploading(true);
     setError(null);
     try {
-      const receipt = await uploadReceipt(file);
+      await uploadReceipt(file);
       await loadData();
-      if (receipt.extractedData?.ocrError) {
-        toast.info('Receipt uploaded, but OCR failed. You can fill the fields manually.');
-      } else {
-        toast.success('Receipt uploaded and parsed');
-      }
       e.target.value = '';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');

@@ -13,6 +13,9 @@ import invoicesRouter from './routes/invoices.js';
 import billsRouter from './routes/bills.js';
 import reconciliationRouter from './routes/reconciliation.js';
 import reportsRouter from './routes/reports.js';
+import insightsRouter from './routes/insights.js';
+import aiRouter from './routes/ai.js';
+import recurringRouter from './routes/recurring.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
@@ -44,6 +47,9 @@ app.use('/api/invoices', invoicesRouter);
 app.use('/api/bills', billsRouter);
 app.use('/api/reconciliation', reconciliationRouter);
 app.use('/api/reports', reportsRouter);
+app.use('/api/insights', insightsRouter);
+app.use('/api/ai', aiRouter);
+app.use('/api/recurring', recurringRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {

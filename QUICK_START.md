@@ -56,15 +56,23 @@ App available at **http://localhost:3000**
 | Reports (P&L, Balance Sheet, Trial Balance) | http://localhost:3000/reports |
 | Bank Reconciliation | http://localhost:3000/reconciliation |
 
-## OCR service (optional)
+## OCR service (for receipt scanning)
 
-Receipt OCR uses Google Cloud Vision via a local Flask server.
+Receipt OCR runs locally using **Tesseract** — free, no API key, no rate limits.
 
 ```bash
+# 1. Install the Tesseract engine (one-time)
+brew install tesseract        # macOS
+# sudo apt install tesseract-ocr    # Ubuntu/Debian
+
+# 2. Install Python dependencies
 cd ocr
-pip install -r requirements.txt
-# Set GCP_API_KEY or GOOGLE_APPLICATION_CREDENTIALS in environment
-python app.py
+pip3 install -r requirements.txt
+
+# 3. Run the OCR server
+python3 app.py
 ```
 
-OCR runs on **http://localhost:5000**. Set `OCR_SERVICE_URL=http://localhost:5000` in `server/.env` to connect it.
+OCR runs on **http://localhost:5001** by default. (Port 5000 is reserved by macOS AirPlay Receiver on recent versions.) The backend defaults to this URL — override with `OCR_SERVICE_URL` in `server/.env` if needed.
+
+Health check: `curl http://localhost:5001/health` should return `{"status":"ok","engine":"tesseract <version>"}`.

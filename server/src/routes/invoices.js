@@ -1,5 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
+import { generateInvoicePdf } from '../lib/generateInvoicePdf.js';
+import { sendInvoiceEmail } from '../lib/sendEmail.js';
 
 const router = express.Router();
 
@@ -253,6 +255,63 @@ router.delete('/:id', async (req, res) => {
     res.status(204).send();
   } catch (error) {
     res.status(500).json({ error: 'Failed to delete invoice' });
+  }
+});
+
+// ── PDF download ──────────────────────────────────────────────────────────
+router.get('/:id/pdf', async (req, res) => {
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: true,
+        lines: { include: { account: { select: { name: true } } } },
+      },
+    });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const pdf = await generateInvoicePdf(invoice);
+    res.setHeader('Content-Type', 'application/pdf');
+    res.setHeader('Content-Disposition', `attachment; filename="Invoice-${invoice.invoiceNo}.pdf"`);
+    res.send(pdf);
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate PDF' });
+  }
+});
+
+// ── Send PDF via email ─────────────────────────────────────────────────────
+router.post('/:id/send-pdf', async (req, res) => {
+  if (!process.env.RESEND_API_KEY) {
+    return res.status(503).json({ error: 'Email is not configured. Add RESEND_API_KEY to server/.env' });
+  }
+  try {
+    const invoice = await prisma.invoice.findUnique({
+      where: { id: req.params.id },
+      include: {
+        customer: true,
+        lines: { include: { account: { select: { name: true } } } },
+      },
+    });
+    if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+
+    const email = req.body.email || invoice.customer?.email;
+    if (!email) {
+      return res.status(400).json({ error: 'No recipient email. Provide email in body or add one to the customer.' });
+    }
+
+    const pdf = await generateInvoicePdf(invoice);
+    const result = await sendInvoiceEmail({
+      to: email,
+      invoiceNo: invoice.invoiceNo,
+      pdfBuffer: pdf,
+      customerName: invoice.customer?.name ?? 'Customer',
+    });
+
+    res.json({ success: true, messageId: result.messageId, previewUrl: result.previewUrl });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: error.message || 'Failed to send invoice email' });
   }
 });
 

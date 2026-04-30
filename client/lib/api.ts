@@ -269,7 +269,6 @@ export interface ReceiptExtractedData {
   category?: string;
   confidence?: number;
   rawText?: string;
-  ocrError?: string | null;
 }
 
 export interface Receipt {
@@ -611,6 +610,9 @@ export interface Bill {
   status: BillStatus;
   total: string;
   notes?: string | null;
+  isRecurring?: boolean;
+  recurrenceInterval?: string | null;
+  nextDueDate?: string | null;
   journalEntryId?: string | null;
   lines?: BillLine[];
   createdAt: string;
@@ -631,6 +633,9 @@ export interface CreateBillInput {
   dueDate: string;
   lines: BillLineInput[];
   notes?: string;
+  isRecurring?: boolean;
+  recurrenceInterval?: string;
+  nextDueDate?: string;
 }
 
 export async function getBills(params?: {
@@ -801,3 +806,58 @@ export async function getTrialBalance(params?: { startDate?: string; endDate?: s
   return handleResponse<TrialBalanceReport>(response);
 }
 
+// ==================== INSIGHTS API ====================
+
+export interface InsightAlert {
+  type: string;
+  severity: 'info' | 'warning' | 'critical';
+  message: string;
+  detail: string;
+  link: string;
+}
+
+export interface InsightsData {
+  alerts: InsightAlert[];
+  generatedAt: string;
+}
+
+export async function getInsights(): Promise<InsightsData> {
+  const response = await fetch(`${API_URL}/api/insights`);
+  return handleResponse<InsightsData>(response);
+}
+
+// ==================== AI CHAT API ====================
+
+export async function sendAiMessage(message: string): Promise<{ reply: string }> {
+  const response = await fetch(`${API_URL}/api/ai/chat`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ message }),
+  });
+  return handleResponse<{ reply: string }>(response);
+}
+
+// ==================== RECURRING API ====================
+
+export async function triggerRecurring(): Promise<{ created: number; details: string[] }> {
+  const response = await fetch(`${API_URL}/api/recurring/run`, { method: 'POST' });
+  return handleResponse<{ created: number; details: string[] }>(response);
+}
+
+export async function getRecurringBills(): Promise<Bill[]> {
+  const response = await fetch(`${API_URL}/api/recurring/bills`);
+  return handleResponse<Bill[]>(response);
+}
+
+// ==================== CSV IMPORT API ====================
+
+export async function importCSVTransactions(accountId: string, file: File): Promise<{ imported: number; suggestions: number }> {
+  const formData = new FormData();
+  formData.append('csv', file);
+  formData.append('accountId', accountId);
+  const response = await fetch(`${API_URL}/api/reconciliation/import-csv`, {
+    method: 'POST',
+    body: formData,
+  });
+  return handleResponse<{ imported: number; suggestions: number }>(response);
+}

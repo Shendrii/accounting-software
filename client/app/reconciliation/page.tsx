@@ -1,9 +1,9 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { RefreshCw, Upload, CheckCircle, XCircle, Loader2, Plus, Trash2 } from 'lucide-react';
+import { useEffect, useRef, useState } from 'react';
+import { RefreshCw, Upload, CheckCircle, XCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
 import {
-  getAccounts, getReconciliationData, importBankTransactions, matchTransaction,
+  getAccounts, getReconciliationData, importBankTransactions, importCSVTransactions, matchTransaction,
   unmatchTransaction, completeReconciliation,
   type Account, type BankTransaction, type ReconciliationData,
 } from '@/lib/api';
@@ -40,6 +40,10 @@ export default function ReconciliationPage() {
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[]>([{ date: '', description: '', amount: '' }]);
   const [importing, setImporting] = useState(false);
+  const [csvModalOpen, setCsvModalOpen] = useState(false);
+  const [csvFile, setCsvFile] = useState<File | null>(null);
+  const [csvImporting, setCsvImporting] = useState(false);
+  const csvInputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
     getAccounts().then((accs) =>
@@ -124,6 +128,26 @@ export default function ReconciliationPage() {
       setError(e instanceof Error ? e.message : 'Failed to import transactions');
     } finally {
       setImporting(false);
+    }
+  }
+
+  async function handleCsvImport() {
+    if (!csvFile || !selectedAccountId) return;
+    setCsvImporting(true);
+    setError(null);
+    try {
+      const result = await importCSVTransactions(selectedAccountId, csvFile);
+      setCsvModalOpen(false);
+      setCsvFile(null);
+      const rec = await getReconciliationData(selectedAccountId);
+      setData(rec);
+      toast.success(
+        `Imported ${result.imported} transaction${result.imported !== 1 ? 's' : ''}${result.suggestions > 0 ? `, auto-matched ${result.suggestions}` : ''}`
+      );
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to import CSV');
+    } finally {
+      setCsvImporting(false);
     }
   }
 
@@ -230,6 +254,13 @@ export default function ReconciliationPage() {
               >
                 <Upload className="h-4 w-4" />
                 Import Transactions
+              </button>
+              <button
+                onClick={() => setCsvModalOpen(true)}
+                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
+              >
+                <FileSpreadsheet className="h-4 w-4" />
+                Import CSV
               </button>
               <button
                 onClick={handleComplete}
@@ -376,6 +407,55 @@ export default function ReconciliationPage() {
               </div>
             )}
           </>
+        )}
+
+        {/* CSV Import Modal */}
+        {csvModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setCsvModalOpen(false)} />
+            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-md mx-4">
+              <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-1">Import CSV Bank Statement</h3>
+              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
+                Upload a CSV exported from your bank. We auto-detect columns for date, description, and amount.
+                After import, transactions are auto-matched to journal lines within ±3 days.
+              </p>
+              <div
+                className="border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400 transition-colors mb-4"
+                onClick={() => csvInputRef.current?.click()}
+              >
+                <FileSpreadsheet className="h-8 w-8 text-zinc-400 mx-auto mb-2" />
+                {csvFile ? (
+                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{csvFile.name}</p>
+                ) : (
+                  <p className="text-sm text-zinc-500">Click to select CSV file</p>
+                )}
+                <input
+                  ref={csvInputRef}
+                  type="file"
+                  accept=".csv,text/csv"
+                  className="hidden"
+                  onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
+                />
+              </div>
+              <p className="text-xs text-zinc-400 mb-4">
+                Accepted columns: <code>date</code>, <code>description</code> (or memo/narrative), <code>amount</code> (or separate debit/credit columns)
+              </p>
+              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+              <div className="flex gap-3">
+                <button onClick={() => { setCsvModalOpen(false); setCsvFile(null); }} className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
+                  Cancel
+                </button>
+                <button
+                  onClick={handleCsvImport}
+                  disabled={!csvFile || csvImporting}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {csvImporting && <Loader2 className="h-4 w-4 animate-spin" />}
+                  Import CSV
+                </button>
+              </div>
+            </div>
+          </div>
         )}
       </div>
     </div>

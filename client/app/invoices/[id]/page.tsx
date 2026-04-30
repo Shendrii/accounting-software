@@ -3,12 +3,14 @@
 import { useEffect, useState } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Download, Mail, Loader2, X } from 'lucide-react';
 import {
   getInvoice, sendInvoice, recordInvoicePayment, voidInvoice, getAccounts,
   type Invoice, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+
+const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -33,6 +35,9 @@ export default function InvoiceDetailPage() {
   const [paymentModalOpen, setPaymentModalOpen] = useState(false);
   const [paymentAccountId, setPaymentAccountId] = useState('');
   const [actionLoading, setActionLoading] = useState(false);
+  const [sendEmailLoading, setSendEmailLoading] = useState(false);
+  const [emailModalOpen, setEmailModalOpen] = useState(false);
+  const [emailTo, setEmailTo] = useState('');
   const [error, setError] = useState<string | null>(null);
 
   async function load() {
@@ -76,6 +81,36 @@ export default function InvoiceDetailPage() {
       setError(e instanceof Error ? e.message : 'Failed to record payment');
     } finally {
       setActionLoading(false);
+    }
+  }
+
+  function handleDownloadPdf() {
+    if (!invoice) return;
+    window.open(`${API_URL}/api/invoices/${invoice.id}/pdf`, '_blank');
+  }
+
+  async function handleSendEmail() {
+    if (!invoice) return;
+    setSendEmailLoading(true);
+    setError(null);
+    try {
+      const res = await fetch(`${API_URL}/api/invoices/${invoice.id}/send-pdf`, {
+        method: 'POST',
+        headers: { 'Content-Type': 'application/json' },
+        body: JSON.stringify({ email: emailTo || undefined }),
+      });
+      const data = await res.json();
+      if (!res.ok) throw new Error(data.error || 'Failed to send email');
+      setEmailModalOpen(false);
+      if (data.previewUrl) {
+        toast.success(`Email sent! Preview: ${data.previewUrl}`);
+      } else {
+        toast.success('Invoice emailed successfully');
+      }
+    } catch (e: unknown) {
+      setError(e instanceof Error ? e.message : 'Failed to send email');
+    } finally {
+      setSendEmailLoading(false);
     }
   }
 
@@ -133,6 +168,24 @@ export default function InvoiceDetailPage() {
             {error}
           </div>
         )}
+
+        {/* PDF / Email Buttons (always visible) */}
+        <div className="flex flex-wrap gap-3 mb-4">
+          <button
+            onClick={handleDownloadPdf}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          >
+            <Download className="h-4 w-4" />
+            Download PDF
+          </button>
+          <button
+            onClick={() => { setEmailTo(invoice.customer?.email ?? ''); setEmailModalOpen(true); }}
+            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
+          >
+            <Mail className="h-4 w-4" />
+            Send by Email
+          </button>
+        </div>
 
         {/* Action Buttons */}
         {invoice.status !== 'VOID' && invoice.status !== 'PAID' && (
@@ -229,6 +282,50 @@ export default function InvoiceDetailPage() {
             </div>
           )}
         </div>
+
+        {/* Email Modal */}
+        {emailModalOpen && (
+          <div className="fixed inset-0 z-50 flex items-center justify-center">
+            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEmailModalOpen(false)} />
+            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-sm mx-4">
+              <div className="flex items-center justify-between mb-4">
+                <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Send Invoice by Email</h3>
+                <button onClick={() => setEmailModalOpen(false)} aria-label="Close">
+                  <X className="h-5 w-5 text-zinc-400" />
+                </button>
+              </div>
+              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
+                Invoice <strong>{invoice.invoiceNo}</strong> will be attached as a PDF.
+              </p>
+              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipient Email</label>
+              <input
+                type="email"
+                value={emailTo}
+                onChange={(e) => setEmailTo(e.target.value)}
+                placeholder={invoice.customer?.email ?? 'customer@example.com'}
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              />
+              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
+              <div className="flex gap-3">
+                <button
+                  onClick={() => setEmailModalOpen(false)}
+                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium"
+                >
+                  Cancel
+                </button>
+                <button
+                  onClick={handleSendEmail}
+                  disabled={sendEmailLoading}
+                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
+                >
+                  {sendEmailLoading && <Loader2 className="h-4 w-4 animate-spin" />}
+                  <Mail className="h-4 w-4" />
+                  Send
+                </button>
+              </div>
+            </div>
+          </div>
+        )}
 
         {/* Payment Modal */}
         {paymentModalOpen && (

@@ -1,9 +1,9 @@
 'use client';
 
 import Link from 'next/link';
-import { BookOpen, TrendingUp, TrendingDown, DollarSign, FileText, BarChart3, Users, Building2, Receipt, RefreshCw } from 'lucide-react';
+import { BookOpen, TrendingUp, TrendingDown, DollarSign, FileText, BarChart3, Users, Building2, Receipt, RefreshCw, AlertTriangle, Info, XCircle } from 'lucide-react';
 import { useEffect, useState } from 'react';
-import { fetchDashboard, type DashboardData } from '@/lib/api';
+import { fetchDashboard, getInsights, type DashboardData, type InsightAlert } from '@/lib/api';
 
 function formatCurrency(value: string | number): string {
   const num = typeof value === 'string' ? parseFloat(value) : value;
@@ -46,17 +46,37 @@ function KpiCard({
   );
 }
 
+function AlertBadge({ severity }: { severity: InsightAlert['severity'] }) {
+  if (severity === 'critical') return <XCircle className="h-4 w-4 text-red-500 flex-shrink-0" />;
+  if (severity === 'warning') return <AlertTriangle className="h-4 w-4 text-amber-500 flex-shrink-0" />;
+  return <Info className="h-4 w-4 text-blue-500 flex-shrink-0" />;
+}
+
+const severityBorder: Record<InsightAlert['severity'], string> = {
+  critical: 'border-red-200 dark:border-red-800 bg-red-50 dark:bg-red-900/20',
+  warning: 'border-amber-200 dark:border-amber-800 bg-amber-50 dark:bg-amber-900/20',
+  info: 'border-blue-200 dark:border-blue-800 bg-blue-50 dark:bg-blue-900/20',
+};
+
 export default function Home() {
   const [data, setData] = useState<DashboardData | null>(null);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
+  const [alerts, setAlerts] = useState<InsightAlert[]>([]);
+  const [dismissedAlerts, setDismissedAlerts] = useState<Set<string>>(new Set());
 
   useEffect(() => {
     fetchDashboard()
       .then(setData)
       .catch((e) => setError(e.message))
       .finally(() => setLoading(false));
+    getInsights()
+      .then((d) => setAlerts(d.alerts))
+      .catch(() => {});
   }, []);
+
+  const visibleAlerts = alerts.filter((a) => !dismissedAlerts.has(a.type));
+  const dismissAlert = (type: string) => setDismissedAlerts((prev) => new Set([...prev, type]));
 
   const netIncome = data ? parseFloat(data.netIncome) : 0;
 
@@ -127,6 +147,36 @@ export default function Home() {
             >
               View invoices →
             </Link>
+          </div>
+        )}
+
+        {/* Smart Alerts */}
+        {visibleAlerts.length > 0 && (
+          <div className="mb-10">
+            <h2 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-3">Smart Alerts</h2>
+            <div className="space-y-3">
+              {visibleAlerts.map((alert) => (
+                <div key={alert.type} className={`flex items-start gap-3 p-4 rounded-lg border ${severityBorder[alert.severity]}`}>
+                  <AlertBadge severity={alert.severity} />
+                  <div className="flex-1 min-w-0">
+                    <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{alert.message}</p>
+                    <p className="text-xs text-zinc-500 dark:text-zinc-400 mt-0.5">{alert.detail}</p>
+                  </div>
+                  <div className="flex items-center gap-3 flex-shrink-0">
+                    <Link href={alert.link} className="text-xs font-medium text-zinc-700 dark:text-zinc-300 hover:underline whitespace-nowrap">
+                      View →
+                    </Link>
+                    <button
+                      onClick={() => dismissAlert(alert.type)}
+                      className="text-zinc-400 hover:text-zinc-600 dark:hover:text-zinc-200"
+                      aria-label="Dismiss"
+                    >
+                      <XCircle className="h-4 w-4" />
+                    </button>
+                  </div>
+                </div>
+              ))}
+            </div>
           </div>
         )}
 
