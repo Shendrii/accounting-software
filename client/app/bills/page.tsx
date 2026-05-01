@@ -187,7 +187,11 @@ export default function BillsPage() {
                   >
                     <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50 flex items-center gap-2">
                       {bill.billNo}
-                      {bill.isRecurring && <Repeat className="h-3.5 w-3.5 text-blue-500" title="Recurring" />}
+                      {bill.isRecurring && (
+                        <span title="Recurring" aria-label="Recurring">
+                          <Repeat className="h-3.5 w-3.5 text-blue-500" />
+                        </span>
+                      )}
                     </td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{bill.vendor?.name ?? '-'}</td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{formatDate(bill.date)}</td>
