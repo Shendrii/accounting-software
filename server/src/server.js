@@ -1,3 +1,7 @@
+import dns from 'node:dns';
+// Force IPv4 globally — Render free tier blocks outbound IPv6 connections
+dns.setDefaultResultOrder('ipv4first');
+
 import app from './app.js';
 
 const PORT = process.env.PORT || 8000;
