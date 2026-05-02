@@ -1,8 +1,5 @@
-import dns from 'node:dns';
+import { lookup as dnsLookup } from 'node:dns';
 import nodemailer from 'nodemailer';
-
-// Force IPv4 DNS resolution — Render free tier blocks outbound IPv6
-dns.setDefaultResultOrder('ipv4first');
 
 function escapeHtml(s) {
   return String(s)
@@ -38,9 +35,11 @@ function createTransporter() {
     port,
     secure,
     requireTLS: port === 587,
-    // Force IPv4 — Render free tier blocks outbound IPv6
-    family: 4,
     auth: { user, pass },
+    // Force IPv4 DNS lookup — Render free tier blocks outbound IPv6
+    lookup: (hostname, options, callback) => {
+      dnsLookup(hostname, { ...options, family: 4 }, callback);
+    },
   });
 }
 
