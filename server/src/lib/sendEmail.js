@@ -9,13 +9,55 @@ function escapeHtml(s) {
     .replace(/"/g, '&quot;');
 }
 
+// ─── Brevo HTTP API ────────────────────────────────────────────────────────────
+
+function isBrevoConfigured() {
+  return Boolean(process.env.BREVO_API_KEY);
+}
+
+async function brevoSend({ from, fromName, to, subject, html, attachments = [] }) {
+  const apiKey = process.env.BREVO_API_KEY;
+  const body = {
+    sender: { name: fromName || 'Accounting', email: from },
+    to: [{ email: to }],
+    subject,
+    htmlContent: html,
+  };
+
+  if (attachments.length > 0) {
+    body.attachment = attachments.map(({ filename, content }) => ({
+      name: filename,
+      content: Buffer.isBuffer(content) ? content.toString('base64') : content,
+    }));
+  }
+
+  const res = await fetch('https://api.brevo.com/v3/smtp/email', {
+    method: 'POST',
+    headers: {
+      'api-key': apiKey,
+      'content-type': 'application/json',
+    },
+    body: JSON.stringify(body),
+  });
+
+  if (!res.ok) {
+    const err = await res.text();
+    throw new Error(`Brevo error ${res.status}: ${err}`);
+  }
+
+  const data = await res.json();
+  return { messageId: data.messageId };
+}
+
+// ─── SMTP (Nodemailer) ─────────────────────────────────────────────────────────
+
 function smtpAuth() {
   const user = process.env.SMTP_USER || process.env.GMAIL_USER;
   const pass = process.env.SMTP_PASS || process.env.GMAIL_APP_PASSWORD;
   return { user, pass };
 }
 
-export function isSmtpConfigured() {
+function isSmtpConfigured() {
   const { user, pass } = smtpAuth();
   return Boolean(user && pass);
 }
@@ -23,7 +65,7 @@ export function isSmtpConfigured() {
 function createTransporter() {
   const { user, pass } = smtpAuth();
   if (!user || !pass) {
-    throw new Error('SMTP is not configured: set SMTP_USER and SMTP_PASS (or GMAIL_USER and GMAIL_APP_PASSWORD)');
+    throw new Error('SMTP is not configured: set SMTP_USER and SMTP_PASS');
   }
 
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
@@ -36,79 +78,92 @@ function createTransporter() {
     secure,
     requireTLS: port === 587,
     auth: { user, pass },
-    // Force IPv4 DNS lookup — Render free tier blocks outbound IPv6
     lookup: (hostname, options, callback) => {
       dnsLookup(hostname, { ...options, family: 4 }, callback);
     },
   });
 }
 
+// ─── Public API ────────────────────────────────────────────────────────────────
+
+export function isEmailConfigured() {
+  return isBrevoConfigured() || isSmtpConfigured();
+}
+
+// Keep backward-compat alias used in invoices/workspaces routes
+export { isEmailConfigured as isSmtpConfigured };
+
 /**
- * Send an invoice PDF via SMTP (e.g. Gmail with an app password).
- * See server/.env.example for variables.
+ * Send an invoice PDF by email (Brevo preferred, SMTP fallback).
  */
 export async function sendInvoiceEmail({ to, invoiceNo, pdfBuffer, customerName }) {
+  const subject = `Invoice #${invoiceNo}`;
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <h2 style="color:#1d4ed8">Invoice #${escapeHtml(invoiceNo)}</h2>
+      <p>Dear ${escapeHtml(customerName)},</p>
+      <p>Please find your invoice attached to this email.</p>
+      <p>Thank you for your business.</p>
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0"/>
+      <p style="font-size:12px;color:#71717a">This email was sent automatically by your accounting system.</p>
+    </div>
+  `;
+
+  if (isBrevoConfigured()) {
+    const from = process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '';
+    return brevoSend({
+      from,
+      to,
+      subject,
+      html,
+      attachments: [{ filename: `Invoice-${invoiceNo}.pdf`, content: pdfBuffer }],
+    });
+  }
+
   const transporter = createTransporter();
   const { user } = smtpAuth();
   const fromRaw = process.env.SMTP_FROM || process.env.MAIL_FROM || user;
   const from = fromRaw.includes('<') ? fromRaw : `Accounting <${fromRaw}>`;
 
   const info = await transporter.sendMail({
-    from,
-    to,
-    subject: `Invoice #${invoiceNo}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-        <h2 style="color:#1d4ed8">Invoice #${escapeHtml(invoiceNo)}</h2>
-        <p>Dear ${escapeHtml(customerName)},</p>
-        <p>Please find your invoice attached to this email.</p>
-        <p>Thank you for your business.</p>
-        <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0"/>
-        <p style="font-size:12px;color:#71717a">This email was sent automatically by your accounting system.</p>
-      </div>
-    `,
-    attachments: [
-      {
-        filename: `Invoice-${invoiceNo}.pdf`,
-        content: pdfBuffer,
-        contentType: 'application/pdf',
-      },
-    ],
+    from, to, subject, html,
+    attachments: [{ filename: `Invoice-${invoiceNo}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }],
   });
-
-  return { messageId: info.messageId, previewUrl: null };
+  return { messageId: info.messageId };
 }
 
 /**
- * Send a workspace invite email via SMTP.
+ * Send a workspace invite email (Brevo preferred, SMTP fallback).
  */
 export async function sendInviteEmail({ to, inviterName, workspaceName, inviteUrl }) {
+  const subject = `You've been invited to join ${workspaceName}`;
+  const html = `
+    <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
+      <h2 style="color:#1d4ed8">Workspace Invitation</h2>
+      <p>Hi,</p>
+      <p><strong>${escapeHtml(inviterName)}</strong> has invited you to join the workspace <strong>${escapeHtml(workspaceName)}</strong> on Accounting.</p>
+      <p style="margin:24px 0">
+        <a href="${inviteUrl}" style="background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
+          Accept Invitation
+        </a>
+      </p>
+      <p style="color:#71717a;font-size:13px">Or copy this link: <a href="${inviteUrl}">${inviteUrl}</a></p>
+      <p style="color:#71717a;font-size:13px">This invite expires in 7 days.</p>
+      <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0"/>
+      <p style="font-size:12px;color:#71717a">If you did not expect this invitation, you can ignore this email.</p>
+    </div>
+  `;
+
+  if (isBrevoConfigured()) {
+    const from = process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '';
+    return brevoSend({ from, to, subject, html });
+  }
+
   const transporter = createTransporter();
   const { user } = smtpAuth();
   const fromRaw = process.env.SMTP_FROM || process.env.MAIL_FROM || user;
   const from = fromRaw.includes('<') ? fromRaw : `Accounting <${fromRaw}>`;
 
-  const info = await transporter.sendMail({
-    from,
-    to,
-    subject: `You've been invited to join ${escapeHtml(workspaceName)}`,
-    html: `
-      <div style="font-family:sans-serif;max-width:600px;margin:0 auto">
-        <h2 style="color:#1d4ed8">Workspace Invitation</h2>
-        <p>Hi,</p>
-        <p><strong>${escapeHtml(inviterName)}</strong> has invited you to join the workspace <strong>${escapeHtml(workspaceName)}</strong> on Accounting.</p>
-        <p style="margin:24px 0">
-          <a href="${inviteUrl}" style="background:#1d4ed8;color:#fff;padding:12px 24px;border-radius:8px;text-decoration:none;font-weight:600;display:inline-block">
-            Accept Invitation
-          </a>
-        </p>
-        <p style="color:#71717a;font-size:13px">Or copy this link: <a href="${inviteUrl}">${inviteUrl}</a></p>
-        <p style="color:#71717a;font-size:13px">This invite expires in 7 days.</p>
-        <hr style="border:none;border-top:1px solid #e4e4e7;margin:24px 0"/>
-        <p style="font-size:12px;color:#71717a">If you did not expect this invitation, you can ignore this email.</p>
-      </div>
-    `,
-  });
-
+  const info = await transporter.sendMail({ from, to, subject, html });
   return { messageId: info.messageId };
 }
