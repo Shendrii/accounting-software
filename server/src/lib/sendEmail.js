@@ -15,10 +15,23 @@ function isBrevoConfigured() {
   return Boolean(process.env.BREVO_API_KEY);
 }
 
+function parseEmail(raw) {
+  // Handles both "Name <email>" and plain "email" formats
+  const match = raw.match(/<([^>]+)>/);
+  return match ? match[1].trim() : raw.trim();
+}
+
+function parseName(raw) {
+  const match = raw.match(/^(.+?)\s*</);
+  return match ? match[1].trim() : 'Accounting';
+}
+
 async function brevoSend({ from, fromName, to, subject, html, attachments = [] }) {
   const apiKey = process.env.BREVO_API_KEY;
+  const senderEmail = parseEmail(from);
+  const senderName = fromName || parseName(from);
   const body = {
-    sender: { name: fromName || 'Accounting', email: from },
+    sender: { name: senderName, email: senderEmail },
     to: [{ email: to }],
     subject,
     htmlContent: html,
@@ -110,6 +123,7 @@ export async function sendInvoiceEmail({ to, invoiceNo, pdfBuffer, customerName 
   `;
 
   if (isBrevoConfigured()) {
+    console.log('📧 Sending invoice via Brevo HTTP API');
     const from = process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '';
     return brevoSend({
       from,
@@ -125,6 +139,7 @@ export async function sendInvoiceEmail({ to, invoiceNo, pdfBuffer, customerName 
   const fromRaw = process.env.SMTP_FROM || process.env.MAIL_FROM || user;
   const from = fromRaw.includes('<') ? fromRaw : `Accounting <${fromRaw}>`;
 
+  console.log('📧 Sending invoice via SMTP');
   const info = await transporter.sendMail({
     from, to, subject, html,
     attachments: [{ filename: `Invoice-${invoiceNo}.pdf`, content: pdfBuffer, contentType: 'application/pdf' }],
@@ -155,6 +170,7 @@ export async function sendInviteEmail({ to, inviterName, workspaceName, inviteUr
   `;
 
   if (isBrevoConfigured()) {
+    console.log('📧 Sending invite via Brevo HTTP API');
     const from = process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '';
     return brevoSend({ from, to, subject, html });
   }
@@ -164,6 +180,7 @@ export async function sendInviteEmail({ to, inviterName, workspaceName, inviteUr
   const fromRaw = process.env.SMTP_FROM || process.env.MAIL_FROM || user;
   const from = fromRaw.includes('<') ? fromRaw : `Accounting <${fromRaw}>`;
 
+  console.log('📧 Sending invite via SMTP');
   const info = await transporter.sendMail({ from, to, subject, html });
   return { messageId: info.messageId };
 }
