@@ -26,14 +26,16 @@ function createTransporter() {
   }
 
   const host = process.env.SMTP_HOST || 'smtp.gmail.com';
-  const port = Number(process.env.SMTP_PORT || 465);
+  const port = Number(process.env.SMTP_PORT || 587);
   const secure = port === 465;
 
   return nodemailer.createTransport({
     host,
     port,
     secure,
-    ...(port === 587 && { requireTLS: true }),
+    requireTLS: port === 587,
+    // Force IPv4 — Render free tier blocks outbound IPv6
+    family: 4,
     auth: { user, pass },
   });
 }
