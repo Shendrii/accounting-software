@@ -1,6 +1,6 @@
 import jwt from 'jsonwebtoken';
 
-const ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '15m';
+const ACCESS_EXPIRES_IN = process.env.JWT_ACCESS_EXPIRES_IN || '30d';
 
 export function signAccessToken(payload) {
   if (!process.env.JWT_ACCESS_SECRET) {

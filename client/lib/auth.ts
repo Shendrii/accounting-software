@@ -9,7 +9,8 @@ const WORKSPACE_KEY = 'workspace_id';
 export function setSession(token: string, user: AuthUser, workspaces: AuthWorkspace[] = []) {
   localStorage.setItem(TOKEN_KEY, token);
   localStorage.setItem(USER_KEY, JSON.stringify(user));
-  if (workspaces.length > 0 && !localStorage.getItem(WORKSPACE_KEY)) {
+  // Always reset workspace on fresh login to avoid stale workspace causing 401 loops
+  if (workspaces.length > 0) {
     localStorage.setItem(WORKSPACE_KEY, workspaces[0].id);
   }
 }

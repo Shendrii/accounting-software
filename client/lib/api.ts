@@ -27,14 +27,32 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   if (workspaceId) headers.set('x-workspace-id', workspaceId);
   const response = await baseFetch(input, { ...init, headers });
 
-  // Auto-logout on 401: clear stale session and redirect to login (only once, not on auth pages)
+  // Auto-logout only when the token itself is rejected (not workspace/permission errors)
   if (response.status === 401 && typeof window !== 'undefined') {
     const onAuthPage = ['/login', '/signup', '/auth/callback'].includes(window.location.pathname);
     if (!onAuthPage) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem('workspace_id');
-      window.location.href = '/login';
+      // Clone response so we can still return it to the caller
+      const clone = response.clone();
+      clone.json().then((body) => {
+        const msg: string = body?.error ?? '';
+        const isTokenError =
+          msg.includes('Unauthorized') ||
+          msg.includes('Invalid') ||
+          msg.includes('expired') ||
+          msg.includes('token');
+        if (isTokenError) {
+          localStorage.removeItem('auth_token');
+          localStorage.removeItem('auth_user');
+          localStorage.removeItem('workspace_id');
+          window.location.href = '/login';
+        }
+      }).catch(() => {
+        // Non-JSON 401 — treat as token error
+        localStorage.removeItem('auth_token');
+        localStorage.removeItem('auth_user');
+        localStorage.removeItem('workspace_id');
+        window.location.href = '/login';
+      });
     }
   }
 
