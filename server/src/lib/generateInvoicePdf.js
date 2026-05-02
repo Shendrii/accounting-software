@@ -28,7 +28,7 @@ export function generateInvoicePdf(invoice) {
       .fillColor('#ffffff')
       .fontSize(12)
       .font('Helvetica-Bold')
-      .text('Your Company', doc.page.width - 200, 28, { width: 150, align: 'right' });
+      .text('Sky Accounting Services', doc.page.width - 200, 28, { width: 150, align: 'right' });
 
     doc.moveDown(2);
     doc.y = 100;
