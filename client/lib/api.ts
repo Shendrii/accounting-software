@@ -5,7 +5,44 @@
  * All functions return Promises that resolve to the API response.
  */
 
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
+const API_URL = API_BASE_URL;
+const baseFetch = globalThis.fetch.bind(globalThis);
+
+function getAuthToken(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('auth_token');
+}
+
+function getWorkspaceId(): string | null {
+  if (typeof window === 'undefined') return null;
+  return localStorage.getItem('workspace_id');
+}
+
+async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+  const headers = new Headers(init?.headers ?? {});
+  const token = getAuthToken();
+  const workspaceId = getWorkspaceId();
+  if (token) headers.set('Authorization', `Bearer ${token}`);
+  if (workspaceId) headers.set('x-workspace-id', workspaceId);
+  const response = await baseFetch(input, { ...init, headers });
+
+  // Auto-logout on 401: clear stale session and redirect to login (only once, not on auth pages)
+  if (response.status === 401 && typeof window !== 'undefined') {
+    const onAuthPage = ['/login', '/signup', '/auth/callback'].includes(window.location.pathname);
+    if (!onAuthPage) {
+      localStorage.removeItem('auth_token');
+      localStorage.removeItem('auth_user');
+      localStorage.removeItem('workspace_id');
+      window.location.href = '/login';
+    }
+  }
+
+  return response;
+}
+
+// Shadow global fetch in this module so all API calls automatically include auth/workspace headers.
+const fetch: typeof globalThis.fetch = apiFetch;
 
 // Helper function to handle API responses
 async function handleResponse<T>(response: Response): Promise<T> {
@@ -585,6 +622,15 @@ export async function deleteInvoice(id: string): Promise<void> {
   return handleResponse<void>(response);
 }
 
+export async function sendInvoiceEmail(id: string, email: string): Promise<{ messageId: string }> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/send-pdf`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ email }),
+  });
+  return handleResponse<{ messageId: string }>(response);
+}
+
 // ==================== BILLS API ====================
 
 export type BillStatus = 'DRAFT' | 'RECEIVED' | 'PAID' | 'VOID';
@@ -860,4 +906,82 @@ export async function importCSVTransactions(accountId: string, file: File): Prom
     body: formData,
   });
   return handleResponse<{ imported: number; suggestions: number }>(response);
+}
+
+// ==================== AUTH + WORKSPACES API ====================
+
+export interface AuthUser {
+  id: string;
+  email: string;
+  name: string;
+  avatarUrl?: string | null;
+}
+
+export interface AuthWorkspace {
+  id: string;
+  name: string;
+  type: 'PERSONAL' | 'TEAM';
+  role: 'OWNER' | 'ADMIN' | 'MEMBER';
+}
+
+export interface AuthResponse {
+  token: string;
+  user: AuthUser;
+  workspace?: AuthWorkspace;
+  workspaces?: AuthWorkspace[];
+}
+
+export async function signup(data: { name: string; email: string; password: string }): Promise<AuthResponse> {
+  const response = await fetch(`${API_URL}/api/auth/signup`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<AuthResponse>(response);
+}
+
+export async function login(data: { email: string; password: string }): Promise<AuthResponse> {
+  const response = await fetch(`${API_URL}/api/auth/login`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<AuthResponse>(response);
+}
+
+export async function fetchMe(): Promise<{ user: AuthUser; workspaces: AuthWorkspace[] }> {
+  const response = await fetch(`${API_URL}/api/auth/me`);
+  return handleResponse<{ user: AuthUser; workspaces: AuthWorkspace[] }>(response);
+}
+
+export async function fetchWorkspaces(): Promise<AuthWorkspace[]> {
+  const response = await fetch(`${API_URL}/api/workspaces`);
+  return handleResponse<AuthWorkspace[]>(response);
+}
+
+export async function createWorkspace(name: string): Promise<AuthWorkspace> {
+  const response = await fetch(`${API_URL}/api/workspaces`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ name }),
+  });
+  return handleResponse<AuthWorkspace>(response);
+}
+
+export async function inviteWorkspaceMember(data: { workspaceId: string; email: string; role?: 'OWNER' | 'ADMIN' | 'MEMBER' }) {
+  const response = await fetch(`${API_URL}/api/workspaces/invite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<{ id: string; token: string; inviteUrl: string; emailSent: boolean }>(response);
+}
+
+export async function acceptWorkspaceInvite(token: string): Promise<{ success: boolean }> {
+  const response = await fetch(`${API_URL}/api/workspaces/accept-invite`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ token }),
+  });
+  return handleResponse<{ success: boolean }>(response);
 }

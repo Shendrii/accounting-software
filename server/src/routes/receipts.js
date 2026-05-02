@@ -126,8 +126,8 @@ router.get('/', async (req, res) => {
 // GET /api/receipts/:id
 router.get('/:id', async (req, res) => {
   try {
-    const receipt = await prisma.receipt.findUnique({
-      where: { id: req.params.id },
+    const receipt = await prisma.receipt.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         journalEntry: { include: { journalLines: { include: { account: true } } } },
         vendor: { select: { id: true, name: true } },
@@ -175,7 +175,7 @@ router.post('/:id/approve', async (req, res) => {
     if (!expenseAccountId || !paymentAccountId) {
       return res.status(400).json({ error: 'expenseAccountId and paymentAccountId are required' });
     }
-    const receipt = await prisma.receipt.findUnique({ where: { id: req.params.id } });
+    const receipt = await prisma.receipt.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
     if (receipt.status === 'APPROVED') {
       return res.status(400).json({ error: 'Receipt already approved' });
@@ -183,7 +183,7 @@ router.post('/:id/approve', async (req, res) => {
 
     // If the receipt is linked to a bill, mark the bill as PAID instead
     if (receipt.billId) {
-      const bill = await prisma.bill.findUnique({ where: { id: receipt.billId } });
+      const bill = await prisma.bill.findFirst({ where: { id: receipt.billId, workspaceId: req.workspace.id } });
       if (bill && bill.status === 'RECEIVED') {
         const apAccount = await prisma.account.findFirst({
           where: { name: { contains: 'payable', mode: 'insensitive' } },

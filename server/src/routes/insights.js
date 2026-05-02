@@ -75,7 +75,7 @@ router.get('/', async (req, res) => {
       prisma.journalLine.groupBy({
         by: ['accountId'],
         where: {
-          journalEntry: { status: 'POSTED', date: { gte: startThisMonth } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: startThisMonth } },
           account: { type: 'EXPENSE' },
         },
         _sum: { debit: true },
@@ -83,7 +83,7 @@ router.get('/', async (req, res) => {
       prisma.journalLine.groupBy({
         by: ['accountId'],
         where: {
-          journalEntry: { status: 'POSTED', date: { gte: start3MonthsAgo, lt: startThisMonth } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: start3MonthsAgo, lt: startThisMonth } },
           account: { type: 'EXPENSE' },
         },
         _sum: { debit: true },
@@ -148,14 +148,14 @@ router.get('/', async (req, res) => {
     const [thisMonthRevLines, lastMonthRevLines] = await Promise.all([
       prisma.journalLine.aggregate({
         where: {
-          journalEntry: { status: 'POSTED', date: { gte: startThisMonth } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: startThisMonth } },
           account: { type: 'REVENUE' },
         },
         _sum: { credit: true },
       }),
       prisma.journalLine.aggregate({
         where: {
-          journalEntry: { status: 'POSTED', date: { gte: startLastMonth, lt: startThisMonth } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: startLastMonth, lt: startThisMonth } },
           account: { type: 'REVENUE' },
         },
         _sum: { credit: true },

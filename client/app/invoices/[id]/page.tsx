@@ -6,11 +6,10 @@ import Link from 'next/link';
 import { ArrowLeft, Download, Mail, Loader2, X } from 'lucide-react';
 import {
   getInvoice, sendInvoice, recordInvoicePayment, voidInvoice, getAccounts,
+  sendInvoiceEmail,
   type Invoice, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
-
-const API_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -94,19 +93,9 @@ export default function InvoiceDetailPage() {
     setSendEmailLoading(true);
     setError(null);
     try {
-      const res = await fetch(`${API_URL}/api/invoices/${invoice.id}/send-pdf`, {
-        method: 'POST',
-        headers: { 'Content-Type': 'application/json' },
-        body: JSON.stringify({ email: emailTo || undefined }),
-      });
-      const data = await res.json();
-      if (!res.ok) throw new Error(data.error || 'Failed to send email');
+      await sendInvoiceEmail(invoice.id, emailTo || invoice.customer?.email || '');
       setEmailModalOpen(false);
-      if (data.previewUrl) {
-        toast.success(`Email sent! Preview: ${data.previewUrl}`);
-      } else {
-        toast.success('Invoice emailed successfully');
-      }
+      toast.success('Invoice emailed successfully');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to send email');
     } finally {
@@ -296,6 +285,9 @@ export default function InvoiceDetailPage() {
               </div>
               <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
                 Invoice <strong>{invoice.invoiceNo}</strong> will be attached as a PDF.
+              </p>
+              <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
+                Sending uses SMTP (e.g. Gmail). Respect your provider&apos;s daily limits; very high volume may need a transactional email provider.
               </p>
               <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipient Email</label>
               <input

@@ -1,7 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
 import { generateInvoicePdf } from '../lib/generateInvoicePdf.js';
-import { sendInvoiceEmail } from '../lib/sendEmail.js';
+import { isSmtpConfigured, sendInvoiceEmail } from '../lib/sendEmail.js';
 
 const router = express.Router();
 
@@ -41,8 +41,8 @@ router.get('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
         lines: { include: { account: { select: { id: true, name: true, code: true } } } },
@@ -99,7 +99,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.invoice.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({ error: 'Only DRAFT invoices can be edited' });
@@ -146,7 +146,7 @@ router.put('/:id', async (req, res) => {
 
 router.post('/:id/send', async (req, res) => {
   try {
-    const existing = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.invoice.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({ error: 'Only DRAFT invoices can be sent' });
@@ -168,8 +168,8 @@ router.post('/:id/record-payment', async (req, res) => {
       return res.status(400).json({ error: 'paymentAccountId is required' });
     }
 
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: { customer: true },
     });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
@@ -229,7 +229,7 @@ router.post('/:id/record-payment', async (req, res) => {
 
 router.post('/:id/void', async (req, res) => {
   try {
-    const existing = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.invoice.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
     if (existing.status === 'PAID') {
       return res.status(400).json({ error: 'Cannot void a paid invoice' });
@@ -246,7 +246,7 @@ router.post('/:id/void', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await prisma.invoice.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.invoice.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Invoice not found' });
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({ error: 'Only DRAFT invoices can be deleted' });
@@ -261,8 +261,8 @@ router.delete('/:id', async (req, res) => {
 // ── PDF download ──────────────────────────────────────────────────────────
 router.get('/:id/pdf', async (req, res) => {
   try {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
         lines: { include: { account: { select: { name: true } } } },
@@ -282,12 +282,15 @@ router.get('/:id/pdf', async (req, res) => {
 
 // ── Send PDF via email ─────────────────────────────────────────────────────
 router.post('/:id/send-pdf', async (req, res) => {
-  if (!process.env.RESEND_API_KEY) {
-    return res.status(503).json({ error: 'Email is not configured. Add RESEND_API_KEY to server/.env' });
+  if (!isSmtpConfigured()) {
+    return res.status(503).json({
+      error:
+        'Email is not configured. Set SMTP_USER and SMTP_PASS (or GMAIL_USER and GMAIL_APP_PASSWORD) in server/.env',
+    });
   }
   try {
-    const invoice = await prisma.invoice.findUnique({
-      where: { id: req.params.id },
+    const invoice = await prisma.invoice.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
         lines: { include: { account: { select: { name: true } } } },

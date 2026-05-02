@@ -42,8 +42,8 @@ router.get('/:accountId', async (req, res) => {
       prisma.journalLine.findMany({
         where: {
           accountId,
-          journalEntry: { status: 'POSTED' },
-          NOT: { id: { in: await getMatchedLineIds() } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
+          NOT: { id: { in: await getMatchedLineIds(req.workspace.id) } },
         },
         include: { journalEntry: { select: { date: true, description: true, referenceNo: true } } },
         orderBy: { journalEntry: { date: 'asc' } },
@@ -57,9 +57,9 @@ router.get('/:accountId', async (req, res) => {
   }
 });
 
-async function getMatchedLineIds() {
+async function getMatchedLineIds(workspaceId) {
   const matched = await prisma.bankTransaction.findMany({
-    where: { isMatched: true, matchedLineId: { not: null } },
+    where: { workspaceId, isMatched: true, matchedLineId: { not: null } },
     select: { matchedLineId: true },
   });
   return matched.map((m) => m.matchedLineId).filter(Boolean);
@@ -226,11 +226,11 @@ router.post('/import-csv', upload.single('csv'), async (req, res) => {
     const threeDays = 3 * 24 * 60 * 60 * 1000;
     let suggestions = 0;
     for (const txn of importedTxns) {
-      const matchedLineIds = await getMatchedLineIds();
+      const matchedLineIds = await getMatchedLineIds(req.workspace.id);
       const candidate = await prisma.journalLine.findFirst({
         where: {
           accountId,
-          journalEntry: { status: 'POSTED' },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
           NOT: { id: { in: matchedLineIds } },
           OR: [
             { debit: Math.abs(txn.amount) },
@@ -238,6 +238,7 @@ router.post('/import-csv', upload.single('csv'), async (req, res) => {
           ],
           journalEntry: {
             status: 'POSTED',
+            workspaceId: req.workspace.id,
             date: {
               gte: new Date(new Date(txn.date).getTime() - threeDays),
               lte: new Date(new Date(txn.date).getTime() + threeDays),

@@ -8,7 +8,7 @@ router.get('/', async (req, res) => {
   try {
     const { status, startDate, endDate } = req.query;
 
-    const where = {};
+    const where = { workspaceId: req.workspace.id };
     if (status) {
       where.status = status;
     }
@@ -41,8 +41,8 @@ router.get('/', async (req, res) => {
 // Get journal entry by ID
 router.get('/:id', async (req, res) => {
   try {
-    const journalEntry = await prisma.journalEntry.findUnique({
-      where: { id: req.params.id },
+    const journalEntry = await prisma.journalEntry.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         journalLines: {
           include: {
@@ -157,8 +157,8 @@ router.put('/:id', async (req, res) => {
   try {
     const { date, description, referenceNo, status, journalLines } = req.body;
 
-    const existingEntry = await prisma.journalEntry.findUnique({
-      where: { id: req.params.id },
+    const existingEntry = await prisma.journalEntry.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: { journalLines: true },
     });
 
@@ -244,8 +244,13 @@ router.put('/:id', async (req, res) => {
 // Post journal entry (change status from DRAFT to POSTED)
 router.post('/:id/post', async (req, res) => {
   try {
+    const existing = await prisma.journalEntry.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
+    });
+    if (!existing) return res.status(404).json({ error: 'Journal entry not found' });
+
     const journalEntry = await prisma.journalEntry.update({
-      where: { id: req.params.id },
+      where: { id: existing.id },
       data: { status: 'POSTED' },
       include: {
         journalLines: {
@@ -282,8 +287,8 @@ router.post('/:id/post', async (req, res) => {
 // Delete journal entry
 router.delete('/:id', async (req, res) => {
   try {
-    const entry = await prisma.journalEntry.findUnique({
-      where: { id: req.params.id },
+    const entry = await prisma.journalEntry.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
     });
 
     if (!entry) {
@@ -297,7 +302,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     await prisma.journalEntry.delete({
-      where: { id: req.params.id },
+      where: { id: entry.id },
     });
 
     res.status(204).send();

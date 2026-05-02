@@ -10,7 +10,7 @@ router.get('/profit-loss', async (req, res) => {
     if (startDate) dateFilter.gte = new Date(startDate);
     if (endDate) dateFilter.lte = new Date(endDate);
 
-    const whereEntry = { status: 'POSTED' };
+    const whereEntry = { status: 'POSTED', workspaceId: req.workspace.id };
     if (Object.keys(dateFilter).length) whereEntry.date = dateFilter;
 
     const [revenueLines, expenseLines] = await Promise.all([
@@ -86,7 +86,7 @@ router.get('/balance-sheet', async (req, res) => {
       const lines = await prisma.journalLine.groupBy({
         by: ['accountId'],
         where: {
-          journalEntry: { status: 'POSTED', date: { lte: asOfDate } },
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { lte: asOfDate } },
         },
         _sum: { debit: true, credit: true },
       });
@@ -164,7 +164,7 @@ router.get('/balance-sheet', async (req, res) => {
 router.get('/trial-balance', async (req, res) => {
   try {
     const { startDate, endDate } = req.query;
-    const whereEntry = { status: 'POSTED' };
+    const whereEntry = { status: 'POSTED', workspaceId: req.workspace.id };
     if (startDate || endDate) {
       whereEntry.date = {};
       if (startDate) whereEntry.date.gte = new Date(startDate);

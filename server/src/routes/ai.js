@@ -68,17 +68,18 @@ router.post('/chat', async (req, res) => {
         take: 5,
       }),
       prisma.journalLine.aggregate({
-        where: { journalEntry: { status: 'POSTED', date: { gte: startOfMonth } }, account: { type: 'REVENUE' } },
+        where: { journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: startOfMonth } }, account: { type: 'REVENUE' } },
         _sum: { credit: true },
       }),
       prisma.journalLine.aggregate({
-        where: { journalEntry: { status: 'POSTED', date: { gte: startOfMonth } }, account: { type: 'EXPENSE' } },
+        where: { journalEntry: { status: 'POSTED', workspaceId: req.workspace.id, date: { gte: startOfMonth } }, account: { type: 'EXPENSE' } },
         _sum: { debit: true },
       }),
       prisma.journalLine.aggregate({
         where: {
           journalEntry: {
             status: 'POSTED',
+            workspaceId: req.workspace.id,
             date: { gte: new Date(now.getFullYear(), now.getMonth() - 1, 1), lt: startOfMonth },
           },
           account: { type: 'REVENUE' },
@@ -89,6 +90,7 @@ router.post('/chat', async (req, res) => {
         where: {
           journalEntry: {
             status: 'POSTED',
+            workspaceId: req.workspace.id,
             date: { gte: new Date(now.getFullYear(), now.getMonth() - 1, 1), lt: startOfMonth },
           },
           account: { type: 'EXPENSE' },

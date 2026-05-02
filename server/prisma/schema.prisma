@@ -12,7 +12,9 @@ datasource db {
 
 model Account {
   id               String            @id @default(cuid())
-  code             String            @unique
+  workspaceId      String
+  workspace        Workspace         @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  code             String
   name             String
   type             AccountType
   balance          Decimal           @default(0) @db.Decimal(15, 2)
@@ -25,10 +27,14 @@ model Account {
   billLines        BillLine[]
   bankTransactions BankTransaction[]
   reconciliations  Reconciliation[]
+
+  @@unique([workspaceId, code])
 }
 
 model JournalEntry {
   id                 String        @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   date               DateTime
   description        String
   referenceNo        String?
@@ -46,6 +52,8 @@ model JournalEntry {
 
 model Receipt {
   id             String        @id @default(cuid())
+  workspaceId    String
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   imageUrl       String
   extractedData  Json
   status         ReceiptStatus @default(PENDING)
@@ -73,35 +81,41 @@ model JournalLine {
 }
 
 model Customer {
-  id        String    @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  city      String?
-  country   String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  invoices  Invoice[]
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  city        String?
+  country     String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  invoices    Invoice[]
 }
 
 model Vendor {
-  id        String    @id @default(cuid())
-  name      String
-  email     String?
-  phone     String?
-  address   String?
-  isActive  Boolean   @default(true)
-  createdAt DateTime  @default(now())
-  updatedAt DateTime  @updatedAt
-  bills     Bill[]
-  receipts  Receipt[]
+  id          String    @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  name        String
+  email       String?
+  phone       String?
+  address     String?
+  isActive    Boolean   @default(true)
+  createdAt   DateTime  @default(now())
+  updatedAt   DateTime  @updatedAt
+  bills       Bill[]
+  receipts    Receipt[]
 }
 
 model Invoice {
   id             String        @id @default(cuid())
-  invoiceNo      String        @unique
+  workspaceId    String
+  workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invoiceNo      String
   customerId     String
   customer       Customer      @relation(fields: [customerId], references: [id])
   date           DateTime
@@ -116,6 +130,8 @@ model Invoice {
   lines          InvoiceLine[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
+
+  @@unique([workspaceId, invoiceNo])
 }
 
 model InvoiceLine {
@@ -131,24 +147,28 @@ model InvoiceLine {
 }
 
 model Bill {
-  id                 String     @id @default(cuid())
-  billNo             String     @unique
+  id                 String        @id @default(cuid())
+  workspaceId        String
+  workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  billNo             String
   vendorId           String
-  vendor             Vendor     @relation(fields: [vendorId], references: [id])
+  vendor             Vendor        @relation(fields: [vendorId], references: [id])
   date               DateTime
   dueDate            DateTime
-  status             BillStatus @default(DRAFT)
-  total              Decimal    @db.Decimal(15, 2)
+  status             BillStatus    @default(DRAFT)
+  total              Decimal       @db.Decimal(15, 2)
   notes              String?
-  isRecurring        Boolean    @default(false)
+  isRecurring        Boolean       @default(false)
   recurrenceInterval String?
   nextDueDate        DateTime?
-  journalEntryId     String?    @unique
+  journalEntryId     String?       @unique
   journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
   lines              BillLine[]
   receipt            Receipt?
-  createdAt          DateTime   @default(now())
-  updatedAt          DateTime   @updatedAt
+  createdAt          DateTime      @default(now())
+  updatedAt          DateTime      @updatedAt
+
+  @@unique([workspaceId, billNo])
 }
 
 model BillLine {
@@ -164,26 +184,30 @@ model BillLine {
 }
 
 model BankTransaction {
-  id            String   @id @default(cuid())
+  id            String    @id @default(cuid())
+  workspaceId   String
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   accountId     String
-  account       Account  @relation(fields: [accountId], references: [id])
+  account       Account   @relation(fields: [accountId], references: [id])
   date          DateTime
   description   String
-  amount        Decimal  @db.Decimal(15, 2)
-  isMatched     Boolean  @default(false)
-  matchedLineId String?  @unique
-  createdAt     DateTime @default(now())
+  amount        Decimal   @db.Decimal(15, 2)
+  isMatched     Boolean   @default(false)
+  matchedLineId String?   @unique
+  createdAt     DateTime  @default(now())
 }
 
 model Reconciliation {
-  id               String   @id @default(cuid())
+  id               String    @id @default(cuid())
+  workspaceId      String
+  workspace        Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   accountId        String
-  account          Account  @relation(fields: [accountId], references: [id])
+  account          Account   @relation(fields: [accountId], references: [id])
   statementDate    DateTime
-  statementBalance Decimal  @db.Decimal(15, 2)
-  status           String   @default("IN_PROGRESS")
-  createdAt        DateTime @default(now())
-  updatedAt        DateTime @updatedAt
+  statementBalance Decimal   @db.Decimal(15, 2)
+  status           String    @default("IN_PROGRESS")
+  createdAt        DateTime  @default(now())
+  updatedAt        DateTime  @updatedAt
 }
 
 enum ReceiptStatus {
@@ -218,4 +242,93 @@ enum BillStatus {
   RECEIVED
   PAID
   VOID
+}
+
+model User {
+  id               String            @id @default(cuid())
+  email            String            @unique
+  passwordHash     String?
+  name             String
+  avatarUrl        String?
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  ownedWorkspaces  Workspace[]       @relation("WorkspaceOwner")
+  workspaceMembers WorkspaceMember[]
+  providers        AuthProvider[]
+  invitesSent      WorkspaceInvite[] @relation("InviteSender")
+}
+
+model Workspace {
+  id               String            @id @default(cuid())
+  name             String
+  slug             String            @unique
+  type             WorkspaceType     @default(PERSONAL)
+  ownerUserId      String
+  ownerUser        User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
+  createdAt        DateTime          @default(now())
+  updatedAt        DateTime          @updatedAt
+  members          WorkspaceMember[]
+  invites          WorkspaceInvite[]
+  accounts         Account[]
+  journalEntries   JournalEntry[]
+  receipts         Receipt[]
+  customers        Customer[]
+  vendors          Vendor[]
+  invoices         Invoice[]
+  bills            Bill[]
+  bankTransactions BankTransaction[]
+  reconciliations  Reconciliation[]
+}
+
+model WorkspaceMember {
+  id          String        @id @default(cuid())
+  workspaceId String
+  userId      String
+  role        WorkspaceRole @default(MEMBER)
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([workspaceId, userId])
+}
+
+model AuthProvider {
+  id                String           @id @default(cuid())
+  userId            String
+  provider          AuthProviderType
+  providerAccountId String
+  createdAt         DateTime         @default(now())
+  user              User             @relation(fields: [userId], references: [id], onDelete: Cascade)
+
+  @@unique([provider, providerAccountId])
+}
+
+model WorkspaceInvite {
+  id          String        @id @default(cuid())
+  workspaceId String
+  email       String
+  role        WorkspaceRole @default(MEMBER)
+  token       String        @unique
+  expiresAt   DateTime
+  acceptedAt  DateTime?
+  invitedById String?
+  createdAt   DateTime      @default(now())
+  workspace   Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+  invitedBy   User?         @relation("InviteSender", fields: [invitedById], references: [id])
+}
+
+enum WorkspaceType {
+  PERSONAL
+  TEAM
+}
+
+enum WorkspaceRole {
+  OWNER
+  ADMIN
+  MEMBER
+}
+
+enum AuthProviderType {
+  LOCAL
+  GOOGLE
 }

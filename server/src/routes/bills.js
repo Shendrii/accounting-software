@@ -39,8 +39,8 @@ router.get('/', async (req, res) => {
 
 router.get('/:id', async (req, res) => {
   try {
-    const bill = await prisma.bill.findUnique({
-      where: { id: req.params.id },
+    const bill = await prisma.bill.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         vendor: true,
         lines: { include: { account: { select: { id: true, name: true, code: true } } } },
@@ -96,7 +96,7 @@ router.post('/', async (req, res) => {
 
 router.put('/:id', async (req, res) => {
   try {
-    const existing = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.bill.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Bill not found' });
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({ error: 'Only DRAFT bills can be edited' });
@@ -139,8 +139,8 @@ router.put('/:id', async (req, res) => {
 
 router.post('/:id/receive', async (req, res) => {
   try {
-    const bill = await prisma.bill.findUnique({
-      where: { id: req.params.id },
+    const bill = await prisma.bill.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: { lines: true },
     });
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
@@ -204,7 +204,7 @@ router.post('/:id/pay', async (req, res) => {
     const { paymentAccountId } = req.body;
     if (!paymentAccountId) return res.status(400).json({ error: 'paymentAccountId is required' });
 
-    const bill = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    const bill = await prisma.bill.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!bill) return res.status(404).json({ error: 'Bill not found' });
     if (bill.status !== 'RECEIVED') {
       return res.status(400).json({ error: 'Only RECEIVED bills can be paid' });
@@ -259,7 +259,7 @@ router.post('/:id/pay', async (req, res) => {
 
 router.post('/:id/void', async (req, res) => {
   try {
-    const existing = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.bill.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Bill not found' });
     if (existing.status === 'PAID') return res.status(400).json({ error: 'Cannot void a paid bill' });
     const bill = await prisma.bill.update({
@@ -274,7 +274,7 @@ router.post('/:id/void', async (req, res) => {
 
 router.delete('/:id', async (req, res) => {
   try {
-    const existing = await prisma.bill.findUnique({ where: { id: req.params.id } });
+    const existing = await prisma.bill.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
     if (!existing) return res.status(404).json({ error: 'Bill not found' });
     if (existing.status !== 'DRAFT') {
       return res.status(400).json({ error: 'Only DRAFT bills can be deleted' });

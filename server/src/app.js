@@ -3,6 +3,8 @@ import path from 'path';
 import { fileURLToPath } from 'url';
 import cors from 'cors';
 import dotenv from 'dotenv';
+import cookieParser from 'cookie-parser';
+import rateLimit from 'express-rate-limit';
 import accountsRouter from './routes/accounts.js';
 import journalEntriesRouter from './routes/journalEntries.js';
 import receiptsRouter from './routes/receipts.js';
@@ -16,16 +18,62 @@ import reportsRouter from './routes/reports.js';
 import insightsRouter from './routes/insights.js';
 import aiRouter from './routes/ai.js';
 import recurringRouter from './routes/recurring.js';
+import authRouter from './routes/auth.js';
+import workspacesRouter from './routes/workspaces.js';
+import { requireAuth } from './middleware/auth.js';
+import { requireWorkspace } from './middleware/workspace.js';
+import { withRequestContext } from './lib/requestContext.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 const app = express();
 
-// Middleware
-app.use(cors());
+// Behind Render/other reverse proxies, required for express-rate-limit and req.ip
+if (process.env.NODE_ENV === 'production') {
+  app.set('trust proxy', 1);
+}
+
+function parseCorsOrigins() {
+  const raw = process.env.CORS_ORIGINS;
+  const isProd = process.env.NODE_ENV === 'production';
+  if (raw?.trim()) {
+    return raw
+      .split(',')
+      .map((s) => s.trim())
+      .filter(Boolean);
+  }
+  if (isProd) return [];
+  return ['http://localhost:3000', 'http://127.0.0.1:3000'];
+}
+
+const corsOrigins = parseCorsOrigins();
+app.use(
+  cors({
+    origin(origin, callback) {
+      if (!origin) return callback(null, true);
+      if (corsOrigins.length === 0) {
+        if (process.env.NODE_ENV === 'production') {
+          console.warn('[cors] CORS_ORIGINS is empty; set it to your frontend URL(s)');
+        }
+        return callback(null, false);
+      }
+      if (corsOrigins.includes(origin)) return callback(null, true);
+      return callback(null, false);
+    },
+  })
+);
 app.use(express.json());
+app.use(cookieParser());
 app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
+app.use((req, res, next) => withRequestContext({}, () => next()));
+
+const authLimiter = rateLimit({
+  windowMs: 15 * 60 * 1000,
+  max: 600,
+  standardHeaders: true,
+  legacyHeaders: false,
+});
 
 // Routes
 app.get('/', (req, res) => {
@@ -37,19 +85,21 @@ app.get('/api/health', (req, res) => {
 });
 
 // API Routes
-app.use('/api/accounts', accountsRouter);
-app.use('/api/journal-entries', journalEntriesRouter);
-app.use('/api/receipts', receiptsRouter);
-app.use('/api/dashboard', dashboardRouter);
-app.use('/api/customers', customersRouter);
-app.use('/api/vendors', vendorsRouter);
-app.use('/api/invoices', invoicesRouter);
-app.use('/api/bills', billsRouter);
-app.use('/api/reconciliation', reconciliationRouter);
-app.use('/api/reports', reportsRouter);
-app.use('/api/insights', insightsRouter);
-app.use('/api/ai', aiRouter);
-app.use('/api/recurring', recurringRouter);
+app.use('/api/auth', authLimiter, authRouter);
+app.use('/api/workspaces', requireAuth, workspacesRouter);
+app.use('/api/accounts', requireAuth, requireWorkspace, accountsRouter);
+app.use('/api/journal-entries', requireAuth, requireWorkspace, journalEntriesRouter);
+app.use('/api/receipts', requireAuth, requireWorkspace, receiptsRouter);
+app.use('/api/dashboard', requireAuth, requireWorkspace, dashboardRouter);
+app.use('/api/customers', requireAuth, requireWorkspace, customersRouter);
+app.use('/api/vendors', requireAuth, requireWorkspace, vendorsRouter);
+app.use('/api/invoices', requireAuth, requireWorkspace, invoicesRouter);
+app.use('/api/bills', requireAuth, requireWorkspace, billsRouter);
+app.use('/api/reconciliation', requireAuth, requireWorkspace, reconciliationRouter);
+app.use('/api/reports', requireAuth, requireWorkspace, reportsRouter);
+app.use('/api/insights', requireAuth, requireWorkspace, insightsRouter);
+app.use('/api/ai', requireAuth, requireWorkspace, aiRouter);
+app.use('/api/recurring', requireAuth, requireWorkspace, recurringRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
