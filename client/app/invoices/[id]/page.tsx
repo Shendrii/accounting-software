@@ -5,6 +5,7 @@ import { useParams } from 'next/navigation';
 import Link from 'next/link';
 import { ArrowLeft, Download, Mail, Loader2, X } from 'lucide-react';
 import {
+  API_BASE_URL,
   getInvoice, sendInvoice, recordInvoicePayment, voidInvoice, getAccounts,
   sendInvoiceEmail,
   type Invoice, type Account,
@@ -85,7 +86,7 @@ export default function InvoiceDetailPage() {
 
   function handleDownloadPdf() {
     if (!invoice) return;
-    window.open(`${API_URL}/api/invoices/${invoice.id}/pdf`, '_blank');
+    window.open(`${API_BASE_URL}/api/invoices/${invoice.id}/pdf`, '_blank');
   }
 
   async function handleSendEmail() {
