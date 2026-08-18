@@ -5,6 +5,9 @@
  * All functions return Promises that resolve to the API response.
  */
 
+import { clearSession } from './auth';
+import { isPublicPath } from './public-paths';
+
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = API_BASE_URL;
 const baseFetch = globalThis.fetch.bind(globalThis);
@@ -29,11 +32,15 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
 
   // Auto-logout only when we sent a token and the server rejected it
   if (response.status === 401 && typeof window !== 'undefined' && token) {
-    const onAuthPage = ['/login', '/signup', '/auth/callback'].includes(window.location.pathname);
-    if (!onAuthPage) {
-      localStorage.removeItem('auth_token');
-      localStorage.removeItem('auth_user');
-      localStorage.removeItem('workspace_id');
+    const path = window.location.pathname;
+    const onAuthPage = ['/login', '/signup', '/auth/callback'].includes(path);
+    clearSession();
+    if (onAuthPage) {
+      // Already on auth flow — stay put
+    } else if (isPublicPath(path)) {
+      // Stale session on landing/preview — reload as guest instead of forcing login
+      window.location.reload();
+    } else {
       window.location.href = '/login';
     }
   }
@@ -165,6 +172,9 @@ export interface JournalEntry {
   journalLines: JournalLine[];
   createdAt: string;
   updatedAt: string;
+  receipt?: { id: string; vendor?: { name: string } | null } | null;
+  invoices?: Array<{ id: string; invoiceNo: string; customer?: { name: string } | null }>;
+  bills?: Array<{ id: string; billNo: string; vendor?: { name: string } | null }>;
 }
 
 export interface CreateJournalLineInput {
@@ -392,6 +402,21 @@ export interface DashboardData {
 export async function fetchDashboard(): Promise<DashboardData> {
   const response = await fetch(`${API_URL}/api/dashboard`);
   return handleResponse<DashboardData>(response);
+}
+
+export interface CloseChecklist {
+  draftJournalEntries: number;
+  pendingReceipts: number;
+  overdueInvoices: number;
+  overdueBills: number;
+  unmatchedBankTransactions: number;
+  trialBalanceBalanced: boolean;
+  lastReconciliationAt: string | null;
+}
+
+export async function getCloseChecklist(): Promise<CloseChecklist> {
+  const response = await fetch(`${API_URL}/api/dashboard/close-checklist`);
+  return handleResponse<CloseChecklist>(response);
 }
 
 // ==================== CUSTOMERS API ====================
@@ -764,6 +789,25 @@ export interface ReconciliationData {
   journalLines: (JournalLine & { journalEntry: { date: string; description: string; referenceNo?: string | null } })[];
 }
 
+export interface BankMatchSuggestion {
+  bankTransactionId: string;
+  candidates: Array<{
+    journalLineId: string;
+    amount: number;
+    date: string;
+    description: string;
+    exactAmount: boolean;
+    amountDelta: number;
+    dateDistance: number;
+    source: { type: 'receipt' | 'invoice' | 'bill' | 'journal'; id: string; label: string };
+  }>;
+}
+
+export async function getBankMatchSuggestions(accountId: string, windowDays = 5): Promise<{ windowDays: number; suggestions: BankMatchSuggestion[] }> {
+  const response = await fetch(`${API_URL}/api/reconciliation/${accountId}/suggestions?windowDays=${windowDays}`);
+  return handleResponse<{ windowDays: number; suggestions: BankMatchSuggestion[] }>(response);
+}
+
 export async function importBankTransactions(accountId: string, transactions: { date: string; description: string; amount: number }[]): Promise<{ imported: number }> {
   const response = await fetch(`${API_URL}/api/reconciliation/import`, {
     method: 'POST',
@@ -874,11 +918,11 @@ export async function getInsights(): Promise<InsightsData> {
 
 // ==================== AI CHAT API ====================
 
-export async function sendAiMessage(message: string): Promise<{ reply: string }> {
+export async function sendAiMessage(message: string, context?: { tab: string; item?: string }): Promise<{ reply: string }> {
   const response = await fetch(`${API_URL}/api/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message }),
+    body: JSON.stringify({ message, context }),
   });
   return handleResponse<{ reply: string }>(response);
 }

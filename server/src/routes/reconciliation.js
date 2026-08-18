@@ -7,6 +7,18 @@ const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 *
 
 const router = express.Router();
 
+function normalize(value) {
+  return (value || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+}
+
+function similarity(left, right) {
+  const leftWords = new Set(normalize(left).split(' ').filter(Boolean));
+  const rightWords = new Set(normalize(right).split(' ').filter(Boolean));
+  if (!leftWords.size || !rightWords.size) return 0;
+  const shared = [...leftWords].filter((word) => rightWords.has(word)).length;
+  return shared / Math.max(leftWords.size, rightWords.size);
+}
+
 router.post('/import', async (req, res) => {
   try {
     const { accountId, transactions } = req.body;
@@ -30,10 +42,81 @@ router.post('/import', async (req, res) => {
   }
 });
 
+router.get('/:accountId/suggestions', async (req, res) => {
+  try {
+    const { accountId } = req.params;
+    const windowDays = Math.min(31, Math.max(1, Number(req.query.windowDays) || 5));
+    const account = await prisma.account.findFirst({ where: { id: accountId }, select: { id: true } });
+    if (!account) return res.status(404).json({ error: 'Bank account not found' });
+
+    const matchedLineIds = await getMatchedLineIds(req.workspace.id);
+    const [bankTransactions, journalLines] = await Promise.all([
+      prisma.bankTransaction.findMany({ where: { accountId, isMatched: false }, orderBy: { date: 'asc' } }),
+      prisma.journalLine.findMany({
+        where: {
+          accountId,
+          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
+          NOT: { id: { in: matchedLineIds } },
+        },
+        include: {
+          journalEntry: {
+            select: {
+              date: true, description: true, referenceNo: true,
+              receipt: { select: { id: true, extractedData: true, vendor: { select: { name: true } } } },
+              invoices: { select: { id: true, invoiceNo: true, customer: { select: { name: true } } } },
+              bills: { select: { id: true, billNo: true, vendor: { select: { name: true } } } },
+            },
+          },
+        },
+      }),
+    ]);
+    const millisecondsPerDay = 86400000;
+    const suggestions = bankTransactions.map((transaction) => {
+      const candidates = journalLines
+        .map((line) => {
+          const lineAmount = Math.max(Number(line.debit), Number(line.credit));
+          const transactionAmount = Math.abs(Number(transaction.amount));
+          const amountDelta = Math.abs(lineAmount - transactionAmount);
+          const percentDelta = transactionAmount ? amountDelta / transactionAmount : amountDelta;
+          const dateDistance = Math.abs(new Date(line.journalEntry.date).getTime() - new Date(transaction.date).getTime()) / millisecondsPerDay;
+          const sourceNames = [
+            line.journalEntry.receipt?.vendor?.name,
+            ...line.journalEntry.invoices.map((invoice) => invoice.customer?.name),
+            ...line.journalEntry.bills.map((bill) => bill.vendor?.name),
+            line.journalEntry.description,
+            line.description,
+          ].filter(Boolean).join(' ');
+          const exactAmount = amountDelta <= 0.01;
+          if ((!exactAmount && percentDelta > 0.05) || dateDistance > windowDays) return null;
+          const nameScore = similarity(transaction.description, sourceNames);
+          const score = (exactAmount ? 100 : 50 - percentDelta * 100) + Math.max(0, windowDays - dateDistance) + nameScore * 20;
+          const source = line.journalEntry.receipt
+            ? { type: 'receipt', id: line.journalEntry.receipt.id, label: line.journalEntry.receipt.vendor?.name ?? 'Receipt' }
+            : line.journalEntry.invoices[0]
+              ? { type: 'invoice', id: line.journalEntry.invoices[0].id, label: line.journalEntry.invoices[0].invoiceNo }
+              : line.journalEntry.bills[0]
+                ? { type: 'bill', id: line.journalEntry.bills[0].id, label: line.journalEntry.bills[0].billNo }
+                : { type: 'journal', id: line.journalEntryId, label: line.journalEntry.description };
+          return { journalLineId: line.id, amount: lineAmount, date: line.journalEntry.date, description: line.description || line.journalEntry.description, source, exactAmount, amountDelta, dateDistance, score };
+        })
+        .filter(Boolean)
+        .sort((a, b) => b.score - a.score)
+        .slice(0, 3);
+      return { bankTransactionId: transaction.id, candidates };
+    });
+    res.json({ windowDays, suggestions });
+  } catch (error) {
+    console.error(error);
+    res.status(500).json({ error: 'Failed to generate match suggestions' });
+  }
+});
+
 router.get('/:accountId', async (req, res) => {
   try {
     const { accountId } = req.params;
 
+    const account = await prisma.account.findFirst({ where: { id: accountId }, select: { id: true } });
+    if (!account) return res.status(404).json({ error: 'Bank account not found' });
     const [bankTransactions, journalLines] = await Promise.all([
       prisma.bankTransaction.findMany({
         where: { accountId, isMatched: false },
@@ -72,6 +155,13 @@ router.post('/match', async (req, res) => {
       return res.status(400).json({ error: 'bankTransactionId and journalLineId are required' });
     }
 
+    const [transaction, journalLine] = await Promise.all([
+      prisma.bankTransaction.findFirst({ where: { id: bankTransactionId }, select: { id: true, accountId: true } }),
+      prisma.journalLine.findFirst({ where: { id: journalLineId, journalEntry: { workspaceId: req.workspace.id } }, select: { id: true, accountId: true } }),
+    ]);
+    if (!transaction || !journalLine || transaction.accountId !== journalLine.accountId) {
+      return res.status(404).json({ error: 'Matching transaction or journal line not found' });
+    }
     await prisma.bankTransaction.update({
       where: { id: bankTransactionId },
       data: { isMatched: true, matchedLineId: journalLineId },
@@ -91,6 +181,8 @@ router.post('/unmatch', async (req, res) => {
     const { bankTransactionId } = req.body;
     if (!bankTransactionId) return res.status(400).json({ error: 'bankTransactionId is required' });
 
+    const transaction = await prisma.bankTransaction.findFirst({ where: { id: bankTransactionId }, select: { id: true } });
+    if (!transaction) return res.status(404).json({ error: 'Bank transaction not found' });
     await prisma.bankTransaction.update({
       where: { id: bankTransactionId },
       data: { isMatched: false, matchedLineId: null },

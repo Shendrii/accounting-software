@@ -9,11 +9,12 @@ import {
   type Vendor, type CreateVendorInput,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import PhoneInput from '@/app/components/PhoneInput';
 
 const emptyForm: CreateVendorInput = { name: '', email: '', phone: '', address: '' };
 
-export default function VendorsPage() {
+export function VendorsPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -298,4 +299,8 @@ export default function VendorsPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyVendorsPage() {
+  return <LegacyRedirect to="/purchases/vendors" />;
 }

@@ -3,23 +3,17 @@
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import {
-  Home,
-  BookOpen,
-  Receipt,
   Menu,
   X,
-  Users,
-  Building2,
-  FileText,
-  BarChart3,
-  RefreshCw,
   Plus,
   Loader2,
 } from 'lucide-react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
-import { createWorkspace, fetchWorkspaces, inviteWorkspaceMember, type AuthWorkspace } from '@/lib/api';
-import { clearSession, getCurrentUser, getWorkspaceId, setWorkspaceId } from '@/lib/auth';
+import { createWorkspace, fetchWorkspaces, getReceipts, inviteWorkspaceMember, type AuthWorkspace } from '@/lib/api';
+import { getCurrentUser, getWorkspaceId, isAuthenticated, setWorkspaceId } from '@/lib/auth';
+import { navigationClusters, type NavigationItem } from '@/lib/navigation';
+import { hideAppChrome } from '@/lib/public-paths';
 
 /* ── Reusable modal dialog ─────────────────────────────────────────────── */
 function Modal({
@@ -47,37 +41,18 @@ function Modal({
   );
 }
 
-const navigation = [
-  { name: 'Home', href: '/', icon: Home },
-  { name: 'Bookkeeping', href: '/bookkeeping', icon: BookOpen },
-  { name: 'Receipts', href: '/receipts', icon: Receipt },
-];
-
-const receivablesNav = [
-  { name: 'Customers', href: '/customers', icon: Users },
-  { name: 'Invoices', href: '/invoices', icon: FileText },
-];
-
-const payablesNav = [
-  { name: 'Vendors', href: '/vendors', icon: Building2 },
-  { name: 'Bills', href: '/bills', icon: FileText },
-];
-
-const toolsNav = [
-  { name: 'Reports', href: '/reports', icon: BarChart3 },
-  { name: 'Reconciliation', href: '/reconciliation', icon: RefreshCw },
-];
-
 function NavSection({
   title,
   items,
   pathname,
   onClose,
+  inboxCount,
 }: {
   title: string;
-  items: { name: string; href: string; icon: React.ElementType }[];
+  items: NavigationItem[];
   pathname: string;
   onClose: () => void;
+  inboxCount: number;
 }) {
   return (
     <div className="mb-4">
@@ -100,6 +75,11 @@ function NavSection({
           >
             <item.icon className="h-4 w-4" />
             <span>{item.name}</span>
+            {item.badge === 'inbox' && inboxCount > 0 && (
+              <span className="ml-auto min-w-5 rounded-full bg-amber-500 px-1.5 py-0.5 text-center text-xs font-semibold text-white">
+                {inboxCount > 99 ? '99+' : inboxCount}
+              </span>
+            )}
           </Link>
         );
       })}
@@ -107,14 +87,13 @@ function NavSection({
   );
 }
 
-const HIDDEN_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite']);
-
 export default function SideNav() {
   const pathname = usePathname();
   const [isMobileMenuOpen, setIsMobileMenuOpen] = useState(false);
   const [workspaces, setWorkspaces] = useState<AuthWorkspace[]>([]);
   const [workspaceId, setWs] = useState<string | null>(null);
   const [currentUserName, setCurrentUserName] = useState<string>('');
+  const [inboxCount, setInboxCount] = useState(0);
   const [wsDropdownOpen, setWsDropdownOpen] = useState(false);
   const wsDropdownRef = useRef<HTMLDivElement>(null);
 
@@ -150,6 +129,8 @@ export default function SideNav() {
   }, [wsDropdownOpen, handleOutsideClick]);
 
   useEffect(() => {
+    if (hideAppChrome(pathname, isAuthenticated()) || !isAuthenticated()) return;
+
     const me = getCurrentUser();
     if (me?.name) setCurrentUserName(me.name);
     setWs(getWorkspaceId());
@@ -162,7 +143,8 @@ export default function SideNav() {
         }
       })
       .catch(() => {});
-  }, []);
+    getReceipts('PENDING').then((receipts) => setInboxCount(receipts.length)).catch(() => {});
+  }, [pathname]);
 
   useEffect(() => {
     if (showNewWs) { setNewWsName(''); setNewWsError(''); setTimeout(() => newWsInputRef.current?.focus(), 50); }
@@ -217,12 +199,7 @@ export default function SideNav() {
     window.location.reload();
   }
 
-  function onLogout() {
-    clearSession();
-    window.location.href = '/login';
-  }
-
-  if (HIDDEN_PATHS.has(pathname)) return null;
+  if (hideAppChrome(pathname, isAuthenticated())) return null;
 
   return (
     <>
@@ -252,12 +229,12 @@ export default function SideNav() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 h-full w-64 bg-white dark:bg-zinc-950 border-r border-zinc-200 dark:border-zinc-800 z-40 transition-transform duration-300 ease-in-out',
+          'fixed left-0 top-0 z-40 flex h-svh w-64 flex-col border-r border-zinc-200 bg-white transition-transform duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950',
           'lg:translate-x-0',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         )}
       >
-        <div className="flex flex-col h-full overflow-y-auto">
+        <div className="flex min-h-0 flex-1 flex-col">
           {/* Logo/Brand */}
           <div className="h-16 flex items-center px-6 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
             <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Accounting</h1>
@@ -300,63 +277,50 @@ export default function SideNav() {
                 </div>
               )}
             </div>
-            <button
-              onClick={() => setShowNewWs(true)}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-900/50"
-            >
-              <Plus className="h-3.5 w-3.5" />
-              New workspace
-            </button>
-            <button
-              onClick={() => setShowInvite(true)}
-              disabled={!workspaceId}
-              className="w-full flex items-center justify-center gap-1.5 px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm hover:bg-zinc-50 dark:hover:bg-zinc-900/50 disabled:opacity-50"
-            >
-              Invite member
-            </button>
           </div>
 
           {/* Navigation */}
-          <nav className="flex-1 px-4 py-4">
-            {/* Main */}
-            <div className="mb-4">
-              {navigation.map((item) => {
-                const isActive =
-                  pathname === item.href ||
-                  (item.href !== '/' && pathname.startsWith(item.href));
-                return (
-                  <Link
-                    key={item.name}
-                    href={item.href}
-                    onClick={closeMenu}
-                    className={cn(
-                      'flex items-center gap-3 px-4 py-2.5 rounded-lg text-sm font-medium transition-all duration-200',
-                      isActive
-                        ? 'bg-zinc-100 dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50'
-                        : 'text-zinc-600 dark:text-zinc-400 hover:bg-zinc-50 dark:hover:bg-zinc-900/50 hover:text-zinc-900 dark:hover:text-zinc-50'
-                    )}
-                  >
-                    <item.icon className="h-4 w-4" />
-                    <span>{item.name}</span>
-                  </Link>
-                );
-              })}
-            </div>
-
-            <div className="border-t border-zinc-100 dark:border-zinc-800 pt-4">
-              <NavSection title="Receivables" items={receivablesNav} pathname={pathname} onClose={closeMenu} />
-              <NavSection title="Payables" items={payablesNav} pathname={pathname} onClose={closeMenu} />
-              <NavSection title="Tools" items={toolsNav} pathname={pathname} onClose={closeMenu} />
-            </div>
+          <nav className="min-h-0 flex-1 overflow-y-auto px-4 py-4">
+            <Link
+              href="/"
+              onClick={closeMenu}
+              className={cn(
+                'mb-4 flex items-center gap-3 rounded-lg px-4 py-2.5 text-sm font-medium transition-all duration-200',
+                pathname === '/' ? 'bg-zinc-100 text-zinc-900 dark:bg-zinc-900 dark:text-zinc-50' : 'text-zinc-600 hover:bg-zinc-50 hover:text-zinc-900 dark:text-zinc-400 dark:hover:bg-zinc-900/50 dark:hover:text-zinc-50'
+              )}
+            >
+              Overview
+            </Link>
+            {navigationClusters.map((cluster, index) => (
+              <div key={cluster.label} className={index ? 'border-t border-zinc-100 pt-4 dark:border-zinc-800' : ''}>
+                <NavSection title={cluster.label} items={cluster.items} pathname={pathname} onClose={closeMenu} inboxCount={inboxCount} />
+              </div>
+            ))}
           </nav>
 
-          {/* Footer — just shows current user name; logout is in the profile button (top-right) */}
-          <div className="px-4 py-3 border-t border-zinc-200 dark:border-zinc-800 flex-shrink-0">
-            <p className="text-xs text-zinc-500 truncate">
-              {currentUserName ? `Signed in as ${currentUserName}` : 'Signed in'}
-            </p>
-          </div>
         </div>
+
+          {/* Profile pinned to bottom-left */}
+          <div className="shrink-0 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+            <div className="flex items-center gap-3">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-zinc-900 text-xs font-bold text-white dark:bg-zinc-50 dark:text-zinc-900">
+                {(currentUserName || 'A')
+                  .split(/\s+/)
+                  .slice(0, 2)
+                  .map((part) => part[0])
+                  .join('')
+                  .toUpperCase()}
+              </span>
+              <div className="min-w-0">
+                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+                  {currentUserName || 'Signed in'}
+                </p>
+                <p className="truncate text-xs text-zinc-500">
+                  {workspaces.find((w) => w.id === workspaceId)?.name ?? 'Workspace'}
+                </p>
+              </div>
+            </div>
+          </div>
       </aside>
 
       {/* Spacer for desktop */}

@@ -1,6 +1,7 @@
 'use client';
 
 import { useState, useEffect, useCallback } from 'react';
+import Link from 'next/link';
 import { BarChart3, Loader2, Download, RefreshCw } from 'lucide-react';
 import {
   getProfitLoss, getBalanceSheet, getTrialBalance,
@@ -477,6 +478,9 @@ export default function ReportsPage() {
         <div className="flex items-center gap-3 mb-8">
           <BarChart3 className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Reports</h1>
+        </div>
+        <div className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
+          Reports are read-only. Review variances in <Link href="/purchases" className="font-medium text-blue-600 hover:underline">Purchases</Link>, collection issues in <Link href="/sales" className="font-medium text-blue-600 hover:underline">Sales</Link>, and posting issues in <Link href="/ledger" className="font-medium text-blue-600 hover:underline">Ledger and close</Link>.
         </div>
 
         {/* Tabs */}

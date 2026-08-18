@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { Plus, Search, FileText, Loader2, AlertCircle, RefreshCw } from 'lucide-react';
 import { getInvoices, type Invoice, type InvoiceStatus } from '@/lib/api';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 const STATUS_COLORS: Record<InvoiceStatus, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -74,7 +75,7 @@ function InvoicesContent() {
             <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Invoices</h1>
           </div>
           <Link
-            href="/invoices/new"
+            href="/sales/invoices/new"
             className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -124,7 +125,7 @@ function InvoicesContent() {
           ) : filtered.length === 0 ? (
             <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
               No invoices found.{' '}
-              <Link href="/invoices/new" className="text-zinc-700 dark:text-zinc-300 underline">
+              <Link href="/sales/invoices/new" className="text-zinc-700 dark:text-zinc-300 underline">
                 Create one
               </Link>
             </div>
@@ -157,7 +158,7 @@ function InvoicesContent() {
                     </td>
                     <td className="px-4 py-3">
                       <Link
-                        href={`/invoices/${inv.id}`}
+                        href={`/sales/invoices/${inv.id}`}
                         className="text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50"
                       >
                         View →
@@ -174,7 +175,7 @@ function InvoicesContent() {
   );
 }
 
-export default function InvoicesPage() {
+export function InvoicesPage() {
   return (
     <Suspense fallback={
       <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
@@ -184,4 +185,8 @@ export default function InvoicesPage() {
       <InvoicesContent />
     </Suspense>
   );
+}
+
+export default function LegacyInvoicesPage() {
+  return <LegacyRedirect to="/sales/invoices" />;
 }

@@ -6,6 +6,7 @@ import Link from 'next/link';
 import { Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { getCustomers, getAccounts, createInvoice, type Customer, type Account, type InvoiceLineInput } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 interface LineItem {
   description: string;
@@ -23,7 +24,7 @@ const emptyLine = (): LineItem => ({
   accountId: '',
 });
 
-export default function NewInvoicePage() {
+export function NewInvoicePage() {
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -87,7 +88,7 @@ export default function NewInvoicePage() {
         })),
       });
       toast.success('Invoice created');
-      router.push(`/invoices/${invoice.id}`);
+      router.push(`/sales/invoices/${invoice.id}`);
     } catch (err: unknown) {
       setError(err instanceof Error ? err.message : 'Failed to create invoice');
       setSaving(false);
@@ -118,7 +119,7 @@ export default function NewInvoicePage() {
     <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center gap-3 mb-8">
-          <Link href="/invoices" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <Link href="/sales/invoices" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <ArrowLeft className="h-5 w-5 text-zinc-600" />
           </Link>
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">New Invoice</h1>
@@ -296,7 +297,7 @@ export default function NewInvoicePage() {
 
           <div className="flex justify-end gap-3">
             <Link
-              href="/invoices"
+              href="/sales/invoices"
               className="px-5 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
             >
               Cancel
@@ -314,4 +315,8 @@ export default function NewInvoicePage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyNewInvoicePage() {
+  return <LegacyRedirect to="/sales/invoices/new" />;
 }

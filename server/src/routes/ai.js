@@ -10,7 +10,7 @@ const router = express.Router();
  * Builds a financial snapshot from live DB and sends it as context to GPT-3.5.
  */
 router.post('/chat', async (req, res) => {
-  const { message } = req.body;
+  const { message, context: requestedContext } = req.body;
   if (!message || typeof message !== 'string') {
     return res.status(400).json({ error: 'message is required' });
   }
@@ -140,8 +140,11 @@ router.post('/chat', async (req, res) => {
 
     const fmt = (n) => `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
 
+    const tab = typeof requestedContext?.tab === 'string' ? requestedContext.tab.slice(0, 40) : 'overview';
+    const item = typeof requestedContext?.item === 'string' ? requestedContext.item.slice(0, 200) : '';
     const context = `
 You are an AI financial assistant embedded in an accounting application. Here is the current financial snapshot as of ${now.toDateString()}:
+The user is working in the "${tab}" tab${item ? ` on ${item}` : ''}. Prioritize guidance relevant to that workflow and item. Do not claim to have reviewed an item unless it is included in the financial data below.
 
 CASH & BANK:
 - Total cash balance: ${fmt(totalCash)}

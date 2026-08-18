@@ -9,6 +9,7 @@ import {
   type Bill, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 const STATUS_COLORS: Record<string, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -25,7 +26,7 @@ function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
 }
 
-export default function BillDetailPage() {
+export function BillDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [bill, setBill] = useState<Bill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -115,7 +116,7 @@ export default function BillDetailPage() {
     <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
       <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
         <div className="flex items-center gap-3 mb-8">
-          <Link href="/bills" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
+          <Link href="/purchases/bills" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
             <ArrowLeft className="h-5 w-5 text-zinc-600" />
           </Link>
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">{bill.billNo}</h1>
@@ -259,4 +260,8 @@ export default function BillDetailPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyBillDetailPage() {
+  return <LegacyRedirect to="/purchases/bills" preserveLastSegment />;
 }

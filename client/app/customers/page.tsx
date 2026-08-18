@@ -9,6 +9,7 @@ import {
   type Customer, type CreateCustomerInput,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import ComboBox from '@/app/components/ComboBox';
 import PhoneInput from '@/app/components/PhoneInput';
 import { COUNTRY_NAMES, getCities } from '@/lib/countries';
@@ -17,7 +18,7 @@ const emptyForm: CreateCustomerInput = {
   name: '', email: '', phone: '', address: '', city: '', country: '',
 };
 
-export default function CustomersPage() {
+export function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
@@ -356,4 +357,8 @@ export default function CustomersPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyCustomersPage() {
+  return <LegacyRedirect to="/sales/customers" />;
 }

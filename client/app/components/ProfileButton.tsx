@@ -4,8 +4,7 @@ import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { LogOut, User } from 'lucide-react';
 import { clearSession, getCurrentUser, isAuthenticated } from '@/lib/auth';
-
-const HIDDEN_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite']);
+import { hideAppChrome } from '@/lib/public-paths';
 
 export function ProfileButton() {
   const pathname = usePathname();
@@ -37,7 +36,7 @@ export function ProfileButton() {
     return () => document.removeEventListener('mousedown', onOutside);
   }, [open]);
 
-  if (HIDDEN_PATHS.has(pathname) || !isAuthenticated()) return null;
+  if (hideAppChrome(pathname, isAuthenticated()) || !isAuthenticated()) return null;
 
   function onLogout() {
     clearSession();

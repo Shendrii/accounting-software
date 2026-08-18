@@ -1,13 +1,14 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Upload, CheckCircle, XCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
+import { RefreshCw, Upload, CheckCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
 import {
   getAccounts, getReconciliationData, importBankTransactions, importCSVTransactions, matchTransaction,
-  unmatchTransaction, completeReconciliation,
-  type Account, type BankTransaction, type ReconciliationData,
+  completeReconciliation, getBankMatchSuggestions,
+  type Account, type BankMatchSuggestion, type BankTransaction, type ReconciliationData,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 type JournalLineWithEntry = ReconciliationData['journalLines'][number];
 
@@ -25,13 +26,14 @@ interface ImportRow {
   amount: string;
 }
 
-export default function ReconciliationPage() {
+export function ReconciliationPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
   const [statementDate, setStatementDate] = useState(new Date().toISOString().split('T')[0]);
   const [statementBalance, setStatementBalance] = useState('');
   const [data, setData] = useState<ReconciliationData | null>(null);
+  const [suggestions, setSuggestions] = useState<BankMatchSuggestion[]>([]);
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
@@ -59,8 +61,12 @@ export default function ReconciliationPage() {
     setLoading(true);
     setError(null);
     try {
-      const rec = await getReconciliationData(selectedAccountId);
+      const [rec, suggestionData] = await Promise.all([
+        getReconciliationData(selectedAccountId),
+        getBankMatchSuggestions(selectedAccountId),
+      ]);
       setData(rec);
+      setSuggestions(suggestionData.suggestions);
       setStep(2);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to load reconciliation data');
@@ -75,20 +81,12 @@ export default function ReconciliationPage() {
       await matchTransaction(selectedBank, selectedLine);
       const rec = await getReconciliationData(selectedAccountId);
       setData(rec);
+      const suggestionData = await getBankMatchSuggestions(selectedAccountId);
+      setSuggestions(suggestionData.suggestions);
       setSelectedBank(null);
       setSelectedLine(null);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to match transaction');
-    }
-  }
-
-  async function handleUnmatch(bankId: string) {
-    try {
-      await unmatchTransaction(bankId);
-      const rec = await getReconciliationData(selectedAccountId);
-      setData(rec);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to unmatch');
     }
   }
 
@@ -283,10 +281,14 @@ export default function ReconciliationPage() {
                     <p className="text-sm text-zinc-400 p-4">No unmatched bank transactions.</p>
                   ) : (
                     data.bankTransactions.map((bt: BankTransaction) => (
-                      <div
-                        key={bt.id}
-                        onClick={() => setSelectedBank(selectedBank === bt.id ? null : bt.id)}
-                        className={`flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0 cursor-pointer transition-colors ${
+                      <div key={bt.id} className={`border-b border-zinc-100 dark:border-zinc-800 last:border-0 ${
+                        selectedBank === bt.id
+                          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200'
+                          : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
+                      }`}>
+                        <button
+                          onClick={() => setSelectedBank(selectedBank === bt.id ? null : bt.id)}
+                          className={`flex w-full items-center justify-between px-4 py-3 text-left cursor-pointer transition-colors ${
                           selectedBank === bt.id
                             ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200'
                             : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
@@ -299,6 +301,22 @@ export default function ReconciliationPage() {
                         <span className={`text-sm font-bold ${parseFloat(bt.amount.toString()) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
                           {formatCurrency(bt.amount)}
                         </span>
+                        </button>
+                        {(suggestions.find((suggestion) => suggestion.bankTransactionId === bt.id)?.candidates.length ?? 0) > 0 && (
+                          <div className="space-y-1 border-t border-blue-100 px-4 py-2 dark:border-blue-900/40">
+                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Likely matches</p>
+                            {suggestions.find((suggestion) => suggestion.bankTransactionId === bt.id)?.candidates.map((candidate) => (
+                              <button
+                                key={candidate.journalLineId}
+                                onClick={() => { setSelectedBank(bt.id); setSelectedLine(candidate.journalLineId); }}
+                                className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-blue-100 dark:hover:bg-blue-900/40"
+                              >
+                                <span>{candidate.source.label} · {candidate.description}</span>
+                                <span className="font-medium">{candidate.exactAmount ? 'Exact amount' : 'Near match'} · {Math.round(candidate.dateDistance)}d</span>
+                              </button>
+                            ))}
+                          </div>
+                        )}
                       </div>
                     ))
                   )}
@@ -460,4 +478,8 @@ export default function ReconciliationPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyReconciliationPage() {
+  return <LegacyRedirect to="/banking" />;
 }

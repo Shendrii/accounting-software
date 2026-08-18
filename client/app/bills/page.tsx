@@ -5,6 +5,7 @@ import Link from 'next/link';
 import { Plus, Search, FileText, Loader2, AlertCircle, RefreshCw, Repeat } from 'lucide-react';
 import { getBills, getRecurringBills, triggerRecurring, type Bill, type BillStatus } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 const STATUS_COLORS: Record<BillStatus, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -28,7 +29,7 @@ const INTERVAL_LABELS: Record<string, string> = {
   yearly: 'Yearly',
 };
 
-export default function BillsPage() {
+export function BillsPage() {
   const [bills, setBills] = useState<Bill[]>([]);
   const [recurringBills, setRecurringBills] = useState<Bill[]>([]);
   const [loading, setLoading] = useState(true);
@@ -89,7 +90,7 @@ export default function BillsPage() {
             <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Bills</h1>
           </div>
           <Link
-            href="/bills/new"
+            href="/purchases/bills/new"
             className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
           >
             <Plus className="h-4 w-4" />
@@ -164,7 +165,7 @@ export default function BillsPage() {
           ) : filtered.length === 0 ? (
             <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
               No bills found.{' '}
-              <Link href="/bills/new" className="text-zinc-700 dark:text-zinc-300 underline">
+              <Link href="/purchases/bills/new" className="text-zinc-700 dark:text-zinc-300 underline">
                 Create one
               </Link>
             </div>
@@ -204,7 +205,7 @@ export default function BillsPage() {
                     </td>
                     <td className="px-4 py-3">
                       <Link
-                        href={`/bills/${bill.id}`}
+                        href={`/purchases/bills/${bill.id}`}
                         className="text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50"
                       >
                         View →
@@ -237,7 +238,7 @@ export default function BillsPage() {
               {recurringBills.length === 0 ? (
                 <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
                   No recurring bills yet.{' '}
-                  <Link href="/bills/new" className="text-zinc-700 dark:text-zinc-300 underline">
+                  <Link href="/purchases/bills/new" className="text-zinc-700 dark:text-zinc-300 underline">
                     Create a bill
                   </Link>{' '}
                   and check &ldquo;Make this recurring&rdquo;.
@@ -267,7 +268,7 @@ export default function BillsPage() {
                         </td>
                         <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(bill.total)}</td>
                         <td className="px-4 py-3">
-                          <Link href={`/bills/${bill.id}`} className="text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50">
+                          <Link href={`/purchases/bills/${bill.id}`} className="text-xs font-medium text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50">
                             View →
                           </Link>
                         </td>
@@ -282,4 +283,8 @@ export default function BillsPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyBillsPage() {
+  return <LegacyRedirect to="/purchases/bills" />;
 }

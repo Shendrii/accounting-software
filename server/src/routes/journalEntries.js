@@ -26,6 +26,9 @@ router.get('/', async (req, res) => {
             account: true,
           },
         },
+        receipt: { include: { vendor: { select: { name: true } } } },
+        invoices: { include: { customer: { select: { name: true } } } },
+        bills: { include: { vendor: { select: { name: true } } } },
       },
       orderBy: {
         date: 'desc',
@@ -49,6 +52,9 @@ router.get('/:id', async (req, res) => {
             account: true,
           },
         },
+        receipt: { include: { vendor: { select: { name: true } } } },
+        invoices: { include: { customer: { select: { name: true } } } },
+        bills: { include: { vendor: { select: { name: true } } } },
       },
     });
 

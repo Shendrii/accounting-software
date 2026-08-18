@@ -1,8 +1,11 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import { usePathname } from 'next/navigation';
 import { Bot, Send, X, Loader2, Sparkles } from 'lucide-react';
 import { sendAiMessage } from '@/lib/api';
+import { isAuthenticated } from '@/lib/auth';
+import { hideAppChrome } from '@/lib/public-paths';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -17,6 +20,7 @@ const SUGGESTIONS = [
 ];
 
 export function AIChatPanel() {
+  const pathname = usePathname();
   const [open, setOpen] = useState(false);
   const [messages, setMessages] = useState<Message[]>([]);
   const [input, setInput] = useState('');
@@ -38,7 +42,10 @@ export function AIChatPanel() {
     setMessages((prev) => [...prev, { role: 'user', content: msg }]);
     setLoading(true);
     try {
-      const { reply } = await sendAiMessage(msg);
+      const { reply } = await sendAiMessage(msg, {
+        tab: pathname.split('/')[1] || 'overview',
+        item: pathname,
+      });
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : 'Something went wrong.';
@@ -54,6 +61,8 @@ export function AIChatPanel() {
       sendMessage();
     }
   }
+
+  if (hideAppChrome(pathname, isAuthenticated())) return null;
 
   return (
     <>
@@ -75,7 +84,7 @@ export function AIChatPanel() {
             <Bot className="h-5 w-5 text-white" />
             <div className="flex-1">
               <p className="text-sm font-semibold text-white">AI Financial Assistant</p>
-              <p className="text-xs text-blue-200">Ask anything about your books</p>
+              <p className="text-xs text-blue-200">Context: {pathname.split('/')[1] || 'overview'}</p>
             </div>
             <button onClick={() => setOpen(false)} className="text-white/70 hover:text-white" aria-label="Close AI panel">
               <X className="h-4 w-4" />

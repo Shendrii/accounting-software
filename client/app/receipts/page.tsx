@@ -19,8 +19,9 @@ import {
 } from '@/lib/api';
 import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-export default function ReceiptsPage() {
+export function ReceiptsPage() {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -324,6 +325,10 @@ export default function ReceiptsPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyReceiptsPage() {
+  return <LegacyRedirect to="/inbox" />;
 }
 
 const CATEGORY_SUGGESTIONS = ['Office Supplies', 'Travel', 'Meals', 'Utilities', 'Software', 'Other'];

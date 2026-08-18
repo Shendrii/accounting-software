@@ -1,23 +1,29 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { getAccounts, getJournalEntries, type Account, type JournalEntry } from '@/lib/api';
+import { useSearchParams } from 'next/navigation';
+import { getAccounts, getCloseChecklist, getJournalEntries, type Account, type CloseChecklist, type JournalEntry } from '@/lib/api';
 import CreateAccountForm from '@/app/components/CreateAccountForm';
 import EditAccountForm from '@/app/components/EditAccountForm';
 import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
 import EditJournalEntryForm from '@/app/components/EditJournalEntryForm';
-import { Plus, BookOpen, FileText, Edit2, Search, Filter, X, ChevronRight, ChevronDown, DollarSign, Calendar, Hash } from 'lucide-react';
+import { Plus, BookOpen, FileText, Edit2, Search, X, ChevronRight, ChevronDown, DollarSign, Calendar, Hash } from 'lucide-react';
+import Link from 'next/link';
+import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-export default function BookkeepingPage() {
-  const [activeTab, setActiveTab] = useState<'accounts' | 'journal'>('accounts');
+export function BookkeepingPage() {
+  const searchParams = useSearchParams();
+  const [activeTab, setActiveTab] = useState<'accounts' | 'journal'>(searchParams.get('tab') === 'journal' ? 'journal' : 'accounts');
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
-  const [showCreateJournalForm, setShowCreateJournalForm] = useState(false);
+  const [showCreateJournalForm, setShowCreateJournalForm] = useState(searchParams.get('new') === '1');
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editingJournalEntry, setEditingJournalEntry] = useState<JournalEntry | null>(null);
+  const [closeChecklist, setCloseChecklist] = useState<CloseChecklist | null>(null);
+  const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   
   // Account filters
   const [accountSearch, setAccountSearch] = useState('');
@@ -33,6 +39,7 @@ export default function BookkeepingPage() {
 
   useEffect(() => {
     loadData();
+    getCloseChecklist().then(setCloseChecklist).catch(() => {});
   }, []);
 
   const loadData = async () => {
@@ -135,12 +142,24 @@ export default function BookkeepingPage() {
         {/* Header */}
         <div className="mb-8">
           <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-            Bookkeeping
+            Ledger and close
           </h1>
           <p className="text-zinc-600 dark:text-zinc-400">
-            Manage your chart of accounts and record journal entries
+            Manage your chart of accounts, journal entries, and period-close readiness.
           </p>
         </div>
+        {closeChecklist && (
+          <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
+            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Close checklist</h2><span className={closeChecklist.trialBalanceBalanced ? 'text-xs text-emerald-600' : 'text-xs text-red-600'}>{closeChecklist.trialBalanceBalanced ? 'Trial balance is balanced' : 'Trial balance needs attention'}</span></div>
+            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
+              <Link href="/ledger?tab=journal" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.draftJournalEntries}</strong><span className="block text-xs text-zinc-500">unposted entries</span></Link>
+              <Link href="/banking" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.unmatchedBankTransactions}</strong><span className="block text-xs text-zinc-500">unmatched bank items</span></Link>
+              <Link href="/sales" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.overdueInvoices}</strong><span className="block text-xs text-zinc-500">overdue AR</span></Link>
+              <Link href="/purchases" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.overdueBills}</strong><span className="block text-xs text-zinc-500">overdue AP</span></Link>
+              <Link href="/inbox" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.pendingReceipts}</strong><span className="block text-xs text-zinc-500">receipt reviews</span></Link>
+            </div>
+          </div>
+        )}
 
         {/* Tabs */}
         <div className="mb-6 border-b border-zinc-200 dark:border-zinc-800">
@@ -649,9 +668,14 @@ export default function BookkeepingPage() {
                       {filteredJournalEntries.map((entry) => {
                         const totalDebit = entry.journalLines.reduce((sum, line) => sum + parseFloat(line.debit), 0);
                         const accountNames = entry.journalLines.map(line => line.account?.name || 'Unknown').join(', ');
+                        const sourceLabels = [
+                          entry.receipt && `Receipt${entry.receipt.vendor?.name ? ` · ${entry.receipt.vendor.name}` : ''}`,
+                          ...(entry.invoices ?? []).map((invoice) => `Invoice ${invoice.invoiceNo}${invoice.customer?.name ? ` · ${invoice.customer.name}` : ''}`),
+                          ...(entry.bills ?? []).map((bill) => `Bill ${bill.billNo}${bill.vendor?.name ? ` · ${bill.vendor.name}` : ''}`),
+                        ].filter(Boolean);
                         return (
+                          <React.Fragment key={entry.id}>
                           <tr
-                            key={entry.id}
                             className="hover:bg-zinc-50 dark:hover:bg-zinc-900/50 transition-colors"
                           >
                             <td className="px-6 py-4 whitespace-nowrap text-sm text-zinc-900 dark:text-zinc-50">
@@ -692,15 +716,22 @@ export default function BookkeepingPage() {
                               </span>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap text-right">
-                              <button
-                                onClick={() => setEditingJournalEntry(entry)}
-                                className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
-                                title="Edit entry"
-                              >
-                                <Edit2 className="h-4 w-4" />
-                              </button>
+                              <div className="flex justify-end gap-3">
+                                {sourceLabels.length > 0 && <button onClick={() => setExpandedSources((current) => { const next = new Set(current); if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id); return next; })} className="text-xs font-medium text-blue-600 hover:underline">View source</button>}
+                                <button
+                                  onClick={() => setEditingJournalEntry(entry)}
+                                  className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
+                                  title="Edit entry"
+                                >
+                                  <Edit2 className="h-4 w-4" />
+                                </button>
+                              </div>
                             </td>
                           </tr>
+                          {expandedSources.has(entry.id) && (
+                            <tr className="bg-zinc-50 dark:bg-zinc-900/40"><td colSpan={6} className="px-6 py-3 text-sm text-zinc-600 dark:text-zinc-300"><span className="mr-2 font-medium">Generated by:</span>{sourceLabels.join(' · ')}</td></tr>
+                          )}
+                          </React.Fragment>
                         );
                       })}
                     </tbody>
@@ -713,4 +744,8 @@ export default function BookkeepingPage() {
       </div>
     </div>
   );
+}
+
+export default function LegacyBookkeepingPage() {
+  return <LegacyRedirect to="/ledger" />;
 }

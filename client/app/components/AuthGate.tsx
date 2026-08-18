@@ -3,30 +3,43 @@
 import { useEffect, useState } from 'react';
 import { usePathname, useRouter } from 'next/navigation';
 import { isAuthenticated } from '@/lib/auth';
+import { isPublicPath } from '@/lib/public-paths';
 
-const PUBLIC_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite']);
-/** Logged-in users hitting these are sent home (OAuth callback stays reachable while finishing sign-in). */
 const LOGIN_SIGNUP_PATHS = new Set(['/login', '/signup']);
 
 export function AuthGate({ children }: { children: React.ReactNode }) {
   const pathname = usePathname();
   const router = useRouter();
   const [ready, setReady] = useState(false);
+  const isPublic = pathname ? isPublicPath(pathname) : false;
 
   useEffect(() => {
-    const authed = isAuthenticated();
-    const isPublic = PUBLIC_PATHS.has(pathname);
+    if (!pathname || isPublicPath(pathname)) return;
 
-    if (!authed && !isPublic) {
+    const authed = isAuthenticated();
+    if (!authed) {
       router.replace('/login');
       return;
     }
-    if (authed && LOGIN_SIGNUP_PATHS.has(pathname)) {
+    if (LOGIN_SIGNUP_PATHS.has(pathname)) {
       router.replace('/');
       return;
     }
     setReady(true);
   }, [pathname, router]);
+
+  // Public routes (landing, portfolio previews) render immediately — no auth redirect.
+  if (isPublic) {
+    return <>{children}</>;
+  }
+
+  if (!pathname) {
+    return (
+      <div className="min-h-screen flex items-center justify-center text-zinc-500">
+        Loading...
+      </div>
+    );
+  }
 
   if (!ready) {
     return (
@@ -37,4 +50,3 @@ export function AuthGate({ children }: { children: React.ReactNode }) {
   }
   return <>{children}</>;
 }
-
