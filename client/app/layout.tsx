@@ -2,7 +2,6 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SideNav from "./components/SideNav";
-import { ProfileButton } from "./components/ProfileButton";
 import { ToastProvider } from "./components/Toast";
 import { AIChatPanel } from "./components/AIChatPanel";
 import { AuthGate } from "./components/AuthGate";
@@ -29,16 +28,13 @@ export default function RootLayout({
   children: React.ReactNode;
 }>) {
   return (
-    <html lang="en">
+    <html lang="en" style={{ colorScheme: "light" }}>
       <body
-        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-50 dark:bg-zinc-950`}
+        className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-50 text-zinc-900`}
       >
         <AuthGate>
           <SideNav />
-          <ProfileButton />
-          <main className="min-h-screen">
-            {children}
-          </main>
+          <main className="min-h-screen">{children}</main>
           <ToastProvider />
           <AIChatPanel />
         </AuthGate>

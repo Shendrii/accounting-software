@@ -7,11 +7,12 @@ import {
   X,
   Plus,
   Loader2,
+  LogOut,
 } from 'lucide-react';
 import { useEffect, useRef, useState, useCallback } from 'react';
 import { cn } from '@/lib/utils';
 import { createWorkspace, fetchWorkspaces, getReceipts, inviteWorkspaceMember, type AuthWorkspace } from '@/lib/api';
-import { getCurrentUser, getWorkspaceId, isAuthenticated, setWorkspaceId } from '@/lib/auth';
+import { getCurrentUser, getWorkspaceId, isAuthenticated, setWorkspaceId, clearSession } from '@/lib/auth';
 import { navigationClusters, type NavigationItem } from '@/lib/navigation';
 import { hideAppChrome } from '@/lib/public-paths';
 import { PRODUCT_NAME } from '@/lib/brand';
@@ -200,6 +201,11 @@ export default function SideNav() {
     window.location.reload();
   }
 
+  function onLogout() {
+    clearSession();
+    window.location.href = '/login';
+  }
+
   if (hideAppChrome(pathname, isAuthenticated())) return null;
 
   return (
@@ -230,7 +236,7 @@ export default function SideNav() {
       {/* Sidebar */}
       <aside
         className={cn(
-          'fixed left-0 top-0 z-40 flex h-svh w-64 flex-col border-r border-zinc-200 bg-white transition-transform duration-300 ease-in-out dark:border-zinc-800 dark:bg-zinc-950',
+          'fixed left-0 top-0 z-40 flex h-svh w-64 flex-col border-r border-zinc-200 bg-white transition-transform duration-300 ease-in-out',
           'lg:translate-x-0',
           isMobileMenuOpen ? 'translate-x-0' : '-translate-x-full'
         )}
@@ -302,9 +308,9 @@ export default function SideNav() {
         </div>
 
           {/* Profile pinned to bottom-left */}
-          <div className="shrink-0 border-t border-zinc-200 px-4 py-3 dark:border-zinc-800">
+          <div className="shrink-0 border-t border-zinc-200 px-4 py-3">
             <div className="flex items-center gap-3">
-              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-zinc-900 text-xs font-bold text-white dark:bg-zinc-50 dark:text-zinc-900">
+              <span className="grid h-9 w-9 shrink-0 place-items-center rounded-full bg-zinc-900 text-xs font-bold text-white">
                 {(currentUserName || 'A')
                   .split(/\s+/)
                   .slice(0, 2)
@@ -312,14 +318,22 @@ export default function SideNav() {
                   .join('')
                   .toUpperCase()}
               </span>
-              <div className="min-w-0">
-                <p className="truncate text-sm font-semibold text-zinc-900 dark:text-zinc-50">
+              <div className="min-w-0 flex-1">
+                <p className="truncate text-sm font-semibold text-zinc-900">
                   {currentUserName || 'Signed in'}
                 </p>
                 <p className="truncate text-xs text-zinc-500">
                   {workspaces.find((w) => w.id === workspaceId)?.name ?? 'Workspace'}
                 </p>
               </div>
+              <button
+                type="button"
+                onClick={onLogout}
+                className="shrink-0 rounded-lg p-2 text-zinc-400 transition-colors hover:bg-zinc-100 hover:text-zinc-700"
+                aria-label="Log out"
+              >
+                <LogOut className="h-4 w-4" />
+              </button>
             </div>
           </div>
       </aside>

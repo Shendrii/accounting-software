@@ -21,7 +21,15 @@ import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-export function ReceiptsPage() {
+export function ReceiptsPage({
+  title = 'Receipts',
+  subtitle = 'Upload receipt images to extract data with OCR, review, and create journal entries',
+  headerAction,
+}: {
+  title?: string;
+  subtitle?: string;
+  headerAction?: React.ReactNode;
+}) {
   const [receipts, setReceipts] = useState<Receipt[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -151,15 +159,14 @@ export function ReceiptsPage() {
   });
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
+    <div className="lg:pl-64 min-h-screen bg-zinc-50">
       <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-            Receipts
-          </h1>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Upload receipt images to extract data with OCR, review, and create journal entries
-          </p>
+        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
+          <div>
+            <h1 className="text-3xl font-bold text-zinc-900 mb-2">{title}</h1>
+            <p className="text-zinc-600">{subtitle}</p>
+          </div>
+          {headerAction}
         </div>
 
         {error && (
