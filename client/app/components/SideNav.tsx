@@ -14,6 +14,7 @@ import { createWorkspace, fetchWorkspaces, getReceipts, inviteWorkspaceMember, t
 import { getCurrentUser, getWorkspaceId, isAuthenticated, setWorkspaceId } from '@/lib/auth';
 import { navigationClusters, type NavigationItem } from '@/lib/navigation';
 import { hideAppChrome } from '@/lib/public-paths';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 /* ── Reusable modal dialog ─────────────────────────────────────────────── */
 function Modal({
@@ -237,7 +238,7 @@ export default function SideNav() {
         <div className="flex min-h-0 flex-1 flex-col">
           {/* Logo/Brand */}
           <div className="h-16 flex items-center px-6 border-b border-zinc-200 dark:border-zinc-800 flex-shrink-0">
-            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">Accounting</h1>
+            <h1 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">{PRODUCT_NAME}</h1>
           </div>
 
           <div className="px-4 py-4 border-b border-zinc-200 dark:border-zinc-800 space-y-2">

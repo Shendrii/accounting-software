@@ -5,6 +5,7 @@ import { Home, Bell } from 'lucide-react';
 import { cn } from '@/lib/utils';
 import { navigationClusters } from '@/lib/navigation';
 import type { PortfolioProfile } from '@/lib/portfolio-demo-data';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 function isActivePath(pathname: string, href: string) {
   return pathname === href || (href !== '/' && pathname.startsWith(href));
@@ -28,7 +29,7 @@ export function PortfolioAppShell({
       <aside className="fixed inset-y-0 left-0 z-30 hidden h-svh w-64 flex-col border-r border-zinc-200 bg-white lg:flex">
         <div className="flex min-h-0 flex-1 flex-col">
           <div className="flex h-16 shrink-0 items-center border-b border-zinc-200 px-6">
-            <p className="text-xl font-semibold">Ledger</p>
+            <p className="text-xl font-semibold">{PRODUCT_NAME}</p>
           </div>
           <div className="shrink-0 border-b border-zinc-200 px-4 py-3">
             <div className="rounded-lg border border-zinc-200 bg-zinc-50 px-3 py-2 text-sm font-medium">{workspaceName}</div>

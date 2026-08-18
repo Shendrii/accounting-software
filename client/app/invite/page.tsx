@@ -1,7 +1,7 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { useRouter, useSearchParams } from 'next/navigation';
+import { Suspense, useEffect, useState } from 'react';
+import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, CheckCircle, XCircle } from 'lucide-react';
 import { acceptWorkspaceInvite, fetchWorkspaces } from '@/lib/api';
@@ -9,8 +9,7 @@ import { isAuthenticated, setWorkspaceId } from '@/lib/auth';
 
 type State = 'loading' | 'needs_login' | 'accepting' | 'success' | 'error';
 
-export default function InvitePage() {
-  const router = useRouter();
+function InvitePageContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
@@ -32,7 +31,6 @@ export default function InvitePage() {
     setState('accepting');
     acceptWorkspaceInvite(token)
       .then(async () => {
-        // Refresh workspaces and switch to the new one
         try {
           const workspaces = await fetchWorkspaces();
           if (workspaces.length > 0) {
@@ -110,7 +108,6 @@ export default function InvitePage() {
     );
   }
 
-  // error
   return (
     <div className="min-h-screen flex items-center justify-center px-4 bg-zinc-50 dark:bg-zinc-950">
       <div className="w-full max-w-sm bg-white dark:bg-zinc-900 border border-zinc-200 dark:border-zinc-800 rounded-xl p-6 shadow-sm text-center space-y-4">
@@ -122,5 +119,19 @@ export default function InvitePage() {
         </Link>
       </div>
     </div>
+  );
+}
+
+export default function InvitePage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+          <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
+        </div>
+      }
+    >
+      <InvitePageContent />
+    </Suspense>
   );
 }

@@ -1,13 +1,12 @@
 import Link from 'next/link';
 import { ArrowRight, BookOpenCheck, Inbox, Landmark, ShieldCheck } from 'lucide-react';
+import { PRODUCT_NAME } from '@/lib/brand';
 
 export function MarketingLanding() {
   return (
     <main className="min-h-dvh bg-zinc-50 text-zinc-950" style={{ colorScheme: 'light' }}>
       <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-        <p className="text-xl font-bold tracking-tight">
-          Ledger<span className="text-blue-600">.</span>
-        </p>
+        <p className="text-xl font-bold tracking-tight">{PRODUCT_NAME}</p>
         <div className="flex gap-2">
           <Link href="/login" className="inline-flex h-11 items-center rounded-xl px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">
             Sign in
@@ -55,7 +54,7 @@ export function MarketingLanding() {
 
       <section className="border-y border-zinc-200 bg-white py-14">
         <div className="mx-auto max-w-7xl px-6">
-          <h2 className="text-2xl font-bold">How Ledger works</h2>
+          <h2 className="text-2xl font-bold">How {PRODUCT_NAME} works</h2>
           <div className="mt-7 grid gap-5 md:grid-cols-3">
             {[
               ['1', 'Inbox first', 'Receipts and quick entries land in one review queue.'],

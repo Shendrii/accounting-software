@@ -13,10 +13,10 @@ const outDir = join(root, "docs", "portfolio");
 const base = process.env.PORTFOLIO_BASE_URL ?? "http://localhost:3000";
 
 const shots = [
-  { file: "01-landing.png", url: "/", wait: 800, fullPage: true },
-  { file: "02-reports.png", url: "/reports-preview", wait: 800, fullPage: false },
-  { file: "03-inbox.png", url: "/portfolio-preview/inbox", wait: 1200, fullPage: false },
-  { file: "04-invoice-detail.png", url: "/portfolio-preview/invoice", wait: 1200, fullPage: false },
+  { file: "01-landing.png", url: "/", wait: 800, fullPage: true, waitForChat: false },
+  { file: "02-reports.png", url: "/reports-preview", wait: 800, fullPage: false, waitForChat: true },
+  { file: "03-inbox.png", url: "/portfolio-preview/inbox", wait: 1200, fullPage: false, waitForChat: true },
+  { file: "04-invoice-detail.png", url: "/portfolio-preview/invoice", wait: 1200, fullPage: false, waitForChat: true },
 ];
 
 await mkdir(outDir, { recursive: true });
@@ -34,6 +34,9 @@ for (const shot of shots) {
   await page.goto(target, { waitUntil: "load", timeout: 60_000 });
   await page.addStyleTag({ content: "nextjs-portal { display: none !important; }" }).catch(() => {});
   await page.waitForTimeout(shot.wait);
+  if (shot.waitForChat) {
+    await page.getByText("AI Financial Assistant").waitFor({ timeout: 10_000 });
+  }
   const path = join(outDir, shot.file);
   await page.screenshot({ path, fullPage: shot.fullPage ?? false });
   console.log(`Wrote ${path}`);

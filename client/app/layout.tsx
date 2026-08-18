@@ -6,6 +6,7 @@ import { ProfileButton } from "./components/ProfileButton";
 import { ToastProvider } from "./components/Toast";
 import { AIChatPanel } from "./components/AIChatPanel";
 import { AuthGate } from "./components/AuthGate";
+import { PRODUCT_NAME } from "@/lib/brand";
 
 const geistSans = Geist({
   variable: "--font-geist-sans",
@@ -18,8 +19,8 @@ const geistMono = Geist_Mono({
 });
 
 export const metadata: Metadata = {
-  title: "Accounting System",
-  description: "Modern bookkeeping and accounting system",
+  title: PRODUCT_NAME,
+  description: "Modern bookkeeping and accounting for teams",
 };
 
 export default function RootLayout({

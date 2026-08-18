@@ -1,15 +1,23 @@
 const AUTH_PUBLIC_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite']);
 
+export function isPreviewPath(pathname: string): boolean {
+  return pathname === '/reports-preview' || pathname.startsWith('/portfolio-preview');
+}
+
 export function isPublicPath(pathname: string): boolean {
-  if (pathname === '/' || pathname === '/reports-preview') return true;
-  if (pathname.startsWith('/portfolio-preview')) return true;
+  if (pathname === '/' || isPreviewPath(pathname)) return true;
   return AUTH_PUBLIC_PATHS.has(pathname);
 }
 
-/** Hide the live SideNav / profile / AI chrome (preview routes supply their own shell). */
+/** Hide the live SideNav / profile (preview routes supply their own shell). */
 export function hideAppChrome(pathname: string, authenticated: boolean): boolean {
-  if (pathname === '/reports-preview') return true;
-  if (pathname.startsWith('/portfolio-preview')) return true;
+  if (isPreviewPath(pathname)) return true;
   if (pathname === '/' && !authenticated) return true;
+  return AUTH_PUBLIC_PATHS.has(pathname);
+}
+
+/** Hide Ask AI on marketing/auth pages. Preview product shots keep the live chatbot. */
+export function hideLiveAiChat(pathname: string): boolean {
+  if (pathname === '/') return true;
   return AUTH_PUBLIC_PATHS.has(pathname);
 }

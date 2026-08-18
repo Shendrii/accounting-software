@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import { Bot, Send, X, Loader2, Sparkles } from 'lucide-react';
 import { sendAiMessage } from '@/lib/api';
 import { isAuthenticated } from '@/lib/auth';
-import { hideAppChrome } from '@/lib/public-paths';
+import { hideLiveAiChat, isPreviewPath } from '@/lib/public-paths';
+import { portfolioAiThread } from '@/lib/portfolio-demo-data';
 
 interface Message {
   role: 'user' | 'assistant';
@@ -19,14 +20,28 @@ const SUGGESTIONS = [
   'Am I spending more than last month?',
 ];
 
+function contextLabel(pathname: string): string {
+  if (pathname === '/reports-preview') return 'reports';
+  if (pathname.startsWith('/portfolio-preview/inbox')) return 'inbox';
+  if (pathname.startsWith('/portfolio-preview/invoice')) return 'invoices';
+  return pathname.split('/')[1] || 'overview';
+}
+
 export function AIChatPanel() {
   const pathname = usePathname();
-  const [open, setOpen] = useState(false);
-  const [messages, setMessages] = useState<Message[]>([]);
+  const demo = pathname ? portfolioAiThread(pathname) : null;
+  const [open, setOpen] = useState(Boolean(demo));
+  const [messages, setMessages] = useState<Message[]>(demo?.messages ?? []);
   const [input, setInput] = useState('');
   const [loading, setLoading] = useState(false);
   const bottomRef = useRef<HTMLDivElement>(null);
   const inputRef = useRef<HTMLInputElement>(null);
+
+  useEffect(() => {
+    const next = portfolioAiThread(pathname);
+    setOpen(Boolean(next));
+    setMessages(next?.messages ?? []);
+  }, [pathname]);
 
   useEffect(() => {
     if (open) {
@@ -42,8 +57,15 @@ export function AIChatPanel() {
     setMessages((prev) => [...prev, { role: 'user', content: msg }]);
     setLoading(true);
     try {
+      if (isPreviewPath(pathname)) {
+        setMessages((prev) => [
+          ...prev,
+          { role: 'assistant', content: 'This is a demo workspace. Sign in to ask about live books.' },
+        ]);
+        return;
+      }
       const { reply } = await sendAiMessage(msg, {
-        tab: pathname.split('/')[1] || 'overview',
+        tab: contextLabel(pathname),
         item: pathname,
       });
       setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
@@ -62,7 +84,7 @@ export function AIChatPanel() {
     }
   }
 
-  if (hideAppChrome(pathname, isAuthenticated())) return null;
+  if (hideLiveAiChat(pathname) || (!isAuthenticated() && !isPreviewPath(pathname))) return null;
 
   return (
     <>
@@ -84,7 +106,7 @@ export function AIChatPanel() {
             <Bot className="h-5 w-5 text-white" />
             <div className="flex-1">
               <p className="text-sm font-semibold text-white">AI Financial Assistant</p>
-              <p className="text-xs text-blue-200">Context: {pathname.split('/')[1] || 'overview'}</p>
+              <p className="text-xs text-blue-200">Context: {contextLabel(pathname)}</p>
             </div>
             <button onClick={() => setOpen(false)} className="text-white/70 hover:text-white" aria-label="Close AI panel">
               <X className="h-4 w-4" />

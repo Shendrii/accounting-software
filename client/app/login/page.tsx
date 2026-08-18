@@ -1,13 +1,13 @@
 'use client';
 
 import Link from 'next/link';
+import { Suspense, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { useState } from 'react';
 import { Loader2 } from 'lucide-react';
 import { API_BASE_URL, login } from '@/lib/api';
 import { setSession, setWorkspaceId } from '@/lib/auth';
 
-export default function LoginPage() {
+function LoginPageContent() {
   const router = useRouter();
   const searchParams = useSearchParams();
   const redirect = searchParams.get('redirect') || '/';
@@ -73,3 +73,16 @@ export default function LoginPage() {
   );
 }
 
+export default function LoginPage() {
+  return (
+    <Suspense
+      fallback={
+        <div className="min-h-screen flex items-center justify-center bg-zinc-50 dark:bg-zinc-950">
+          <Loader2 className="h-6 w-6 animate-spin text-zinc-400" />
+        </div>
+      }
+    >
+      <LoginPageContent />
+    </Suspense>
+  );
+}

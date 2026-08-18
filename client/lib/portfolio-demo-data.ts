@@ -188,3 +188,48 @@ export const PORTFOLIO_INVOICE: Invoice = {
   createdAt: '2026-07-15T16:20:00.000Z',
   updatedAt: '2026-07-16T09:00:00.000Z',
 };
+
+export type PortfolioAiMessage = { role: 'user' | 'assistant'; content: string };
+
+export function portfolioAiThread(pathname: string): { tab: string; messages: PortfolioAiMessage[] } | null {
+  if (pathname === '/reports-preview') {
+    return {
+      tab: 'reports',
+      messages: [
+        { role: 'user', content: 'What was my profit last month?' },
+        {
+          role: 'assistant',
+          content:
+            'Last 30 days at Northline Studio:\n\nRevenue     $88,250\nExpenses    $28,445\nNet income  $59,805\n\nDesign retainers are the largest line at $48,200.',
+        },
+      ],
+    };
+  }
+  if (pathname.startsWith('/portfolio-preview/inbox')) {
+    return {
+      tab: 'inbox',
+      messages: [
+        { role: 'user', content: 'Which receipts still need review?' },
+        {
+          role: 'assistant',
+          content:
+            '3 items are pending:\n\n• WeWork SoHo — $1,200.00 (Office, 96%)\n• Figma — $180.00 (Software, 99%)\n• Delta Air Lines — $486.40 (Travel, 91%)',
+        },
+      ],
+    };
+  }
+  if (pathname.startsWith('/portfolio-preview/invoice')) {
+    return {
+      tab: 'invoices',
+      messages: [
+        { role: 'user', content: "What's outstanding on INV-1048?" },
+        {
+          role: 'assistant',
+          content:
+            'INV-1048 to Harbor & Pine Co. is SENT.\n\nTotal $13,824.00 · due Aug 14, 2026.\nNo payment recorded yet.',
+        },
+      ],
+    };
+  }
+  return null;
+}
