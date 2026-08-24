@@ -196,7 +196,7 @@ Answer the user's question concisely and accurately based on the data above. You
       baseURL: process.env.GROQ_API_KEY ? 'https://api.groq.com/openai/v1' : undefined,
     });
     const completion = await openai.chat.completions.create({
-      model: process.env.GROQ_API_KEY ? 'llama-3.1-8b-instant' : 'gpt-3.5-turbo',
+      model: process.env.GROQ_API_KEY ? 'openai/gpt-oss-20b' : 'gpt-3.5-turbo',
       messages: [
         { role: 'system', content: context },
         { role: 'user', content: message },
