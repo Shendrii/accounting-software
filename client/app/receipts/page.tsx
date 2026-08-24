@@ -73,7 +73,7 @@ export function ReceiptsPage({
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
     if (!file || !file.type.startsWith('image/')) {
-      setError('Please select an image file (JPEG, PNG, etc.)');
+      setError('Please select a JPEG, PNG, or WebP image');
       return;
     }
     setUploading(true);
@@ -180,7 +180,7 @@ export function ReceiptsPage({
           <label className="flex flex-col items-center gap-2 cursor-pointer">
             <input
               type="file"
-              accept="image/*"
+              accept="image/jpeg,image/png,image/webp"
               onChange={handleFileSelect}
               disabled={uploading}
               className="hidden"
@@ -193,7 +193,7 @@ export function ReceiptsPage({
             <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
               {uploading ? 'Processing…' : 'Drop receipt image or click to upload'}
             </span>
-            <span className="text-xs text-zinc-500">OCR + GPT-3.5 will extract vendor, date, amount, category</span>
+            <span className="text-xs text-zinc-500">JPEG, PNG, or WebP — OCR will extract vendor, date, amount, category</span>
           </label>
         </div>
 

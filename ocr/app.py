@@ -23,7 +23,12 @@ import shutil
 
 import pytesseract
 from flask import Flask, jsonify, request
-from PIL import Image, ImageOps
+from PIL import Image, ImageFile, ImageOps
+
+ImageFile.LOAD_TRUNCATED_IMAGES = True
+
+app = Flask(__name__)
+app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
 
 app = Flask(__name__)
 app.config["MAX_CONTENT_LENGTH"] = 16 * 1024 * 1024  # 16 MB
@@ -46,22 +51,27 @@ def _ensure_tesseract_available() -> str:
     return str(pytesseract.get_tesseract_version())
 
 
-def _preprocess(image: Image.Image) -> Image.Image:
-    """Light preprocessing for better OCR accuracy on receipts."""
-    # Honour EXIF orientation so phone photos are upright
+def _to_ocr_image(image: Image.Image) -> Image.Image:
+    """Normalize PNG/WebP/JPEG (including alpha) into a Tesseract-friendly grayscale image."""
     image = ImageOps.exif_transpose(image)
-
-    # Convert to grayscale to drop colour noise
-    gray = image.convert("L")
-
-    # Auto-stretch contrast (helps faded thermal receipts)
-    return ImageOps.autocontrast(gray)
+    if image.mode in ("RGBA", "LA") or (image.mode == "P" and "transparency" in image.info):
+        rgba = image.convert("RGBA")
+        background = Image.new("RGB", rgba.size, (255, 255, 255))
+        background.paste(rgba, mask=rgba.split()[-1])
+        image = background
+    elif image.mode != "RGB":
+        image = image.convert("RGB")
+    return ImageOps.autocontrast(image.convert("L"))
 
 
 def extract_text_with_tesseract(image_bytes: bytes) -> str:
     """Run Tesseract on the given image bytes and return extracted text."""
-    image = Image.open(io.BytesIO(image_bytes))
-    image = _preprocess(image)
+    try:
+        image = Image.open(io.BytesIO(image_bytes))
+        image.load()
+    except Exception as exc:
+        raise ValueError("Could not read image. Use JPEG, PNG, or WebP.") from exc
+    image = _to_ocr_image(image)
     # PSM 6 == Assume a single uniform block of text — good default for receipts
     config = "--psm 6"
     return pytesseract.image_to_string(image, lang=TESSERACT_LANG, config=config).strip()

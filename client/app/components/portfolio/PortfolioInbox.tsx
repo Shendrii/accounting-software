@@ -22,7 +22,7 @@ export function PortfolioInbox({ receipts }: { receipts: Receipt[] }) {
         <div className="flex flex-col items-center gap-2">
           <Upload className="h-10 w-10 text-zinc-500" />
           <span className="text-sm font-medium text-zinc-700">Drop receipt image or click to upload</span>
-          <span className="text-xs text-zinc-500">OCR will extract vendor, date, amount, category</span>
+          <span className="text-xs text-zinc-500">JPEG, PNG, or WebP — OCR will extract vendor, date, amount, category</span>
         </div>
       </div>
 

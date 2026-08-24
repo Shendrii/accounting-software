@@ -3,9 +3,9 @@ import multer from 'multer';
 import path from 'path';
 import fs from 'fs';
 import { fileURLToPath } from 'url';
-import { readFile } from 'fs/promises';
 import prisma from '../db/prisma.js';
 import { parseReceiptWithGPT } from '../lib/parseReceipt.js';
+import { isAllowedReceiptImage, receiptImageToJpeg } from '../lib/receiptImage.js';
 
 const __dirname = path.dirname(fileURLToPath(import.meta.url));
 const uploadsDir = path.join(__dirname, '../../uploads');
@@ -22,30 +22,53 @@ const storage = multer.diskStorage({
     cb(null, `receipt-${unique}${ext}`);
   },
 });
-const upload = multer({ storage, limits: { fileSize: 10 * 1024 * 1024 } }); // 10MB
+const upload = multer({
+  storage,
+  limits: { fileSize: 10 * 1024 * 1024 },
+  fileFilter: (req, file, cb) => {
+    if (isAllowedReceiptImage(file.mimetype, file.originalname)) {
+      cb(null, true);
+      return;
+    }
+    cb(new Error('Upload a JPEG, PNG, or WebP image'));
+  },
+});
 
 const router = express.Router();
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:5001';
 
 async function extractTextFromImage(filePath) {
-  const buffer = await readFile(filePath);
-  const blob = new Blob([buffer], { type: 'image/jpeg' });
-  const formData = new FormData();
-  formData.append('image', blob, path.basename(filePath));
-  const response = await fetch(`${OCR_SERVICE_URL}/extract`, {
-    method: 'POST',
-    body: formData,
-  });
-  if (!response.ok) {
+  const jpeg = await receiptImageToJpeg(filePath);
+  let lastError = new Error('OCR failed');
+  for (let attempt = 0; attempt < 3; attempt += 1) {
+    const formData = new FormData();
+    formData.append('image', new Blob([jpeg], { type: 'image/jpeg' }), 'receipt.jpg');
+    const response = await fetch(`${OCR_SERVICE_URL}/extract`, {
+      method: 'POST',
+      body: formData,
+    });
+    if (response.ok) {
+      const data = await response.json();
+      return data.text || '';
+    }
     const err = await response.json().catch(() => ({}));
-    throw new Error(err.error || `OCR failed: ${response.status}`);
+    lastError = new Error(err.error || `OCR failed: ${response.status}`);
+    if (response.status !== 429 || attempt === 2) break;
+    await new Promise((resolve) => setTimeout(resolve, 800 * (attempt + 1)));
   }
-  const data = await response.json();
-  return data.text || '';
+  throw lastError;
 }
 
 // POST /api/receipts/upload - upload image, OCR + GPT, create receipt
-router.post('/upload', upload.single('image'), async (req, res) => {
+router.post('/upload', (req, res, next) => {
+  upload.single('image')(req, res, (err) => {
+    if (err) {
+      const message = err.message || 'Upload failed';
+      return res.status(400).json({ error: message });
+    }
+    next();
+  });
+}, async (req, res) => {
   try {
     if (!req.file) {
       return res.status(400).json({ error: 'No image file uploaded' });
