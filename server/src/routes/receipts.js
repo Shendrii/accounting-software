@@ -4,6 +4,7 @@ import { fileURLToPath } from 'node:url';
 import prisma from '../db/prisma.js';
 import { parseReceiptWithGPT } from '../lib/parseReceipt.js';
 import { isAllowedReceiptImage, receiptImageToJpeg } from '../lib/receiptImage.js';
+import { LedgerError, createPosting, decimalInput, ledgerAccounts, ledgerDate, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -199,157 +200,141 @@ router.get('/:id', async (req, res) => {
   }
 });
 
-// PUT /api/receipts/:id - update extractedData, status, vendor, category, bill
+const receiptDetail = {
+  journalEntry: { include: { journalLines: { include: { account: true } } } },
+  vendor: { select: { id: true, name: true } },
+  bill: { select: { id: true, billNo: true } },
+};
+
+const receiptWhere = req => ({ id: req.params.id, workspaceId: req.workspace.id });
+
+async function getReceipt(tx, where) {
+  const receipt = await tx.receipt.findFirst({ where, include: receiptDetail });
+  if (!receipt) throw new LedgerError('Receipt not found.', 404);
+  return receipt;
+}
+
+function receiptDate(data) {
+  return ledgerDate(data?.invoiceDate || data?.date, 'Confirmed receipt date');
+}
+
+// Save review details without posting or recording a payment.
 router.put('/:id', async (req, res) => {
   try {
+    const where = receiptWhere(req);
     const { extractedData, status, vendorId, category, billId } = req.body;
-    const update = {};
-    if (extractedData != null) update.extractedData = extractedData;
-    if (status != null) update.status = status;
-    if (vendorId !== undefined) update.vendorId = vendorId || null;
-    if (category !== undefined) update.category = category || null;
-    if (billId !== undefined) update.billId = billId || null;
-
-    const receipt = await prisma.receipt.update({
-      where: { id: req.params.id },
-      data: update,
-      include: {
-        journalEntry: { include: { journalLines: { include: { account: true } } } },
-        vendor: { select: { id: true, name: true } },
-        bill: { select: { id: true, billNo: true } },
-      },
+    const receipt = await ledgerTransaction(async tx => {
+      const current = await getReceipt(tx, where);
+      if (status !== undefined) throw new LedgerError('Use the receipt review actions to change status.');
+      if (current.status !== 'PENDING' && (extractedData !== undefined || billId !== undefined)) {
+        throw new LedgerError('Reviewed receipt amounts, dates, and bill links are read-only.', 409);
+      }
+      if (vendorId && (typeof vendorId !== 'string' || !await tx.vendor.findFirst({
+        where: { id: vendorId, workspaceId: where.workspaceId }, select: { id: true },
+      }))) throw new LedgerError('Choose a vendor from this workspace.');
+      if (billId && (typeof billId !== 'string' || !await tx.bill.findFirst({
+        where: { id: billId, workspaceId: where.workspaceId }, select: { id: true },
+      }))) throw new LedgerError('Choose a bill from this workspace.');
+      if (extractedData !== undefined) {
+        if (!extractedData || typeof extractedData !== 'object' || Array.isArray(extractedData)) throw new LedgerError('Enter valid receipt details.');
+        const date = receiptDate(extractedData).toISOString().slice(0, 10);
+        extractedData.invoiceDate = date;
+        extractedData.date = date;
+      }
+      return tx.receipt.update({
+        where, include: receiptDetail,
+        data: {
+          extractedData,
+          ...(vendorId !== undefined && { vendorId: vendorId || null }),
+          ...(category !== undefined && { category: category || null }),
+          ...(billId !== undefined && { billId: billId || null }),
+        },
+      });
     });
     res.json(receipt);
   } catch (error) {
-    if (error.code === 'P2025') return res.status(404).json({ error: 'Receipt not found' });
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to save receipt details.');
   }
 });
 
-// POST /api/receipts/:id/approve - create journal entry (debit expense, credit payment), link receipt
+router.post('/:id/attach-to-bill', async (req, res) => {
+  try {
+    const where = receiptWhere(req);
+    const { billId, vendorId, category } = req.body;
+    const receipt = await ledgerTransaction(async tx => {
+      const current = await getReceipt(tx, where);
+      if (current.status === 'APPROVED' && current.billId && current.billId === billId && !current.journalEntryId) return current;
+      if (current.status !== 'PENDING' || current.journalEntryId) throw new LedgerError('Only receipts awaiting review can be attached.', 409);
+      receiptDate(current.extractedData);
+      if (typeof billId !== 'string' || !billId) throw new LedgerError('Select a posted bill.');
+      if (category != null && typeof category !== 'string') throw new LedgerError('Enter a valid receipt category.');
+      const bill = await tx.bill.findFirst({
+        where: { id: billId, workspaceId: where.workspaceId, OR: [{ status: 'PAID' }, { status: 'RECEIVED', postingEntryId: { not: null } }] },
+        select: { id: true, vendorId: true },
+      });
+      if (!bill) throw new LedgerError('Select a posted bill from this workspace.');
+      const expectedVendor = vendorId === undefined ? current.vendorId : vendorId;
+      if (expectedVendor && expectedVendor !== bill.vendorId) throw new LedgerError('Choose a bill for the receipt vendor.');
+      return tx.receipt.update({ where, data: { billId: bill.id, vendorId: bill.vendorId, category, status: 'APPROVED' }, include: receiptDetail });
+    });
+    res.json(receipt);
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to attach the receipt.');
+  }
+});
+
 router.post('/:id/approve', async (req, res) => {
   try {
+    const where = receiptWhere(req);
     const { expenseAccountId, paymentAccountId } = req.body;
-    if (!expenseAccountId || !paymentAccountId) {
-      return res.status(400).json({ error: 'expenseAccountId and paymentAccountId are required' });
-    }
-    const receipt = await prisma.receipt.findFirst({ where: { id: req.params.id, workspaceId: req.workspace.id } });
-    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
-    if (receipt.status === 'APPROVED') {
-      return res.status(400).json({ error: 'Receipt already approved' });
-    }
-
-    // If the receipt is linked to a bill, mark the bill as PAID instead
-    if (receipt.billId) {
-      const bill = await prisma.bill.findFirst({ where: { id: receipt.billId, workspaceId: req.workspace.id } });
-      if (bill && bill.status === 'RECEIVED') {
-        const apAccount = await prisma.account.findFirst({
-          where: { name: { contains: 'payable', mode: 'insensitive' } },
-        });
-        if (!apAccount) {
-          return res.status(400).json({ error: 'No Accounts Payable account found.' });
+    const result = await ledgerTransaction(async tx => {
+      const current = await getReceipt(tx, where);
+      if (current.billId) throw new LedgerError('Attach this receipt as evidence and record the bill payment in Purchases.', 409);
+      if (current.status === 'APPROVED' && current.journalEntry) {
+        const lines = current.journalEntry.journalLines;
+        if (lines.some(line => line.accountId === expenseAccountId && line.debit.gt(0)) &&
+            lines.some(line => line.accountId === paymentAccountId && line.credit.gt(0))) {
+          return { receipt: current, journalEntry: current.journalEntry };
         }
-        const amount = parseFloat(bill.total.toString());
-        await prisma.$transaction(async (tx) => {
-          const entry = await tx.journalEntry.create({
-            data: {
-              date: new Date(),
-              description: `Payment for Bill ${bill.billNo} via receipt`,
-              referenceNo: bill.billNo,
-              status: 'POSTED',
-              journalLines: {
-                create: [
-                  { accountId: apAccount.id, debit: amount, credit: 0 },
-                  { accountId: paymentAccountId, debit: 0, credit: amount },
-                ],
-              },
-            },
-          });
-          await tx.account.update({ where: { id: apAccount.id }, data: { balance: { decrement: amount } } });
-          await tx.account.update({ where: { id: paymentAccountId }, data: { balance: { decrement: amount } } });
-          await tx.bill.update({ where: { id: bill.id }, data: { status: 'PAID', journalEntryId: entry.id } });
-          await tx.receipt.update({ where: { id: receipt.id }, data: { status: 'APPROVED' } });
-        });
-        const updatedReceipt = await prisma.receipt.findUnique({
-          where: { id: req.params.id },
-          include: { vendor: { select: { id: true, name: true } }, bill: { select: { id: true, billNo: true } } },
-        });
-        return res.json({ receipt: updatedReceipt });
       }
-    }
-
-    const data = receipt.extractedData;
-    const parsedAmount = parseFloat(data?.amount ?? data?.total ?? data?.balanceDue ?? data?.amountPaid);
-    const amount =
-      (typeof data?.amount === 'number' ? data.amount : null) ??
-      (typeof data?.total === 'number' ? data.total : null) ??
-      (typeof data?.balanceDue === 'number' ? data.balanceDue : null) ??
-      (typeof data?.amountPaid === 'number' ? data.amountPaid : null) ??
-      (isNaN(parsedAmount) ? 0 : parsedAmount);
-    if (amount <= 0) {
-      return res.status(400).json({ error: 'Invalid or missing amount in receipt data' });
-    }
-    const dateStr = data?.date || data?.invoiceDate || data?.dueDate;
-    const date = dateStr ? new Date(dateStr) : new Date();
-    const description = data?.vendor
-      ? (data?.invoiceNumber ? `Invoice ${data.invoiceNumber}: ${data.vendor}` : `Receipt: ${data.vendor}`)
-      : `Receipt ${receipt.id.slice(0, 8)}`;
-
-    const journalEntry = await prisma.$transaction(async (tx) => {
-      const entry = await tx.journalEntry.create({
-        data: {
-          date,
-          description,
-          referenceNo: data?.invoiceNumber || data?.vendor || null,
-          status: 'POSTED',
-          journalLines: {
-            create: [
-              { accountId: expenseAccountId, debit: amount, credit: 0 },
-              { accountId: paymentAccountId, debit: 0, credit: amount },
-            ],
-          },
-        },
-        include: { journalLines: { include: { account: true } } },
+      if (current.status !== 'PENDING') throw new LedgerError('This receipt has already been reviewed.', 409);
+      const data = current.extractedData;
+      const date = receiptDate(data);
+      const amount = decimalInput(data?.amount ?? data?.total ?? data?.amountPaid, 'Receipt amount');
+      if (amount.isZero()) throw new LedgerError('Confirm a positive receipt amount before posting.');
+      const accounts = await ledgerAccounts(tx, where.workspaceId, [expenseAccountId, paymentAccountId]);
+      if (accounts.get(expenseAccountId).type !== 'EXPENSE' ||
+          !['ASSET', 'LIABILITY'].includes(accounts.get(paymentAccountId).type)) {
+        throw new LedgerError('Choose an expense account and a cash or credit account.');
+      }
+      const journalEntry = await createPosting(tx, where.workspaceId, {
+        date, description: data?.vendor ? 'Receipt: ' + data.vendor : 'Receipt ' + current.id.slice(0, 8),
+        referenceNo: data?.invoiceNumber || data?.vendor || null,
+        lines: [{ accountId: expenseAccountId, debit: amount }, { accountId: paymentAccountId, credit: amount }],
       });
-      await tx.receipt.update({
-        where: { id: receipt.id },
-        data: { status: 'APPROVED', journalEntryId: entry.id },
+      const receipt = await tx.receipt.update({
+        where, data: { status: 'APPROVED', journalEntryId: journalEntry.id }, include: receiptDetail,
       });
-      await tx.account.update({
-        where: { id: expenseAccountId },
-        data: { balance: { increment: amount } },
-      });
-      await tx.account.update({
-        where: { id: paymentAccountId },
-        data: { balance: { decrement: amount } },
-      });
-      return entry;
+      return { receipt, journalEntry };
     });
-
-    const updatedReceipt = await prisma.receipt.findUnique({
-      where: { id: req.params.id },
-      include: { journalEntry: { include: { journalLines: { include: { account: true } } } } },
-    });
-    res.json({ receipt: updatedReceipt, journalEntry });
+    res.json(result);
   } catch (error) {
-    if (error.code === 'P2025') return res.status(404).json({ error: 'Receipt not found' });
-    console.error(error);
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to post the receipt expense.');
   }
 });
 
-// POST /api/receipts/:id/reject
 router.post('/:id/reject', async (req, res) => {
   try {
-    const receipt = await prisma.receipt.update({
-      where: { id: req.params.id },
-      data: { status: 'REJECTED' },
-      include: { journalEntry: true },
+    const where = receiptWhere(req);
+    const receipt = await ledgerTransaction(async tx => {
+      const current = await getReceipt(tx, where);
+      if (current.status === 'REJECTED') return current;
+      if (current.status !== 'PENDING') throw new LedgerError('This receipt has already been reviewed.', 409);
+      return tx.receipt.update({ where, data: { status: 'REJECTED' }, include: receiptDetail });
     });
     res.json(receipt);
   } catch (error) {
-    if (error.code === 'P2025') return res.status(404).json({ error: 'Receipt not found' });
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to reject the receipt.');
   }
 });
 

@@ -1,21 +1,22 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import {
   getReceipts,
   getAccounts,
   uploadReceipt,
   updateReceipt,
   approveReceipt,
+  attachReceiptToBill,
   rejectReceipt,
   getVendors,
   getBills,
   type Receipt,
   type ReceiptExtractedData,
-  type Account,
   type Vendor,
   type Bill,
 } from '@/lib/api';
+import Link from 'next/link';
 import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
 import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
@@ -23,24 +24,38 @@ import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { formatUsd } from '@/lib/money';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import ReceiptImage from '@/app/components/ReceiptImage';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
+
+function validReceiptDate(value: string) {
+  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+  const date = new Date(value + 'T00:00:00Z');
+  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+}
+
+function receiptStatus(receipt: Receipt) {
+  if (receipt.status === 'REJECTED') return 'Rejected';
+  if (receipt.status === 'APPROVED') return receipt.billId ? 'Attached to bill' : receipt.journalEntryId ? 'Posted expense' : 'Reviewed';
+  return validReceiptDate(receipt.extractedData?.invoiceDate || receipt.extractedData?.date || '') ? 'Needs review' : 'Check date';
+}
+
+async function loadReceiptLookups() {
+  const [accounts, vendors, bills] = await Promise.all([getAccounts(), getVendors({ isActive: true }), getBills()]);
+  return {
+    accounts: accounts.filter(account => account.isActive), vendors,
+    bills: bills.filter(bill => bill.status === 'PAID' || bill.status === 'RECEIVED' && bill.postingEntryId),
+  };
+}
 
 export function ReceiptsPage({
   title = 'Receipts',
-  subtitle = 'Upload receipt images to extract data with OCR, review, and create journal entries',
-  headerAction,
+  subtitle = 'Review extracted details, post expenses, and attach supporting documents to bills.',
 }: {
   title?: string;
   subtitle?: string;
-  headerAction?: React.ReactNode;
 }) {
-  const [receipts, setReceipts] = useState<Receipt[]>([]);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [vendors, setVendors] = useState<Vendor[]>([]);
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>(title === 'Inbox' ? 'PENDING' : 'all');
+  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'all'>('PENDING');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
@@ -49,30 +64,14 @@ export function ReceiptsPage({
   const [approvePaymentId, setApprovePaymentId] = useState('');
   const [approving, setApproving] = useState(false);
 
-  useEffect(() => {
-    loadData();
-  }, [statusFilter]);
-
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [receiptsData, accountsData, vendorsData, billsData] = await Promise.all([
-        getReceipts(statusFilter === 'all' ? undefined : statusFilter),
-        getAccounts(),
-        getVendors({ isActive: true }),
-        getBills({ status: 'RECEIVED' }),
-      ]);
-      setReceipts(receiptsData);
-      setAccounts(accountsData.filter((a) => a.isActive));
-      setVendors(vendorsData);
-      setBills(billsData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  };
+  const loadReceipts = useCallback(() => getReceipts(statusFilter === 'all' ? undefined : statusFilter), [statusFilter]);
+  const queue = useWorkspaceData(loadReceipts);
+  const lookups = useWorkspaceData(loadReceiptLookups);
+  const receipts = queue.data ?? [];
+  const { loading } = queue;
+  const accounts = lookups.data?.accounts ?? [];
+  const vendors = lookups.data?.vendors ?? [];
+  const bills = lookups.data?.bills ?? [];
 
   const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
     const file = e.target.files?.[0];
@@ -84,7 +83,7 @@ export function ReceiptsPage({
     setError(null);
     try {
       await uploadReceipt(file);
-      await loadData();
+      queue.retry();
       e.target.value = '';
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Upload failed');
@@ -95,15 +94,16 @@ export function ReceiptsPage({
 
   const handleUpdateExtracted = async (id: string, extractedData: ReceiptExtractedData) => {
     try {
-      // Ensure server has amount + date for approve flow (from total/invoiceDate or legacy keys)
+      const date = extractedData.invoiceDate || extractedData.date || '';
+      if (!validReceiptDate(date)) throw new Error('Confirm a valid receipt date before saving.');
       const payload: ReceiptExtractedData = {
         ...extractedData,
         amount: extractedData.amount ?? extractedData.total ?? extractedData.balanceDue ?? extractedData.amountPaid ?? 0,
-        date: extractedData.date ?? extractedData.invoiceDate ?? extractedData.dueDate ?? '',
+        date, invoiceDate: date,
       };
       await updateReceipt(id, { extractedData: payload });
       setEditingId(null);
-      await loadData();
+      queue.retry();
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Update failed');
     }
@@ -122,8 +122,8 @@ export function ReceiptsPage({
       setApproveModal(null);
       setApproveExpenseId('');
       setApprovePaymentId('');
-      await loadData();
-      toast.success('Receipt approved and journal entry created');
+      queue.retry();
+      toast.success('Receipt expense posted.');
     } catch (err) {
       setError(err instanceof Error ? err.message : 'Approve failed');
     } finally {
@@ -134,7 +134,7 @@ export function ReceiptsPage({
   const handleReject = async (id: string) => {
     try {
       await rejectReceipt(id);
-      await loadData();
+      queue.retry();
       toast.success('Receipt rejected');
     } catch (err) {
       toast.error(err instanceof Error ? err.message : 'Reject failed');
@@ -169,9 +169,10 @@ export function ReceiptsPage({
       <div className="workspace-content">
         <div className="mb-5">
           <WorkspaceHeading section="Daily work" title={title} description={subtitle}
-            actions={<><a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>{headerAction}</>} />
+            actions={<a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>} />
         </div>
 
+        {queue.error && <div className="mb-5"><WorkspaceNotice title="Receipts could not load" onRetry={queue.retry} /></div>}
         {error && <div className="mb-5"><WorkspaceNotice title="Receipt action could not finish">{error}</WorkspaceNotice></div>}
 
         <section id="upload-receipt" className="workspace-panel mb-5 scroll-mt-4 px-4 py-3 sm:px-5">
@@ -188,6 +189,12 @@ export function ReceiptsPage({
           </label>
         </section>
 
+        <nav className="workspace-tabs mb-4" aria-label="Receipt views">
+          <button type="button" className="workspace-tab" aria-current={statusFilter === 'PENDING' ? 'page' : undefined}
+            onClick={() => { setStatusFilter('PENDING'); setSelectedId(null); }}>Needs review</button>
+          <button type="button" className="workspace-tab" aria-current={statusFilter === 'all' ? 'page' : undefined}
+            onClick={() => { setStatusFilter('all'); setSelectedId(null); }}>All receipts</button>
+        </nav>
         {/* Filters */}
         <div className="mb-6 flex flex-wrap gap-4 items-center">
           <div className="relative flex-1 min-w-[200px]">
@@ -200,22 +207,11 @@ export function ReceiptsPage({
               className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
             />
           </div>
-          <select
-            aria-label="Receipt status"
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value)}
-            className="px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-          >
-            <option value="all">All statuses</option>
-            <option value="PENDING">Needs review</option>
-            <option value="APPROVED">Approved</option>
-            <option value="REJECTED">Rejected</option>
-          </select>
         </div>
 
         <WorkspacePanel title="Receipt queue" description={loading ? 'Loading receipts…' : filteredReceipts.length + (filteredReceipts.length === 1 ? ' receipt' : ' receipts')}>
           {loading ? <p role="status" className="p-4 text-sm text-slate-600">Loading receipts…</p> : filteredReceipts.length === 0 ? (
-            <p className="p-4 text-sm text-slate-600">{error ? 'Receipt data is unavailable.' : 'No receipts match this view.'}</p>
+            <p className="p-4 text-sm text-slate-600">{queue.error ? 'Receipt data is unavailable.' : 'No receipts match this view.'}</p>
           ) : (
             <div className="workspace-table-wrap">
               <table className="workspace-table">
@@ -231,7 +227,7 @@ export function ReceiptsPage({
                       {details?.vendor || details?.invoiceNumber || 'Uploaded receipt'}
                     </button></td>
                     <td className="whitespace-nowrap">{details?.invoiceDate || details?.date || '—'}</td>
-                    <td><WorkspaceStatus>{receipt.status === 'PENDING' ? 'Needs review' : receipt.status === 'APPROVED' ? 'Approved' : 'Rejected'}</WorkspaceStatus></td>
+                    <td><WorkspaceStatus>{receiptStatus(receipt)}</WorkspaceStatus></td>
                     <td className="workspace-number">{amount === null ? '—' : formatUsd(amount)}</td>
                   </tr>;
                 })}</tbody>
@@ -241,14 +237,20 @@ export function ReceiptsPage({
         </WorkspacePanel>
         {selected && (
           <section className="mt-5 space-y-2" id="receipt-review" aria-label="Receipt review">
+            {lookups.error && <WorkspaceNotice title="Receipt accounts, vendors, and bills could not load" onRetry={lookups.retry} />}
             <h2 className="font-semibold text-slate-950">Receipt review</h2>
             <ReceiptCard key={selected.id} receipt={selected}
               isEditing={editingId === selected.id} onStartEdit={() => setEditingId(selected.id)} onCancelEdit={() => setEditingId(null)}
               onSave={data => handleUpdateExtracted(selected.id, data)} onApprove={() => setApproveModal({ receipt: selected })}
               onReject={() => handleReject(selected.id)} canApprove={selected.status === 'PENDING'} vendors={vendors} bills={bills}
-              onUpdateMeta={async (vendorId, category, billId) => {
-                await updateReceipt(selected.id, { vendorId, category, billId });
-                await loadData();
+              onUpdateMeta={async (vendorId, category, removeLegacyBill) => {
+                await updateReceipt(selected.id, { vendorId, category, ...(removeLegacyBill && { billId: null }) });
+                queue.retry();
+              }}
+              onAttach={async (billId, vendorId, category) => {
+                await attachReceiptToBill(selected.id, { billId, vendorId, category });
+                queue.retry();
+                toast.success('Receipt attached. The bill balance is unchanged.');
               }} />
           </section>
         )}
@@ -351,6 +353,7 @@ function ReceiptCard({
   vendors,
   bills,
   onUpdateMeta,
+  onAttach,
 }: {
   receipt: Receipt;
   isEditing: boolean;
@@ -362,56 +365,51 @@ function ReceiptCard({
   canApprove: boolean;
   vendors: Vendor[];
   bills: Bill[];
-  onUpdateMeta: (vendorId: string | null, category: string | null, billId: string | null) => Promise<void>;
+  onUpdateMeta: (vendorId: string | null, category: string | null, removeLegacyBill: boolean) => Promise<void>;
+  onAttach: (billId: string, vendorId: string | null, category: string | null) => Promise<void>;
 }) {
   // Normalize so old receipts (date, amount) show in new fields (invoiceDate, total)
   const normalizeForEdit = (raw: Receipt['extractedData']): ReceiptExtractedData => {
     if (!raw) return {};
     return {
       ...raw,
-      invoiceDate: raw.invoiceDate ?? raw.date ?? '',
+      invoiceDate: raw.invoiceDate || raw.date || '',
       dueDate: raw.dueDate ?? '',
       invoiceNumber: raw.invoiceNumber ?? '',
       total: raw.total ?? raw.amount ?? 0,
       amountPaid: raw.amountPaid ?? 0,
       balanceDue: raw.balanceDue ?? 0,
       items: Array.isArray(raw.items) ? raw.items : [],
-      date: raw.date ?? raw.invoiceDate ?? raw.dueDate ?? '',
+      date: raw.invoiceDate || raw.date || '',
       amount: raw.amount ?? raw.total ?? raw.balanceDue ?? raw.amountPaid ?? 0,
     };
   };
 
   const [editData, setEditData] = useState<ReceiptExtractedData>(() => normalizeForEdit(receipt.extractedData));
-  const [metaVendorId, setMetaVendorId] = useState<string>((receipt as Receipt & { vendorId?: string }).vendorId ?? '');
-  const [metaCategory, setMetaCategory] = useState<string>((receipt as Receipt & { category?: string }).category ?? '');
-  const [metaBillId, setMetaBillId] = useState<string>((receipt as Receipt & { billId?: string }).billId ?? '');
+  const [metaVendorId, setMetaVendorId] = useState(receipt.vendorId ?? '');
+  const [metaCategory, setMetaCategory] = useState(receipt.category ?? '');
+  const [metaBillId, setMetaBillId] = useState(receipt.billId ?? '');
   const [metaSaving, setMetaSaving] = useState(false);
+  const [metaError, setMetaError] = useState('');
+  const d = receipt.extractedData || {};
+  const rawDate = d.invoiceDate || d.date || '';
+  const dateConfirmed = validReceiptDate(rawDate);
+  const vendorBills = bills.filter(bill => !metaVendorId || bill.vendorId === metaVendorId);
 
-  useEffect(() => {
-    setEditData(normalizeForEdit(receipt.extractedData));
-    setMetaVendorId((receipt as Receipt & { vendorId?: string }).vendorId ?? '');
-    setMetaCategory((receipt as Receipt & { category?: string }).category ?? '');
-    setMetaBillId((receipt as Receipt & { billId?: string }).billId ?? '');
-  }, [receipt.extractedData]);
-
-  async function saveMeta() {
+  async function saveMeta(attach = false) {
     setMetaSaving(true);
+    setMetaError('');
     try {
-      await onUpdateMeta(metaVendorId || null, metaCategory || null, metaBillId || null);
+      if (attach) await onAttach(metaBillId, metaVendorId || null, metaCategory || null);
+      else await onUpdateMeta(metaVendorId || null, metaCategory || null, Boolean(receipt.billId && !metaBillId));
+    } catch (cause) {
+      setMetaError(cause instanceof Error ? cause.message : 'Could not save receipt details.');
     } finally {
       setMetaSaving(false);
     }
   }
 
-  const vendorBills = bills.filter((b) => !metaVendorId || b.vendorId === metaVendorId);
-
-  const d = receipt.extractedData || {};
   const items = d.items ?? [];
-  const statusColors = {
-    PENDING: 'bg-amber-100 dark:bg-amber-900/30 text-amber-800 dark:text-amber-200',
-    APPROVED: 'bg-green-100 dark:bg-green-900/30 text-green-800 dark:text-green-200',
-    REJECTED: 'bg-red-100 dark:bg-red-900/30 text-red-800 dark:text-red-200',
-  };
   const fmt = (n: number | undefined) => (n != null && typeof n === 'number' ? n.toFixed(2) : '—');
 
   return (
@@ -420,9 +418,8 @@ function ReceiptCard({
         <ReceiptImage key={receipt.id} receiptId={receipt.id} />
         <div className="min-w-0 flex-1 p-4 sm:p-5">
           <div className="flex items-center gap-2 mb-3">
-            <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[receipt.status]}`}>
-              {receipt.status}
-            </span>
+            <WorkspaceStatus>{receiptStatus(receipt)}</WorkspaceStatus>
+            {receipt.bill && <Link href={`/purchases/bills/${receipt.bill.id}`} className="text-sm font-semibold text-blue-800 underline">{receipt.bill.billNo}</Link>}
             {receipt.journalEntryId && (
               <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
                 <FileText className="h-3 w-3" />
@@ -430,13 +427,16 @@ function ReceiptCard({
               </span>
             )}
           </div>
+          {receipt.status === 'PENDING' && !dateConfirmed && <div className="mb-3"><WorkspaceNotice title="Check receipt date">
+            {rawDate ? 'The extracted date ' + rawDate + ' is invalid. Confirm the date from the original receipt.' : 'Enter the date shown on the original receipt.'}
+          </WorkspaceNotice></div>}
           {!isEditing ? (
             <div className="text-sm">
-              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Invoice details</div>
+              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Receipt details</div>
               <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
                 <div><span className="text-zinc-500 dark:text-zinc-400">Invoice #</span> {d.invoiceNumber || '—'}</div>
                 <div><span className="text-zinc-500 dark:text-zinc-400">Total</span> {fmt(d.total ?? d.amount)}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Invoice Date</span> {d.invoiceDate || d.date || '—'}</div>
+                <div><span className="text-zinc-500 dark:text-zinc-400">Receipt date</span> {d.invoiceDate || d.date || '—'}</div>
                 <div><span className="text-zinc-500 dark:text-zinc-400">Due Date</span> {d.dueDate || '—'}</div>
                 <div><span className="text-zinc-500 dark:text-zinc-400">Amount Paid</span> {fmt(d.amountPaid)}</div>
                 <div><span className="text-zinc-500 dark:text-zinc-400">Balance Due</span> {fmt(d.balanceDue)}</div>
@@ -462,7 +462,7 @@ function ReceiptCard({
             </div>
           ) : (
             <div className="space-y-2 text-sm">
-              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Edit invoice details</div>
+              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Edit receipt details</div>
               <div>
                 <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Vendor</label>
                 <input
@@ -494,12 +494,11 @@ function ReceiptCard({
               </div>
               <div className="grid grid-cols-2 gap-2">
                 <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Invoice Date</label>
+                  <label htmlFor="receipt-confirmed-date" className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Confirmed receipt date</label>
                   <input
-                    type="text"
-                    value={editData.invoiceDate ?? editData.date ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, invoiceDate: e.target.value, date: e.target.value || p.date }))}
-                    placeholder="YYYY-MM-DD"
+                    id="receipt-confirmed-date" type="date"
+                    value={validReceiptDate(editData.invoiceDate || editData.date || '') ? (editData.invoiceDate || editData.date) : ''}
+                    onChange={e => setEditData(current => ({ ...current, invoiceDate: e.target.value, date: e.target.value }))}
                     className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
                   />
                 </div>
@@ -601,7 +600,7 @@ function ReceiptCard({
             </div>
           )}
           {/* Vendor / Category / Bill metadata */}
-          <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
+          {receipt.status === 'PENDING' && !isEditing && <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
             <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Expense Details</p>
             <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
               <div>
@@ -629,9 +628,9 @@ function ReceiptCard({
                 </datalist>
               </div>
               <div>
-                <label className="block text-xs text-zinc-500 mb-1">Link to Bill</label>
+                <label htmlFor="receipt-attach-bill" className="block text-xs text-zinc-500 mb-1">Attach to bill</label>
                 <select
-                  value={metaBillId}
+                  id="receipt-attach-bill" value={metaBillId}
                   onChange={(e) => setMetaBillId(e.target.value)}
                   className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
@@ -640,15 +639,13 @@ function ReceiptCard({
                 </select>
               </div>
             </div>
-            <button
-              onClick={saveMeta}
-              disabled={metaSaving}
-              className="mt-2 px-3 py-1.5 text-xs font-medium rounded bg-zinc-100 dark:bg-zinc-800 text-zinc-700 dark:text-zinc-300 hover:bg-zinc-200 dark:hover:bg-zinc-700 disabled:opacity-50 flex items-center gap-1"
-            >
-              {metaSaving && <Loader2 className="h-3 w-3 animate-spin" />}
-              Save details
-            </button>
-          </div>
+            <div className="mt-3 flex flex-wrap items-center gap-2">
+              <button type="button" className="workspace-button" disabled={metaSaving} onClick={() => void saveMeta()}>Save details</button>
+              <button type="button" className="workspace-primary" disabled={metaSaving || !dateConfirmed || !metaBillId} onClick={() => void saveMeta(true)}>Attach receipt</button>
+            </div>
+            <p className="mt-2 text-xs text-slate-600">Attaching a receipt adds evidence. Record payments from the bill in Purchases.</p>
+            {metaError && <p role="alert" className="mt-2 text-sm text-red-700">{metaError}</p>}
+          </div>}
 
           <div className="mt-4 flex flex-wrap gap-2">
             {!isEditing ? (
@@ -658,17 +655,18 @@ function ReceiptCard({
                     onClick={onStartEdit}
                     className="px-3 py-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800"
                   >
-                    Edit
+                    {dateConfirmed ? 'Edit details' : 'Confirm date'}
                   </button>
                 )}
                 {canApprove && (
                   <>
                     <button
+                      disabled={!dateConfirmed || Boolean(metaBillId)}
                       onClick={onApprove}
-                      className="px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-1"
+                      className="disabled:opacity-50 px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-1"
                     >
                       <Check className="h-4 w-4" />
-                      Approve
+                      Post expense
                     </button>
                     <button
                       onClick={onReject}
@@ -684,9 +682,10 @@ function ReceiptCard({
               <>
                 <button
                   onClick={() => onSave(editData)}
-                  className="px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-50 rounded-lg hover:bg-blue-800"
+                  disabled={!validReceiptDate(editData.invoiceDate || editData.date || '')}
+                  className="disabled:opacity-50 px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-50 rounded-lg hover:bg-blue-800"
                 >
-                  Save
+                  Save receipt details
                 </button>
                 <button
                   onClick={onCancelEdit}

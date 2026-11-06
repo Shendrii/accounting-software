@@ -702,6 +702,8 @@ export function BookkeepingPage() {
                           entry.receipt && `Receipt${entry.receipt.vendor?.name ? ` · ${entry.receipt.vendor.name}` : ''}`,
                           entry.invoicePosting && `Invoice ${entry.invoicePosting.invoiceNo}`,
                           entry.invoicePayment && `Payment for ${entry.invoicePayment.invoice.invoiceNo}`,
+                          entry.billPosting && `Bill ${entry.billPosting.billNo}`,
+                          entry.billPayment && `Payment for ${entry.billPayment.bill.billNo}`,
                           ...(entry.invoices ?? []).map((invoice) => `Invoice ${invoice.invoiceNo}${invoice.customer?.name ? ` · ${invoice.customer.name}` : ''}`),
                           ...(entry.bills ?? []).map((bill) => `Bill ${bill.billNo}${bill.vendor?.name ? ` · ${bill.vendor.name}` : ''}`),
                         ].filter(Boolean);

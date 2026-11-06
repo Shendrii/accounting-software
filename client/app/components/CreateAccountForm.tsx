@@ -106,7 +106,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
             id="type"
             required
             value={formData.type}
-            onChange={(e) => setFormData({ ...formData, type: e.target.value as CreateAccountInput['type'] })}
+            onChange={(e) => setFormData({ ...formData, type: e.target.value as CreateAccountInput['type'], isBankAccount: e.target.value === 'ASSET' && formData.isBankAccount })}
             className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500"
           >
             <option value="ASSET">Asset</option>
@@ -132,7 +132,12 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
         </div>
 
         <div>
-          <label className="flex items-center">
+          {formData.type === 'ASSET' && <label className="mb-2 flex items-center gap-2 text-sm font-medium">
+              <input type="checkbox" checked={formData.isBankAccount ?? false}
+                onChange={event => setFormData({ ...formData, isBankAccount: event.target.checked })} />
+              Bank account for reconciliation
+            </label>}
+            <label className="flex items-center">
             <input
               type="checkbox"
               checked={formData.isActive}

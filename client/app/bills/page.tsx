@@ -1,20 +1,16 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
+import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Search, Loader2, Repeat } from 'lucide-react';
 import { getBills, getRecurringBills, triggerRecurring, type Bill, type BillStatus } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { decimalUnits, localDay } from '@/lib/money';
 
 import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice } from '@/app/components/WorkspaceUI';
-
-const STATUS_COLORS: Record<BillStatus, string> = {
-  DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
-  RECEIVED: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  PAID: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  VOID: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
-};
 
 function formatCurrency(v: string | number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
@@ -37,16 +33,22 @@ export function BillsPage() {
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<BillStatus | ''>('');
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const view = searchParams.get('view') ?? '';
+  const requestedStatus = searchParams.get('status') ?? '';
+  const statusFilter = (['DRAFT', 'RECEIVED', 'PAID', 'VOID'].includes(requestedStatus) ? requestedStatus : '') as BillStatus | '';
+  const filter = ['open', 'overdue', 'due-soon'].includes(view) ? view : statusFilter;
+  const apiStatus = ['open', 'overdue', 'due-soon'].includes(filter) ? 'RECEIVED' : statusFilter;
   const [tab, setTab] = useState<'all' | 'recurring'>('all');
   const [runningRecurring, setRunningRecurring] = useState(false);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
       const [data, recurring] = await Promise.all([
-        getBills(statusFilter ? { status: statusFilter } : undefined),
+        getBills(apiStatus ? { status: apiStatus } : undefined),
         getRecurringBills(),
       ]);
       setBills(data);
@@ -56,7 +58,7 @@ export function BillsPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [apiStatus]);
 
   async function handleRunRecurring() {
     setRunningRecurring(true);
@@ -75,13 +77,22 @@ export function BillsPage() {
     }
   }
 
-  useEffect(() => { load(); }, [statusFilter]);
+  useEffect(() => { void load(); }, [load]);
 
-  const filtered = bills.filter(
-    (b) =>
-      b.billNo.toLowerCase().includes(search.toLowerCase()) ||
-      (b.vendor?.name ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const today = localDay();
+  const soon = new Date(today + 'T00:00:00Z');
+  soon.setUTCDate(soon.getUTCDate() + 7);
+  const through = soon.toISOString().slice(0, 10);
+  const filtered = bills.filter(bill => {
+    const matchesSearch = bill.billNo.toLowerCase().includes(search.toLowerCase()) ||
+      (bill.vendor?.name ?? '').toLowerCase().includes(search.toLowerCase());
+    if (!matchesSearch || (apiStatus && bill.status !== apiStatus)) return false;
+    if (['open', 'overdue', 'due-soon'].includes(filter) && (!bill.postingEntryId || decimalUnits(bill.balanceDue ?? '0') <= BigInt(0))) return false;
+    const due = bill.dueDate.slice(0, 10);
+    if (filter === 'overdue') return due < today;
+    if (filter === 'due-soon') return due >= today && due <= through;
+    return true;
+  });
 
   return (
     <div className="workspace-page">
@@ -131,20 +142,24 @@ export function BillsPage() {
             />
           </div>
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as BillStatus | '')}
+            aria-label="Bill status" value={filter}
+            onChange={event => {
+              const value = event.target.value;
+              const query = ['open', 'overdue', 'due-soon'].includes(value) ? '?view=' + value : value ? '?status=' + value : '';
+              router.replace('/purchases/bills' + query, { scroll: false });
+            }}
             className="px-3 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">All Statuses</option>
-            {(['DRAFT', 'RECEIVED', 'PAID', 'VOID'] as BillStatus[]).map((s) => (
-              <option key={s} value={s}>{s}</option>
-            ))}
+            <option value="">All statuses</option>
+            <option value="open">Unpaid bills</option><option value="overdue">Overdue bills</option><option value="due-soon">Due within 7 days</option>
+            <option value="DRAFT">Draft</option><option value="PAID">Paid</option><option value="VOID">Void</option>
+            {filter === 'RECEIVED' && <option value="RECEIVED">Awaiting payment</option>}
           </select>
         </div>
         )}
 
         {tab === 'all' && (
-        <div className="workspace-panel overflow-hidden">
+        <div className="workspace-panel overflow-x-auto">
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -161,7 +176,7 @@ export function BillsPage() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                  {['Bill #', 'Vendor', 'Date', 'Due Date', 'Total', 'Status', ''].map((h) => (
+                  {['Bill #', 'Vendor', 'Date', 'Due Date', 'Open balance', 'Status', ''].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                       {h}
                     </th>
@@ -185,11 +200,10 @@ export function BillsPage() {
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{bill.vendor?.name ?? '-'}</td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{formatDate(bill.date)}</td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{formatDate(bill.dueDate)}</td>
-                    <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(bill.total)}</td>
+                    <td className="whitespace-nowrap px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">{bill.status === 'DRAFT' || bill.status === 'VOID' ? '—' : formatCurrency(bill.balanceDue ?? (bill.status === 'PAID' ? '0' : bill.total))}</td>
                     <td className="px-4 py-3">
-                      <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[bill.status]}`}>
-                        {bill.status}
-                      </span>
+                      <WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus>
+                      {bill.status === 'RECEIVED' && bill.dueDate.slice(0, 10) < today && <p className="mt-1 text-xs text-amber-800">Overdue</p>}
                     </td>
                     <td className="px-4 py-3">
                       <Link

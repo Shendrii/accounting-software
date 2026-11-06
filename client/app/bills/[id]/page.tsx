@@ -1,24 +1,26 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import {
-  getBill, receiveBill, payBill, voidBill, getAccounts,
+  getBill, receiveBill, payBill, voidBill, updateBill, getAccounts,
   type Bill, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
-import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import AccountingDialog from '@/app/components/AccountingDialog';
+import { decimalUnits, localDay } from '@/lib/money';
 
 function formatCurrency(v: string | number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
 }
 
 function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
 export function BillDetailPage() {
@@ -27,22 +29,26 @@ export function BillDetailPage() {
   const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [payModalOpen, setPayModalOpen] = useState(false);
-  const [payAccountId, setPayAccountId] = useState('');
+  const [paymentRequestId, setPaymentRequestId] = useState('');
+  const [paymentError, setPaymentError] = useState('');
+  const [coding, setCoding] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     try {
       const [b, accs] = await Promise.all([getBill(id), getAccounts()]);
       setBill(b);
-      setAccounts(accs.filter((a) => a.isActive && a.type === 'ASSET'));
+      setAccounts(accs.filter(account => account.isActive));
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not load the bill.');
     } finally {
       setLoading(false);
     }
-  }
+  }, [id]);
 
-  useEffect(() => { load(); }, [id]);
+  useEffect(() => { void load(); }, [load]);
 
   async function handleReceive() {
     if (!bill) return;
@@ -51,7 +57,7 @@ export function BillDetailPage() {
     try {
       const updated = await receiveBill(bill.id);
       setBill(updated);
-      toast.success('Bill marked as received');
+      toast.success('Bill posted to the ledger.');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to receive bill');
     } finally {
@@ -59,17 +65,41 @@ export function BillDetailPage() {
     }
   }
 
-  async function handlePay() {
-    if (!bill || !payAccountId) return;
+  async function handlePay(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!bill || actionLoading) return;
+    const values = new FormData(event.currentTarget);
+    setActionLoading(true);
+    setPaymentError('');
+    try {
+      const updated = await payBill(bill.id, {
+        paymentAccountId: String(values.get('paymentAccountId')),
+        amount: String(values.get('amount')), date: String(values.get('date')), requestId: paymentRequestId,
+      });
+      setBill(updated);
+      setPayModalOpen(false);
+      toast.success('Payment recorded.');
+    } catch (cause) {
+      setPaymentError(cause instanceof Error ? cause.message : 'Could not record payment.');
+    } finally {
+      setActionLoading(false);
+    }
+  }
+
+  async function saveCoding(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!bill?.lines) return;
+    const values = new FormData(event.currentTarget);
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await payBill(bill.id, payAccountId);
-      setBill(updated);
-      setPayModalOpen(false);
-      toast.success('Bill paid successfully');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to pay bill');
+      setBill(await updateBill(bill.id, { lines: bill.lines.map(line => ({
+        description: line.description, quantity: line.quantity, unitPrice: line.unitPrice, amount: line.amount,
+        accountId: String(values.get(line.id)),
+      })) }));
+      setCoding(false);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not save the bill accounts.');
     } finally {
       setActionLoading(false);
     }
@@ -107,6 +137,9 @@ export function BillDetailPage() {
     );
   }
 
+  const amountPaid = bill.amountPaid ?? (bill.status === 'PAID' ? bill.total : '0.00');
+  const balanceDue = bill.balanceDue ?? (bill.status === 'RECEIVED' ? bill.total : '0.00');
+
   return (
     <div className="workspace-page">
       <div className="workspace-content">
@@ -131,25 +164,30 @@ export function BillDetailPage() {
                 className="workspace-primary"
               >
                 {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Mark as Received
+                Post bill
               </button>
             )}
-            {bill.status === 'RECEIVED' && (
+            {bill.status === 'RECEIVED' && bill.postingEntryId && (
               <button
-                onClick={() => setPayModalOpen(true)}
+                onClick={() => {
+                  setPaymentRequestId(crypto.randomUUID());
+                  setPaymentError('');
+                  setPayModalOpen(true);
+                }}
                 disabled={actionLoading}
                 className="workspace-primary"
               >
-                Pay Bill
+                Record payment
               </button>
             )}
-            <button
+            {bill.status === 'DRAFT' && <button type="button" className="workspace-button" disabled={actionLoading} onClick={() => setCoding(current => !current)}>Assign line accounts</button>}
+            {decimalUnits(amountPaid) === BigInt(0) && <button
               onClick={handleVoid}
               disabled={actionLoading}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
-              Void Bill
-            </button>
+              Void bill
+            </button>}
           </div>
         )}
 
@@ -209,57 +247,56 @@ export function BillDetailPage() {
           )}
         </section>
         <WorkspacePanel title="Payment summary">
-          <div className="space-y-2 p-4 sm:p-5">
-            <p className="text-sm text-slate-600">{bill.status === 'RECEIVED' ? 'Amount due' : 'Bill total'}</p>
-            <p className="text-2xl font-semibold tracking-tight tabular-nums">{formatCurrency(bill.total)}</p>
-            <WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus>
-          </div>
+          <dl className="space-y-2 p-4 text-sm sm:p-5">
+            <div className="flex justify-between gap-3"><dt>Bill total</dt><dd>{formatCurrency(bill.total)}</dd></div>
+            <div className="flex justify-between gap-3"><dt>Payments recorded</dt><dd>{formatCurrency(amountPaid)}</dd></div>
+            {bill.status !== 'DRAFT' && <div className="flex justify-between gap-3 border-t border-slate-200 pt-2 font-semibold"><dt>Remaining balance</dt><dd>{formatCurrency(balanceDue)}</dd></div>}
+          </dl>
+          {!!bill.payments?.length && <ul className="divide-y divide-slate-200 border-t border-slate-200 px-4 text-sm">
+            {bill.payments.map(payment => <li key={payment.id} className="flex justify-between gap-2 py-2">
+              <span>{formatDate(payment.journalEntry.date)}</span><strong>{formatCurrency(payment.amount)}</strong>
+            </li>)}
+          </ul>}
+          {!!bill.receipts?.length && <p className="border-t border-slate-200 p-4 text-sm text-slate-600">
+            {bill.receipts.length} attached {bill.receipts.length === 1 ? 'receipt' : 'receipts'} · <Link className="font-semibold text-blue-800 underline" href="/inbox">View receipts</Link>
+          </p>}
         </WorkspacePanel>
         </div>
 
-        {/* Pay Modal */}
-        {payModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPayModalOpen(false)} />
-            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-sm mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Pay Bill</h3>
-                <button onClick={() => setPayModalOpen(false)} aria-label="Close">
-                  <X className="h-5 w-5 text-zinc-400" />
-                </button>
-              </div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-                Select the account to pay <strong>{formatCurrency(bill.total)}</strong> from.
-              </p>
-              <select
-                value={payAccountId}
-                onChange={(e) => setPayAccountId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
-              >
-                <option value="">Select payment account…</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                ))}
+        {coding && bill.status === 'DRAFT' && <WorkspacePanel title="Bill line accounts">
+          <form onSubmit={saveCoding} className="grid gap-3 p-4">
+            {bill.lines?.map(line => <label key={line.id} className="grid gap-1 text-sm font-semibold">{line.description}
+              <select name={line.id} className="workspace-field" defaultValue={line.accountId ?? ''} required>
+                <option value="">Select expense or asset account…</option>
+                {accounts.filter(account => account.type === 'EXPENSE' || account.type === 'ASSET' && !account.isBankAccount).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
               </select>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setPayModalOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handlePay}
-                  disabled={!payAccountId || actionLoading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Confirm Payment
-                </button>
-              </div>
+            </label>)}
+            <div><button type="submit" className="workspace-primary" disabled={actionLoading}>Save line accounts</button></div>
+          </form>
+        </WorkspacePanel>}
+
+        {payModalOpen && <AccountingDialog title="Record bill payment" busy={actionLoading} onDismiss={() => setPayModalOpen(false)}>
+          <form onSubmit={handlePay} className="space-y-3">
+            <p className="text-sm text-slate-600">Record a payment already made. The remaining bill balance is <strong>{formatCurrency(balanceDue)}</strong>.</p>
+            <label className="grid gap-1 text-sm font-semibold">Payment account
+              <select className="workspace-field" name="paymentAccountId" required disabled={actionLoading}>
+                <option value="">Select payment account…</option>
+                {accounts.filter(account => account.type === 'ASSET').map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+              </select>
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">Payment amount
+              <input name="amount" className="workspace-field" inputMode="decimal" defaultValue={balanceDue} required disabled={actionLoading} />
+            </label>
+            <label className="grid gap-1 text-sm font-semibold">Payment date
+              <input name="date" className="workspace-field" type="date" defaultValue={localDay()} required disabled={actionLoading} />
+            </label>
+            {paymentError && <WorkspaceNotice title="Payment could not be recorded">{paymentError}</WorkspaceNotice>}
+            <div className="flex justify-end gap-2">
+              <button type="button" className="workspace-button" disabled={actionLoading} onClick={() => setPayModalOpen(false)}>Cancel</button>
+              <button type="submit" className="workspace-primary" disabled={actionLoading}>{actionLoading ? 'Recording…' : 'Record payment'}</button>
             </div>
-          </div>
-        )}
+          </form>
+        </AccountingDialog>}
       </div>
     </div>
   );

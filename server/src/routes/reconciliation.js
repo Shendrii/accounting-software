@@ -1,357 +1,384 @@
 import express from 'express';
 import multer from 'multer';
 import { parse } from 'csv-parse/sync';
+import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
-
-const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+import {
+  Decimal, LedgerError, createPosting, decimalInput, decimalSum, ledgerAccounts, ledgerDate,
+  ledgerTransaction, nextDay, sendLedgerError,
+} from '../lib/ledger.js';
 
 const router = express.Router();
+const upload = multer({ storage: multer.memoryStorage(), limits: { fileSize: 5 * 1024 * 1024 } });
+const journalDetail = { journalEntry: { select: { date: true, description: true, referenceNo: true } } };
 
-function normalize(value) {
-  return (value || '').toLowerCase().replace(/[^a-z0-9\s]/g, ' ').replace(/\s+/g, ' ').trim();
+function signedAmount(value, label) {
+  const text = String(value ?? '').trim();
+  return text.startsWith('-') ? decimalInput(text.slice(1), label).negated() : decimalInput(text, label);
 }
 
-function similarity(left, right) {
-  const leftWords = new Set(normalize(left).split(' ').filter(Boolean));
-  const rightWords = new Set(normalize(right).split(' ').filter(Boolean));
-  if (!leftWords.size || !rightWords.size) return 0;
-  const shared = [...leftWords].filter((word) => rightWords.has(word)).length;
-  return shared / Math.max(leftWords.size, rightWords.size);
+function bankAmount(line) {
+  return new Decimal(line.debit).minus(line.credit);
 }
 
-router.post('/import', async (req, res) => {
-  try {
-    const { accountId, transactions } = req.body;
-    if (!accountId || !transactions?.length) {
-      return res.status(400).json({ error: 'accountId and transactions are required' });
-    }
+async function bankAccount(tx, workspaceId, accountId) {
+  if (typeof accountId !== 'string' || !accountId) throw new LedgerError('Choose a bank account.');
+  const account = await tx.account.findFirst({ where: { id: accountId, workspaceId, type: 'ASSET', isBankAccount: true, isActive: true } });
+  if (!account) throw new LedgerError('Choose an active bank account in this workspace.', 404);
+  return account;
+}
 
-    const created = await prisma.bankTransaction.createMany({
-      data: transactions.map((t) => ({
-        accountId,
-        date: new Date(t.date),
-        description: t.description,
-        amount: parseFloat(t.amount),
-      })),
-    });
-
-    res.status(201).json({ imported: created.count });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to import transactions' });
-  }
-});
-
-router.get('/:accountId/suggestions', async (req, res) => {
-  try {
-    const { accountId } = req.params;
-    const windowDays = Math.min(31, Math.max(1, Number(req.query.windowDays) || 5));
-    const account = await prisma.account.findFirst({ where: { id: accountId }, select: { id: true } });
-    if (!account) return res.status(404).json({ error: 'Bank account not found' });
-
-    const matchedLineIds = await getMatchedLineIds(req.workspace.id);
-    const [bankTransactions, journalLines] = await Promise.all([
-      prisma.bankTransaction.findMany({ where: { accountId, isMatched: false }, orderBy: { date: 'asc' } }),
-      prisma.journalLine.findMany({
-        where: {
-          accountId,
-          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
-          NOT: { id: { in: matchedLineIds } },
-        },
-        include: {
-          journalEntry: {
-            select: {
-              date: true, description: true, referenceNo: true,
-              receipt: { select: { id: true, extractedData: true, vendor: { select: { name: true } } } },
-              invoices: { select: { id: true, invoiceNo: true, customer: { select: { name: true } } } },
-              bills: { select: { id: true, billNo: true, vendor: { select: { name: true } } } },
-            },
-          },
-        },
-      }),
-    ]);
-    const millisecondsPerDay = 86400000;
-    const suggestions = bankTransactions.map((transaction) => {
-      const candidates = journalLines
-        .map((line) => {
-          const lineAmount = Math.max(Number(line.debit), Number(line.credit));
-          const transactionAmount = Math.abs(Number(transaction.amount));
-          const amountDelta = Math.abs(lineAmount - transactionAmount);
-          const percentDelta = transactionAmount ? amountDelta / transactionAmount : amountDelta;
-          const dateDistance = Math.abs(new Date(line.journalEntry.date).getTime() - new Date(transaction.date).getTime()) / millisecondsPerDay;
-          const sourceNames = [
-            line.journalEntry.receipt?.vendor?.name,
-            ...line.journalEntry.invoices.map((invoice) => invoice.customer?.name),
-            ...line.journalEntry.bills.map((bill) => bill.vendor?.name),
-            line.journalEntry.description,
-            line.description,
-          ].filter(Boolean).join(' ');
-          const exactAmount = amountDelta <= 0.01;
-          if ((!exactAmount && percentDelta > 0.05) || dateDistance > windowDays) return null;
-          const nameScore = similarity(transaction.description, sourceNames);
-          const score = (exactAmount ? 100 : 50 - percentDelta * 100) + Math.max(0, windowDays - dateDistance) + nameScore * 20;
-          const source = line.journalEntry.receipt
-            ? { type: 'receipt', id: line.journalEntry.receipt.id, label: line.journalEntry.receipt.vendor?.name ?? 'Receipt' }
-            : line.journalEntry.invoices[0]
-              ? { type: 'invoice', id: line.journalEntry.invoices[0].id, label: line.journalEntry.invoices[0].invoiceNo }
-              : line.journalEntry.bills[0]
-                ? { type: 'bill', id: line.journalEntry.bills[0].id, label: line.journalEntry.bills[0].billNo }
-                : { type: 'journal', id: line.journalEntryId, label: line.journalEntry.description };
-          return { journalLineId: line.id, amount: lineAmount, date: line.journalEntry.date, description: line.description || line.journalEntry.description, source, exactAmount, amountDelta, dateDistance, score };
-        })
-        .filter(Boolean)
-        .sort((a, b) => b.score - a.score)
-        .slice(0, 3);
-      return { bankTransactionId: transaction.id, candidates };
-    });
-    res.json({ windowDays, suggestions });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to generate match suggestions' });
-  }
-});
-
-router.get('/:accountId', async (req, res) => {
-  try {
-    const { accountId } = req.params;
-
-    const account = await prisma.account.findFirst({ where: { id: accountId }, select: { id: true } });
-    if (!account) return res.status(404).json({ error: 'Bank account not found' });
-    const [bankTransactions, journalLines] = await Promise.all([
-      prisma.bankTransaction.findMany({
-        where: { accountId, isMatched: false },
-        orderBy: { date: 'asc' },
-      }),
-      prisma.journalLine.findMany({
-        where: {
-          accountId,
-          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
-          NOT: { id: { in: await getMatchedLineIds(req.workspace.id) } },
-        },
-        include: { journalEntry: { select: { date: true, description: true, referenceNo: true } } },
-        orderBy: { journalEntry: { date: 'asc' } },
-      }),
-    ]);
-
-    res.json({ bankTransactions, journalLines });
-  } catch (error) {
-    console.error(error);
-    res.status(500).json({ error: 'Failed to fetch reconciliation data' });
-  }
-});
-
-async function getMatchedLineIds(workspaceId) {
-  const matched = await prisma.bankTransaction.findMany({
-    where: { workspaceId, isMatched: true, matchedLineId: { not: null } },
-    select: { matchedLineId: true },
+function lastVerified(tx, workspaceId, accountId) {
+  return tx.reconciliation.findFirst({
+    where: { workspaceId, accountId, status: 'COMPLETE', proof: { not: Prisma.DbNull } },
+    orderBy: { statementDate: 'desc' },
   });
-  return matched.map((m) => m.matchedLineId).filter(Boolean);
 }
 
-router.post('/match', async (req, res) => {
+function postedLines(workspaceId, accountId) {
+  return { accountId, journalEntry: { workspaceId, status: 'POSTED' } };
+}
+
+async function statementReview(tx, workspaceId, input) {
+  const { accountId } = input;
+  await bankAccount(tx, workspaceId, accountId);
+  const start = ledgerDate(input.statementStart, 'Statement starting date');
+  const end = ledgerDate(input.statementDate, 'Statement ending date');
+  if (start > end) throw new LedgerError('The statement ending date must be on or after its starting date.');
+  const from = start.toISOString().slice(0, 10);
+  const through = end.toISOString().slice(0, 10);
+  const cutoff = nextDay(through);
+  const opening = signedAmount(input.openingBalance, 'Statement opening balance');
+  const ending = signedAmount(input.statementBalance, 'Statement ending balance');
+  const countText = String(input.statementLineCount ?? '');
+  if (!/^\d{1,7}$/.test(countText)) throw new LedgerError('Enter the number of transaction lines on the bank statement.');
+  const statementLineCount = Number(countText);
+  if (input.outstandingIds !== undefined && (!Array.isArray(input.outstandingIds) || input.outstandingIds.some(id => typeof id !== 'string'))) {
+    throw new LedgerError('Select valid outstanding items.');
+  }
+  const prior = await lastVerified(tx, workspaceId, accountId);
+  if (prior && (start.valueOf() !== nextDay(prior.statementDate.toISOString()).valueOf() || !opening.eq(prior.statementBalance))) {
+    throw new LedgerError('Start the day after the last verified statement and use its ending balance as the opening balance.', 409);
+  }
+  const lines = postedLines(workspaceId, accountId);
+  const carriedIds = prior?.proof.outstanding.map(line => line.id) ?? [];
+  const [transactions, candidates, earlier] = await Promise.all([
+    tx.bankTransaction.findMany({ where: { workspaceId, accountId, date: { gte: start, lt: cutoff } }, orderBy: [{ date: 'asc' }, { id: 'asc' }] }),
+    tx.journalLine.findMany({
+      where: { ...lines, OR: [
+        { journalEntry: { ...lines.journalEntry, date: { gte: start, lt: cutoff } } },
+        { id: { in: carriedIds }, journalEntry: { ...lines.journalEntry, date: { lt: cutoff } } },
+      ] },
+      include: journalDetail,
+      orderBy: [{ journalEntry: { date: 'asc' } }, { id: 'asc' }],
+    }),
+    tx.journalLine.aggregate({
+      where: { ...lines, journalEntry: { ...lines.journalEntry, date: { lt: start } } },
+      _sum: { debit: true, credit: true },
+    }),
+  ]);
+  const openingBook = new Decimal(earlier._sum.debit ?? 0).minus(earlier._sum.credit ?? 0);
+  const openingAgrees = openingBook.eq(prior?.proof.adjustedBook ?? opening);
+  const byId = new Map(candidates.map(line => [line.id, line]));
+  const matched = new Set();
+  const bankTransactions = transactions.map(row => {
+    const line = row.isMatched ? byId.get(row.matchedLineId) : null;
+    const valid = Boolean(line && bankAmount(line).eq(row.amount));
+    if (valid) matched.add(line.id);
+    return { ...row, validMatch: valid, matchDescription: valid ? line.journalEntry.description : null };
+  });
+  const outstanding = candidates.filter(line => !matched.has(line.id)).map(line => ({
+    id: line.id,
+    date: line.journalEntry.date,
+    description: line.description || line.journalEntry.description,
+    referenceNo: line.journalEntry.referenceNo,
+    amount: bankAmount(line).toFixed(2),
+  })).filter(line => !new Decimal(line.amount).isZero());
+  const availableIds = new Set(outstanding.map(line => line.id));
+  const confirmed = new Set(input.outstandingIds ?? []);
+  if (Array.from(confirmed).some(id => !availableIds.has(id))) throw new LedgerError('Outstanding items changed. Refresh the review and confirm them again.', 409);
+  const cleared = opening.plus(decimalSum(bankTransactions.filter(row => row.validMatch).map(row => row.amount)));
+  const importedEnding = opening.plus(decimalSum(transactions.map(row => row.amount)));
+  const adjustedBook = openingBook.plus(decimalSum(candidates.filter(line => line.journalEntry.date >= start).map(bankAmount)));
+  const adjustedBank = ending.plus(decimalSum(outstanding.filter(line => confirmed.has(line.id)).map(line => line.amount)));
+  const difference = adjustedBank.minus(adjustedBook);
+  const unresolved = bankTransactions.filter(row => !row.validMatch).length;
+  const canComplete = openingAgrees && transactions.length === statementLineCount && importedEnding.eq(ending) && unresolved === 0 &&
+    confirmed.size === outstanding.length && cleared.eq(ending) && difference.isZero();
+  const totals = {
+    statementStart: from, statementDate: through, openingBalance: opening.toFixed(2),
+    statementBalance: ending.toFixed(2), statementLineCount: String(statementLineCount), openingBook: openingBook.toFixed(2),
+    deposits: decimalSum(transactions.filter(row => row.amount.gt(0)).map(row => row.amount)).toFixed(2),
+    withdrawals: decimalSum(transactions.filter(row => row.amount.lt(0)).map(row => row.amount)).toFixed(2),
+    bankFees: decimalSum(candidates.filter(line => line.journalEntry.referenceNo?.startsWith('bank-fee:') &&
+      line.journalEntry.date >= start).map(bankAmount)).toFixed(2),
+    clearedBalance: cleared.toFixed(2), importedEnding: importedEnding.toFixed(2),
+    adjustedBank: adjustedBank.toFixed(2), adjustedBook: adjustedBook.toFixed(2),
+    difference: difference.toFixed(2), unresolved, openingAgrees,
+  };
+  return { ...totals, bankTransactions, outstanding, canComplete };
+}
+
+router.get('/history/:accountId', async (req, res) => {
   try {
-    const { bankTransactionId, journalLineId } = req.body;
-    if (!bankTransactionId || !journalLineId) {
-      return res.status(400).json({ error: 'bankTransactionId and journalLineId are required' });
-    }
-
-    const [transaction, journalLine] = await Promise.all([
-      prisma.bankTransaction.findFirst({ where: { id: bankTransactionId }, select: { id: true, accountId: true } }),
-      prisma.journalLine.findFirst({ where: { id: journalLineId, journalEntry: { workspaceId: req.workspace.id } }, select: { id: true, accountId: true } }),
-    ]);
-    if (!transaction || !journalLine || transaction.accountId !== journalLine.accountId) {
-      return res.status(404).json({ error: 'Matching transaction or journal line not found' });
-    }
-    await prisma.bankTransaction.update({
-      where: { id: bankTransactionId },
-      data: { isMatched: true, matchedLineId: journalLineId },
-    });
-
-    res.json({ success: true });
+    res.json(await prisma.reconciliation.findMany({
+      where: { workspaceId: req.workspace.id, accountId: req.params.accountId },
+      orderBy: [{ statementDate: 'desc' }, { createdAt: 'desc' }],
+    }));
   } catch (error) {
-    if (error.code === 'P2002') {
-      return res.status(400).json({ error: 'This journal line is already matched' });
-    }
-    res.status(500).json({ error: 'Failed to match transaction' });
+    sendLedgerError(res, error, 'Failed to load reconciliation history.');
   }
 });
 
-router.post('/unmatch', async (req, res) => {
+router.post('/review', async (req, res) => {
   try {
-    const { bankTransactionId } = req.body;
-    if (!bankTransactionId) return res.status(400).json({ error: 'bankTransactionId is required' });
-
-    const transaction = await prisma.bankTransaction.findFirst({ where: { id: bankTransactionId }, select: { id: true } });
-    if (!transaction) return res.status(404).json({ error: 'Bank transaction not found' });
-    await prisma.bankTransaction.update({
-      where: { id: bankTransactionId },
-      data: { isMatched: false, matchedLineId: null },
-    });
-
-    res.json({ success: true });
+    res.json(await ledgerTransaction(tx => statementReview(tx, req.workspace.id, req.body)));
   } catch (error) {
-    res.status(500).json({ error: 'Failed to unmatch transaction' });
+    sendLedgerError(res, error, 'Failed to load statement review.');
   }
 });
 
 router.post('/complete', async (req, res) => {
   try {
-    const { accountId, statementDate, statementBalance } = req.body;
-    if (!accountId || !statementDate || statementBalance === undefined) {
-      return res.status(400).json({ error: 'accountId, statementDate, and statementBalance are required' });
+    const workspaceId = req.workspace.id;
+    const { accountId, outstandingIds } = req.body;
+    if (typeof accountId !== 'string' || !accountId) throw new LedgerError('Choose a bank account.');
+    if (!Array.isArray(outstandingIds) || outstandingIds.some(id => typeof id !== 'string')) {
+      throw new LedgerError('Confirm outstanding items before completing the reconciliation.');
     }
-
-    const reconciliation = await prisma.reconciliation.create({
-      data: {
-        accountId,
-        statementDate: new Date(statementDate),
-        statementBalance: parseFloat(statementBalance),
-        status: 'COMPLETE',
-      },
-    });
-
-    res.status(201).json(reconciliation);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to complete reconciliation' });
-  }
-});
-
-router.get('/history/:accountId', async (req, res) => {
-  try {
-    const reconciliations = await prisma.reconciliation.findMany({
-      where: { accountId: req.params.accountId },
-      orderBy: { statementDate: 'desc' },
-    });
-    res.json(reconciliations);
-  } catch (error) {
-    res.status(500).json({ error: 'Failed to fetch reconciliation history' });
-  }
-});
-
-/**
- * POST /api/reconciliation/import-csv
- * Accepts a CSV file upload. Columns detected automatically:
- *   date, description (or memo/narrative), amount (or debit/credit)
- * After import, auto-suggests matches with journal lines (±3 days, same amount).
- */
-router.post('/import-csv', upload.single('csv'), async (req, res) => {
-  try {
-    const { accountId } = req.body;
-    if (!accountId) return res.status(400).json({ error: 'accountId is required' });
-    if (!req.file) return res.status(400).json({ error: 'csv file is required' });
-
-    const csvText = req.file.buffer.toString('utf-8');
-    const records = parse(csvText, {
-      columns: true,
-      skip_empty_lines: true,
-      trim: true,
-      bom: true,
-    });
-
-    if (!records.length) return res.status(400).json({ error: 'CSV file is empty or invalid' });
-
-    // Normalise column names (case-insensitive)
-    const headers = Object.keys(records[0]).map((h) => h.toLowerCase().trim());
-    const findCol = (...names) => {
-      for (const n of names) {
-        const h = headers.find((h) => h.includes(n));
-        if (h) return Object.keys(records[0]).find((k) => k.toLowerCase().trim() === h);
-      }
-      return null;
-    };
-
-    const dateCol = findCol('date', 'transaction date', 'txn date', 'trans date');
-    const descCol = findCol('description', 'memo', 'narrative', 'details', 'note', 'desc');
-    const amountCol = findCol('amount', 'amt');
-    const debitCol = findCol('debit', 'withdrawal');
-    const creditCol = findCol('credit', 'deposit');
-
-    if (!dateCol) return res.status(400).json({ error: 'CSV must have a date column' });
-    if (!amountCol && !debitCol && !creditCol) {
-      return res.status(400).json({ error: 'CSV must have amount, debit, or credit columns' });
-    }
-
-    const transactions = [];
-    for (const row of records) {
-      const rawDate = row[dateCol];
-      const parsed = new Date(rawDate);
-      if (isNaN(parsed.getTime())) continue;
-
-      let amount;
-      if (amountCol) {
-        amount = parseFloat(String(row[amountCol]).replace(/[^0-9.-]/g, ''));
-      } else {
-        const debit = parseFloat(String(row[debitCol] ?? 0).replace(/[^0-9.-]/g, '')) || 0;
-        const credit = parseFloat(String(row[creditCol] ?? 0).replace(/[^0-9.-]/g, '')) || 0;
-        amount = credit - debit;
-      }
-
-      if (isNaN(amount)) continue;
-
-      const description = descCol ? String(row[descCol]) : 'Imported transaction';
-      transactions.push({ date: parsed, description, amount });
-    }
-
-    if (!transactions.length) {
-      return res.status(400).json({ error: 'No valid transactions found in CSV' });
-    }
-
-    // Import, skipping duplicates (same account, date, amount, description)
-    let imported = 0;
-    for (const t of transactions) {
-      const existing = await prisma.bankTransaction.findFirst({
-        where: { accountId, date: t.date, amount: t.amount, description: t.description },
+    const result = await ledgerTransaction(async tx => {
+      const date = ledgerDate(req.body.statementDate, 'Statement ending date');
+      const existing = await tx.reconciliation.findFirst({
+        where: { workspaceId, accountId, statementDate: date, proof: { not: Prisma.DbNull } },
       });
-      if (!existing) {
-        await prisma.bankTransaction.create({
-          data: { accountId, date: t.date, description: t.description, amount: t.amount },
-        });
-        imported++;
+      if (existing) {
+        const sameOutstanding = existing.proof.outstanding.length === new Set(outstandingIds).size &&
+          existing.proof.outstanding.every(line => outstandingIds.includes(line.id));
+        if (sameOutstanding && existing.proof.statementStart === ledgerDate(req.body.statementStart).toISOString().slice(0, 10) &&
+            existing.proof.statementLineCount === String(Number(req.body.statementLineCount)) &&
+            signedAmount(req.body.openingBalance, 'Statement opening balance').eq(existing.proof.openingBalance) &&
+            signedAmount(req.body.statementBalance, 'Statement ending balance').eq(existing.statementBalance)) return existing;
+        throw new LedgerError('This statement has already been reconciled.', 409);
       }
-    }
-
-    // Auto-suggest matches: find journal lines within ±3 days with same amount
-    const importedTxns = await prisma.bankTransaction.findMany({
-      where: { accountId, isMatched: false },
-    });
-
-    const threeDays = 3 * 24 * 60 * 60 * 1000;
-    let suggestions = 0;
-    for (const txn of importedTxns) {
-      const matchedLineIds = await getMatchedLineIds(req.workspace.id);
-      const candidate = await prisma.journalLine.findFirst({
-        where: {
-          accountId,
-          journalEntry: { status: 'POSTED', workspaceId: req.workspace.id },
-          NOT: { id: { in: matchedLineIds } },
-          OR: [
-            { debit: Math.abs(txn.amount) },
-            { credit: Math.abs(txn.amount) },
-          ],
-          journalEntry: {
-            status: 'POSTED',
-            workspaceId: req.workspace.id,
-            date: {
-              gte: new Date(new Date(txn.date).getTime() - threeDays),
-              lte: new Date(new Date(txn.date).getTime() + threeDays),
-            },
+      const { bankTransactions, ...proof } = await statementReview(tx, workspaceId, req.body);
+      if (!proof.canComplete) {
+        throw new LedgerError('Completion requires verified opening and ending balances, all statement lines matched, confirmed outstanding items, and a zero unexplained difference.', 409);
+      }
+      const record = await tx.reconciliation.create({
+        data: {
+          workspaceId, accountId, statementDate: date, statementBalance: proof.statementBalance, status: 'COMPLETE',
+          proof: {
+            ...proof, completedById: req.user.id,
+            matches: bankTransactions.map(({ id, date, description, amount, matchedLineId, matchDescription }) => ({
+              id, date: date.toISOString(), description, amount: amount.toFixed(2), matchedLineId, matchDescription,
+            })),
+            outstanding: proof.outstanding.map(line => ({ ...line, date: line.date.toISOString() })),
           },
         },
       });
-
-      if (candidate && !candidate.matchedLineId) {
-        await prisma.bankTransaction.update({
-          where: { id: txn.id },
-          data: { isMatched: true, matchedLineId: candidate.id },
-        });
-        suggestions++;
-      }
-    }
-
-    res.status(201).json({ imported, suggestions, total: transactions.length });
+      await tx.bankTransaction.updateMany({
+        where: { workspaceId, accountId, id: { in: bankTransactions.map(row => row.id) } },
+        data: { reconciliationId: record.id },
+      });
+      return record;
+    });
+    res.status(201).json(result);
   } catch (error) {
-    console.error('CSV import error:', error);
-    res.status(500).json({ error: 'Failed to import CSV: ' + error.message });
+    sendLedgerError(res, error, 'Failed to complete reconciliation.');
+  }
+});
+
+async function reviewableTransaction(tx, workspaceId, id) {
+  if (typeof id !== 'string' || !id) throw new LedgerError('Select a statement transaction.');
+  const row = await tx.bankTransaction.findFirst({ where: { id, workspaceId } });
+  if (!row) throw new LedgerError('Statement transaction not found.', 404);
+  await bankAccount(tx, workspaceId, row.accountId);
+  const prior = await lastVerified(tx, workspaceId, row.accountId);
+  if (row.reconciliationId || prior && row.date < nextDay(prior.statementDate.toISOString())) {
+    throw new LedgerError('This transaction belongs to a completed reconciliation.', 409);
+  }
+  return row;
+}
+
+router.post('/match', async (req, res) => {
+  try {
+    const workspaceId = req.workspace.id;
+    const { bankTransactionId, journalLineId } = req.body;
+    if (typeof journalLineId !== 'string' || !journalLineId) throw new LedgerError('Select a posted ledger line.');
+    await ledgerTransaction(async tx => {
+      const row = await reviewableTransaction(tx, workspaceId, bankTransactionId);
+      if (row.isMatched && row.matchedLineId === journalLineId) return;
+      if (row.isMatched) throw new LedgerError('Undo the existing match before choosing another.', 409);
+      const line = await tx.journalLine.findFirst({ where: { id: journalLineId, ...postedLines(workspaceId, row.accountId) } });
+      if (!line) throw new LedgerError('Posted ledger line not found for this bank account.', 404);
+      if (!bankAmount(line).eq(row.amount)) throw new LedgerError('The ledger line must have the same amount and direction as the statement transaction.');
+      await tx.bankTransaction.update({ where: { id: row.id, workspaceId }, data: { isMatched: true, matchedLineId: line.id } });
+    });
+    res.json({ success: true });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to match the statement transaction.');
+  }
+});
+
+router.post('/unmatch', async (req, res) => {
+  try {
+    const workspaceId = req.workspace.id;
+    await ledgerTransaction(async tx => {
+      const row = await reviewableTransaction(tx, workspaceId, req.body.bankTransactionId);
+      await tx.bankTransaction.update({ where: { id: row.id, workspaceId }, data: { isMatched: false, matchedLineId: null } });
+    });
+    res.json({ success: true });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to undo the match.');
+  }
+});
+
+router.post('/post-fee', async (req, res) => {
+  try {
+    const workspaceId = req.workspace.id;
+    const { bankTransactionId, expenseAccountId } = req.body;
+    await ledgerTransaction(async tx => {
+      const row = await reviewableTransaction(tx, workspaceId, bankTransactionId);
+      const referenceNo = 'bank-fee:' + row.id;
+      const existing = await tx.journalEntry.findFirst({
+        where: { workspaceId, referenceNo, status: 'POSTED', reversal: { is: null } },
+        include: { journalLines: true },
+      });
+      if (existing) {
+        if (row.matchedLineId && existing.journalLines.some(line => line.id === row.matchedLineId)) return;
+        throw new LedgerError('This fee was already posted. Match the existing ledger entry.', 409);
+      }
+      if (row.isMatched || !row.amount.lt(0)) throw new LedgerError('Select an unmatched withdrawal to record a bank fee.');
+      const accounts = await ledgerAccounts(tx, workspaceId, [expenseAccountId]);
+      if (accounts.get(expenseAccountId).type !== 'EXPENSE') throw new LedgerError('Select an expense account for bank fees.');
+      const amount = row.amount.abs();
+      const entry = await createPosting(tx, workspaceId, {
+        date: row.date, description: row.description, referenceNo,
+        lines: [{ accountId: expenseAccountId, debit: amount }, { accountId: row.accountId, credit: amount }],
+      });
+      const line = entry.journalLines.find(item => item.accountId === row.accountId);
+      await tx.bankTransaction.update({ where: { id: row.id, workspaceId }, data: { isMatched: true, matchedLineId: line.id } });
+    });
+    res.json({ success: true });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to post the bank fee.');
+  }
+});
+
+async function importTransactions(workspaceId, accountId, records) {
+  if (!Array.isArray(records) || !records.length) throw new LedgerError('Add at least one statement transaction.');
+  return ledgerTransaction(async tx => {
+    await bankAccount(tx, workspaceId, accountId);
+    const prior = await lastVerified(tx, workspaceId, accountId);
+    const lockedBefore = prior && nextDay(prior.statementDate.toISOString());
+    const existingCounts = new Map();
+    const data = [];
+    for (const record of records) {
+      const date = ledgerDate(record.date, 'Transaction date');
+      const description = typeof record.description === 'string' ? record.description.trim() : '';
+      const amount = signedAmount(record.amount, 'Transaction amount');
+      if (!description || amount.isZero()) throw new LedgerError('Every statement line needs a description and a nonzero amount.');
+      const key = JSON.stringify([date.toISOString(), description, amount.toFixed(2)]);
+      const identity = { workspaceId, accountId, date, description, amount };
+      if (!existingCounts.has(key)) existingCounts.set(key, await tx.bankTransaction.count({ where: { ...identity, date: { gte: date, lt: nextDay(date.toISOString()) } } }));
+      if (existingCounts.get(key) > 0) {
+        existingCounts.set(key, existingCounts.get(key) - 1);
+        continue;
+      }
+      if (lockedBefore && date < lockedBefore) throw new LedgerError('A new line cannot be imported into a completed statement period.', 409);
+      data.push(identity);
+    }
+    if (data.length) await tx.bankTransaction.createMany({ data });
+    return data.length;
+  });
+}
+
+router.post('/import', async (req, res) => {
+  try {
+    const imported = await importTransactions(req.workspace.id, req.body.accountId, req.body.transactions);
+    res.status(201).json({ imported });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to import statement transactions.');
+  }
+});
+
+router.post('/import-csv', upload.single('csv'), async (req, res) => {
+  try {
+    if (!req.file) throw new LedgerError('Choose a statement CSV file.');
+    let records;
+    try { records = parse(req.file.buffer, { columns: true, skip_empty_lines: true, trim: true, bom: true }); }
+    catch { throw new LedgerError('The statement CSV could not be read. Check its columns and rows.'); }
+    const headers = Object.keys(records[0] ?? {});
+    const find = (...names) => headers.find(header => names.includes(header.trim().toLowerCase()));
+    const dateCol = find('date', 'transaction date', 'txn date', 'trans date');
+    const amountCol = find('amount', 'amt');
+    const debitCol = find('debit', 'withdrawal', 'withdrawals');
+    const creditCol = find('credit', 'deposit', 'deposits');
+    const descCol = find('description', 'memo', 'narrative', 'details', 'note', 'desc');
+    if (!dateCol || !(amountCol || debitCol || creditCol)) throw new LedgerError('CSV needs a date and an amount or debit and credit columns.');
+    const clean = value => String(value ?? '').trim().replace(/^(-?)\$/, '$1').replaceAll(',', '');
+    const rows = records.map((row, index) => {
+      try {
+        const rawDate = row[dateCol];
+        const usDate = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(rawDate);
+        const date = usDate ? [usDate[3], usDate[1].padStart(2, '0'), usDate[2].padStart(2, '0')].join('-') : rawDate;
+        ledgerDate(date, 'Transaction date');
+        const amount = amountCol ? signedAmount(clean(row[amountCol]), 'Amount') :
+          decimalInput(clean(row[creditCol]) || 0, 'Credit').minus(decimalInput(clean(row[debitCol]) || 0, 'Debit'));
+        return { date, description: row[descCol] || 'Statement transaction', amount: amount.toFixed(2) };
+      } catch (error) {
+        if (error instanceof LedgerError) throw new LedgerError('CSV row ' + (index + 2) + '. ' + error.message);
+        throw error;
+      }
+    });
+    const imported = await importTransactions(req.workspace.id, req.body.accountId, rows);
+    res.status(201).json({ imported, suggestions: 0, total: rows.length });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to import the statement CSV.');
+  }
+});
+
+// Existing readers use these routes to inspect available transactions and matches.
+router.get('/:accountId/suggestions', async (req, res) => {
+  try {
+    const workspaceId = req.workspace.id;
+    const { accountId } = req.params;
+    await bankAccount(prisma, workspaceId, accountId);
+    const { transactions, lines } = await available(prisma, workspaceId, accountId);
+    const windowDays = Math.min(31, Math.max(1, Number(req.query.windowDays) || 5));
+    const suggestions = transactions.map(row => ({
+      bankTransactionId: row.id,
+      candidates: lines.filter(line => bankAmount(line).eq(row.amount)).map(line => ({
+        journalLineId: line.id, amount: Number(row.amount), date: line.journalEntry.date,
+        description: line.description || line.journalEntry.description, exactAmount: true, amountDelta: 0,
+        dateDistance: Math.abs(line.journalEntry.date - row.date) / 86400000,
+        source: { type: 'journal', id: line.journalEntryId, label: line.journalEntry.description },
+      })).filter(line => line.dateDistance <= windowDays).sort((a, b) => a.dateDistance - b.dateDistance).slice(0, 3),
+    }));
+    res.json({ windowDays, suggestions });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to load match suggestions.');
+  }
+});
+
+async function available(tx, workspaceId, accountId) {
+  const rows = await tx.bankTransaction.findMany({ where: { workspaceId, accountId }, orderBy: { date: 'asc' } });
+  const matched = rows.filter(row => row.isMatched && row.matchedLineId).map(row => row.matchedLineId);
+  const lines = await tx.journalLine.findMany({
+    where: { ...postedLines(workspaceId, accountId), id: { notIn: matched } },
+    include: journalDetail,
+    orderBy: { journalEntry: { date: 'asc' } },
+  });
+  return { transactions: rows.filter(row => !row.isMatched), lines };
+}
+
+router.get('/:accountId', async (req, res) => {
+  try {
+    await bankAccount(prisma, req.workspace.id, req.params.accountId);
+    const { transactions, lines } = await available(prisma, req.workspace.id, req.params.accountId);
+    res.json({ bankTransactions: transactions, journalLines: lines });
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to load reconciliation transactions.');
   }
 });
 

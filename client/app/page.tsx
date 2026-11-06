@@ -10,7 +10,7 @@ import { MarketingLanding } from '@/app/components/MarketingLanding';
 import { CloseProgress, InvoiceActivity, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
-const openBills = () => getBills({ status: 'RECEIVED' });
+const openBills = async () => (await getBills({ status: 'RECEIVED' })).filter(bill => bill.postingEntryId);
 const recentInvoices = () => getInvoices();
 
 function Dashboard() {
@@ -21,7 +21,7 @@ function Dashboard() {
   const invoices = useWorkspaceData(recentInvoices);
   const overdueBills = bills.data?.filter(bill => bill.dueDate.slice(0, 10) < localDay());
   const reviewCount = receipts.data ?? undefined;
-  const unpaidTotal = bills.data?.reduce((total, bill) => total + decimalUnits(bill.total), BigInt(0));
+  const unpaidTotal = bills.data?.reduce((total, bill) => total + decimalUnits(bill.balanceDue ?? bill.total), BigInt(0));
   const empty = summary.data && bills.data?.length === 0 && invoices.data?.length === 0 && reviewCount === 0
     && close.data && close.data.draftJournalEntries === 0 && close.data.unmatchedBankTransactions === 0
     && decimalUnits(summary.data.cashBalance) === BigInt(0);

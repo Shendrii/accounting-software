@@ -20,10 +20,10 @@ export const navigationClusters: Array<{ label: string; items: NavigationItem[] 
   {
     label: 'Daily work',
     items: [
-      { name: 'Inbox', href: '/inbox', icon: BellDot, badge: 'inbox' },
+      { name: 'Receipts', href: '/inbox', icon: BellDot, badge: 'inbox' },
       { name: 'Sales', href: '/sales', icon: ReceiptText },
       { name: 'Purchases', href: '/purchases', icon: ShoppingCart },
-      { name: 'Banking', href: '/banking', icon: Landmark },
+      { name: 'Bank reconciliation', href: '/banking', icon: Landmark },
     ],
   },
   {

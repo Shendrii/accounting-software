@@ -1,8 +1,9 @@
 'use client';
 
-import { useEffect, useState, Suspense } from 'react';
+import { useCallback, useEffect, useState, Suspense } from 'react';
 import Link from 'next/link';
 import { useRouter, useSearchParams } from 'next/navigation';
+import { decimalUnits, localDay } from '@/lib/money';
 import { Plus, Search, Loader2 } from 'lucide-react';
 import { getInvoices, type Invoice, type InvoiceStatus } from '@/lib/api';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
@@ -23,48 +24,43 @@ function InvoicesContent() {
   const searchParams = useSearchParams();
   const router = useRouter();
 
-  const initialStatus = (searchParams.get('status') as InvoiceStatus | null) ?? '';
-
+  const view = searchParams.get('view');
+  const requestedStatus = searchParams.get('status');
+  const statusFilter = (['DRAFT', 'SENT', 'PAID', 'VOID'].includes(requestedStatus ?? '') ? requestedStatus : '') as InvoiceStatus | '';
+  const filter = view === 'open' || view === 'overdue' ? view : statusFilter;
+  const apiStatus = filter === 'open' || filter === 'overdue' ? 'SENT' : statusFilter;
   const [invoices, setInvoices] = useState<Invoice[]>([]);
   const [loading, setLoading] = useState(true);
   const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
-  const [statusFilter, setStatusFilter] = useState<InvoiceStatus | ''>(initialStatus);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
-      const data = await getInvoices(statusFilter ? { status: statusFilter } : undefined);
-      setInvoices(data);
+      setInvoices(await getInvoices(apiStatus ? { status: apiStatus } : undefined));
     } catch (err: unknown) {
       setLoadError(err instanceof Error ? err.message : 'Failed to load invoices');
     } finally {
       setLoading(false);
     }
+  }, [apiStatus]);
+
+  useEffect(() => { void load(); }, [load]);
+
+  function selectFilter(next: string) {
+    const query = next === 'open' || next === 'overdue' ? '?view=' + next : next ? '?status=' + next : '';
+    router.replace('/sales/invoices' + query, { scroll: false });
   }
 
-  useEffect(() => {
-    load();
-    // Sync URL param
-    const params = new URLSearchParams(searchParams.toString());
-    if (statusFilter) {
-      params.set('status', statusFilter);
-    } else {
-      params.delete('status');
-    }
-    const query = params.toString();
-    if (query !== searchParams.toString()) {
-      router.replace(`/sales/invoices${query ? '?' + query : ''}`, { scroll: false });
-    }
-  // eslint-disable-next-line react-hooks/exhaustive-deps
-  }, [statusFilter]);
-
-  const filtered = invoices.filter(
-    (inv) =>
-      inv.invoiceNo.toLowerCase().includes(search.toLowerCase()) ||
-      (inv.customer?.name ?? '').toLowerCase().includes(search.toLowerCase())
-  );
+  const filtered = invoices.filter(inv => {
+    const matchesSearch = inv.invoiceNo.toLowerCase().includes(search.toLowerCase()) ||
+      (inv.customer?.name ?? '').toLowerCase().includes(search.toLowerCase());
+    if (!matchesSearch) return false;
+    if (filter !== 'open' && filter !== 'overdue') return !filter || inv.status === filter;
+    return inv.status === 'SENT' && inv.postingEntryId && decimalUnits(inv.balanceDue) > BigInt(0) &&
+      (filter === 'open' || inv.dueDate.slice(0, 10) < localDay());
+  });
 
   return (
     <div className="workspace-page">
@@ -91,14 +87,14 @@ function InvoicesContent() {
             />
           </div>
           <select
-            value={statusFilter}
-            onChange={(e) => setStatusFilter(e.target.value as InvoiceStatus | '')}
+            aria-label="Invoice status" value={filter}
+            onChange={event => selectFilter(event.target.value)}
             className="px-3 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
-            <option value="">All Statuses</option>
-            {(['DRAFT', 'SENT', 'PAID', 'VOID'] as InvoiceStatus[]).map((s) => (
-              <option key={s} value={s}>{s === 'SENT' ? 'Open' : s}</option>
-            ))}
+            <option value="">All statuses</option>
+            <option value="open">Open invoices</option><option value="overdue">Overdue invoices</option>
+            <option value="DRAFT">Draft</option><option value="PAID">Paid</option><option value="VOID">Void</option>
+            {filter === 'SENT' && <option value="SENT">Sent or posted</option>}
           </select>
         </div>
 

@@ -10,7 +10,7 @@ import { WorkflowTabs, WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, Works
 
 export default function SalesPage() {
   const { data: invoices, loading, error, retry } = useWorkspaceData(getInvoices);
-  const open = invoices?.filter(invoice => invoice.status === 'SENT');
+  const open = invoices?.filter(invoice => invoice.status === 'SENT' && invoice.postingEntryId && decimalUnits(invoice.balanceDue) > BigInt(0));
   const overdue = open?.filter(invoice => invoice.dueDate.slice(0, 10) < localDay());
   const drafts = invoices?.filter(invoice => invoice.status === 'DRAFT');
   const sum = (rows: typeof open) => rows
@@ -26,9 +26,9 @@ export default function SalesPage() {
         <WorkflowTabs area="sales" active="summary" />
         {error && <WorkspaceNotice title="Sales activity could not load" onRetry={retry} />}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-          <WorkspaceMetric label="Outstanding" value={sum(open)} detail={detail(open?.length, 'open invoices')} icon={ReceiptText} href="/sales/invoices" />
-          <WorkspaceMetric label="Overdue" value={sum(overdue)} detail={detail(overdue?.length, 'past due')} icon={CalendarClock} href="/sales/invoices" />
-          <WorkspaceMetric label="Draft invoices" value={drafts ? String(drafts.length) : '—'} detail={drafts ? 'Awaiting review and posting' : detail(undefined, '')} icon={FilePenLine} href="/sales/invoices" />
+          <WorkspaceMetric label="Open invoice balance" value={sum(open)} detail={detail(open?.length, 'posted invoices')} icon={ReceiptText} href="/sales/invoices?view=open" />
+          <WorkspaceMetric label="Overdue balance" value={sum(overdue)} detail={detail(overdue?.length, 'past due')} icon={CalendarClock} href="/sales/invoices?view=overdue" />
+          <WorkspaceMetric label="Draft invoices" value={drafts ? String(drafts.length) : '—'} detail={drafts ? 'Awaiting review and posting' : detail(undefined, '')} icon={FilePenLine} href="/sales/invoices?status=DRAFT" />
         </div>
         <WorkspacePanel title="Invoice activity" description="See what is drafted, posted, or collected."
           action={<Link href="/sales/invoices" className="workspace-text-action">All invoices</Link>}>

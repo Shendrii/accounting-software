@@ -20,6 +20,7 @@ model Account {
   balance          Decimal           @default(0) @db.Decimal(15, 2)
   description      String?
   isActive         Boolean           @default(true)
+  isBankAccount    Boolean           @default(false)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   journalLines     JournalLine[]
@@ -48,6 +49,8 @@ model JournalEntry {
   receipt            Receipt?
   invoices           Invoice[]
   bills              Bill[]
+  billPosting        Bill?         @relation("BillPosting")
+  billPayment        BillPayment?
   invoicePosting     Invoice?      @relation("InvoicePosting")
   invoicePayment     InvoicePayment?
   reversalOfId       String?       @unique
@@ -67,7 +70,7 @@ model Receipt {
   journalEntryId String?       @unique
   vendorId       String?
   category       String?
-  billId         String?       @unique
+  billId         String?
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
@@ -76,6 +79,7 @@ model Receipt {
   image          ReceiptImage?
 
   @@index([workspaceId, status])
+  @@index([billId])
 }
 
 model ReceiptImage {
@@ -197,12 +201,27 @@ model Bill {
   nextDueDate        DateTime?
   journalEntryId     String?       @unique
   journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  postingEntryId     String?       @unique
+  postingEntry       JournalEntry? @relation("BillPosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
+  payments           BillPayment[]
   lines              BillLine[]
-  receipt            Receipt?
+  receipts           Receipt[]
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
 
   @@unique([workspaceId, billNo])
+}
+
+model BillPayment {
+  id             String       @id @default(cuid())
+  billId         String
+  bill           Bill         @relation(fields: [billId], references: [id], onDelete: Restrict)
+  journalEntryId String       @unique
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  requestId      String
+  amount         Decimal      @db.Decimal(15, 2)
+
+  @@unique([billId, requestId])
 }
 
 model BillLine {
@@ -228,7 +247,12 @@ model BankTransaction {
   amount        Decimal   @db.Decimal(15, 2)
   isMatched     Boolean   @default(false)
   matchedLineId String?   @unique
+  reconciliationId String?
+  reconciliation Reconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
   createdAt     DateTime  @default(now())
+
+  @@index([workspaceId, accountId, date])
+  @@index([reconciliationId])
 }
 
 model Reconciliation {
@@ -240,8 +264,12 @@ model Reconciliation {
   statementDate    DateTime
   statementBalance Decimal   @db.Decimal(15, 2)
   status           String    @default("IN_PROGRESS")
+  proof            Json?
+  bankTransactions BankTransaction[]
   createdAt        DateTime  @default(now())
   updatedAt        DateTime  @updatedAt
+
+  @@index([workspaceId, accountId, statementDate])
 }
 
 enum ReceiptStatus {

@@ -1,7 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
 import {
-  LedgerError, journalLines, ledgerAccounts, ledgerDate, ledgerTransaction, nextDay,
+  LedgerError, checkBankPostingDate, journalLines, ledgerAccounts, ledgerDate, ledgerTransaction, nextDay,
   reversePosting, sendLedgerError, updateBalanceCache,
 } from '../lib/ledger.js';
 
@@ -12,6 +12,8 @@ const withSources = {
   receipt: { include: { vendor: { select: { name: true } } } },
   invoices: { include: { customer: { select: { name: true } } } },
   bills: { include: { vendor: { select: { name: true } } } },
+  billPosting: { select: { id: true, billNo: true } },
+  billPayment: { select: { bill: { select: { id: true, billNo: true } } } },
   invoicePosting: { select: { id: true, invoiceNo: true } },
   invoicePayment: { select: { invoice: { select: { id: true, invoiceNo: true } } } },
   reversal: { select: { id: true } },
@@ -90,6 +92,7 @@ router.put('/:id', async (req, res) => {
       if (status === 'POSTED' && existing.status !== 'DRAFT') throw new LedgerError('Restore this entry to draft before posting.');
       const lines = status === 'POSTED' ? (replacement ?? journalLines(existing.journalLines)) : replacement;
       const accounts = lines && await ledgerAccounts(tx, where.workspaceId, lines.map(line => line.accountId));
+      if (status === 'POSTED') await checkBankPostingDate(tx, where.workspaceId, postingDate ?? existing.date, accounts);
       const updated = await tx.journalEntry.update({
         where,
         data: {
@@ -119,6 +122,7 @@ router.post('/:id/post', async (req, res) => {
       if (existing.status !== 'DRAFT') throw new LedgerError('Only drafts can be posted.', 409);
       const lines = journalLines(existing.journalLines);
       const accounts = await ledgerAccounts(tx, where.workspaceId, lines.map(line => line.accountId));
+      await checkBankPostingDate(tx, where.workspaceId, existing.date, accounts);
       const posted = await tx.journalEntry.update({ where, data: { status: 'POSTED' }, include: withLines });
       await updateBalanceCache(tx, where.workspaceId, lines, accounts);
       return posted;
@@ -138,7 +142,7 @@ router.post('/:id/reverse', async (req, res) => {
     const reversal = await ledgerTransaction(async tx => {
       const entry = await requireEntry(tx, where, withSources);
       if (entry.status !== 'POSTED' || entry.reversalOfId) throw new LedgerError('Choose an original posted entry.', 409);
-      if (entry.invoicePosting || entry.invoicePayment || entry.invoices.length || entry.bills.length || entry.receipt) {
+      if (entry.invoicePosting || entry.invoicePayment || entry.billPosting || entry.billPayment || entry.invoices.length || entry.bills.length || entry.receipt) {
         throw new LedgerError('Correct this entry from its source transaction.', 409);
       }
       if (entry.reversal) return requireEntry(tx, { id: entry.reversal.id, workspaceId: where.workspaceId });

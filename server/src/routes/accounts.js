@@ -50,10 +50,13 @@ router.get('/:id', async (req, res) => {
 // Create new account
 router.post('/', async (req, res) => {
   try {
-    const { code, name, type, description, isActive } = req.body;
+    const { code, name, type, description, isActive, isBankAccount = false } = req.body;
 
     if (!code || !name || !type) {
       return res.status(400).json({ error: 'Code, name, and type are required' });
+    }
+    if (typeof isBankAccount !== 'boolean' || isBankAccount && type !== 'ASSET') {
+      return res.status(400).json({ error: 'Bank accounts must be asset accounts.' });
     }
 
     const account = await prisma.account.create({
@@ -62,6 +65,7 @@ router.post('/', async (req, res) => {
         name,
         type,
         description,
+        isBankAccount,
         isActive: isActive !== undefined ? isActive : true,
       },
     });
@@ -78,12 +82,19 @@ router.post('/', async (req, res) => {
 // Update account
 router.put('/:id', async (req, res) => {
   try {
-    const { code, name, type, description, isActive } = req.body;
+    const { code, name, type, description, isActive, isBankAccount } = req.body;
 
     const where = { id: req.params.id, workspaceId: req.workspace.id };
     const account = await ledgerTransaction(async tx => {
       const existing = await tx.account.findFirst({ where });
       if (!existing) throw new LedgerError('Account not found.', 404);
+      if (isBankAccount !== undefined && typeof isBankAccount !== 'boolean' ||
+          (isBankAccount ?? existing.isBankAccount) && (type ?? existing.type) !== 'ASSET') {
+        throw new LedgerError('Bank accounts must be asset accounts.');
+      }
+      if (isBankAccount === false && existing.isBankAccount && await tx.reconciliation.findFirst({
+        where: { accountId: existing.id, workspaceId: where.workspaceId }, select: { id: true },
+      })) throw new LedgerError('Keep the bank account designation for accounts with reconciliation history.', 409);
       if (type && type !== existing.type && await tx.journalLine.findFirst({
         where: { accountId: existing.id, journalEntry: { workspaceId: where.workspaceId, status: 'POSTED' } },
         select: { id: true },
@@ -98,6 +109,7 @@ router.put('/:id', async (req, res) => {
           ...(type && { type }),
           ...(description !== undefined && { description }),
           ...(isActive !== undefined && { isActive }),
+          ...(isBankAccount !== undefined && { isBankAccount }),
         },
       });
     });

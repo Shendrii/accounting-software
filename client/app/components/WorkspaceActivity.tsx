@@ -34,13 +34,16 @@ export function invoiceStatus(invoice: Invoice) {
 }
 
 export function billStatus(bill: Bill) {
-  if (bill.status === 'RECEIVED' && bill.dueDate.slice(0, 10) < localDay()) return 'Overdue';
+  if (bill.status === 'RECEIVED') {
+    if (!bill.postingEntryId) return 'Posting unverified';
+    return decimalUnits(bill.amountPaid ?? '0') > BigInt(0) ? 'Partially paid' : 'Awaiting payment';
+  }
   return bill.status[0] + bill.status.slice(1).toLowerCase();
 }
 
 export function WorkspaceStatus({ children }: { children: string }) {
   const good = ['Paid', 'Complete', 'Posted', 'Matched', 'Approved'].includes(children);
-  const warn = ['Awaiting posting', 'Partially paid', 'Needs review', 'Open item', 'Unmatched'].includes(children);
+  const warn = ['Awaiting posting', 'Posting unverified', 'Awaiting payment', 'Partially paid', 'Needs review', 'Check date', 'Check match', 'Open item', 'Unmatched'].includes(children);
   const bad = ['Overdue', 'Rejected', 'Void'].includes(children);
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current', {

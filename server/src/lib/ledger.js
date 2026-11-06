@@ -72,6 +72,7 @@ export async function cashLedgerAccounts(client, workspaceId, balances) {
         workspaceId,
         type: 'ASSET',
         OR: [
+          { isBankAccount: true },
           ...['cash', 'bank', 'checking'].map(name => ({ name: { contains: name, mode: 'insensitive' } })),
           { journalLines: { some: { debit: { gt: 0 }, journalEntry: { workspaceId, status: 'POSTED', invoicePayment: { isNot: null } } } } },
         ],
@@ -103,7 +104,7 @@ export async function ledgerAccounts(tx, workspaceId, ids, allowInactive = false
   const unique = [...new Set(ids)];
   const accounts = await tx.account.findMany({
     where: { workspaceId, id: { in: unique }, ...(allowInactive ? {} : { isActive: true }) },
-    select: { id: true, name: true, code: true, type: true },
+    select: { id: true, name: true, code: true, type: true, isBankAccount: true },
   });
   if (accounts.length !== unique.length) throw new LedgerError('Choose valid accounts from this workspace.');
   return new Map(accounts.map(account => [account.id, account]));
@@ -121,9 +122,24 @@ export async function updateBalanceCache(tx, workspaceId, lines, accounts) {
   }
 }
 
+export async function checkBankPostingDate(tx, workspaceId, date, accounts) {
+  const accountIds = [...accounts.values()].filter(account => account.isBankAccount).map(account => account.id);
+  if (!accountIds.length) return;
+  const through = ledgerDate(date.toISOString());
+  const reconciliation = await tx.reconciliation.findFirst({
+    where: {
+      workspaceId, accountId: { in: accountIds }, statementDate: { gte: through },
+      status: 'COMPLETE', proof: { not: Prisma.DbNull },
+    },
+    select: { statementDate: true },
+  });
+  if (reconciliation) throw new LedgerError('Choose a posting date after the bank account’s verified statement period.', 409);
+}
+
 export async function createPosting(tx, workspaceId, { lines: input, ...data }, allowInactive = false) {
   const lines = journalLines(input);
   const accounts = await ledgerAccounts(tx, workspaceId, lines.map(line => line.accountId), allowInactive);
+  await checkBankPostingDate(tx, workspaceId, data.date, accounts);
   const entry = await tx.journalEntry.create({
     data: { ...data, workspaceId, status: 'POSTED', journalLines: { create: lines } },
     include: { journalLines: { include: { account: true } } },
@@ -151,6 +167,7 @@ export async function ledgerTransaction(callback) {
     } catch (error) {
       if (error.code !== 'P2034') throw error;
       if (attempt === 3) throw new LedgerError('The ledger changed while saving. Try again.', 409);
+      await new Promise(resolve => setTimeout(resolve, 10 * (attempt + 1)));
     }
   }
 }

@@ -1,438 +1,357 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
-import { ArrowLeftRight, BookOpenCheck, Landmark, Upload, CheckCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
+import { useCallback, useState, type FormEvent } from 'react';
+import Link from 'next/link';
+import { ArrowLeftRight, BookOpenCheck, FileSpreadsheet, Landmark } from 'lucide-react';
 import {
-  getAccounts, getReconciliationData, importBankTransactions, importCSVTransactions, matchTransaction,
-  completeReconciliation, getBankMatchSuggestions,
-  type Account, type BankMatchSuggestion, type ReconciliationData,
+  completeReconciliation, getAccounts, getReconciliationHistory, importBankTransactions, importCSVTransactions,
+  matchTransaction, postBankFee, reviewStatement, unmatchTransaction,
+  type ReconciliationRecord, type StatementInput, type StatementReview,
 } from '@/lib/api';
+import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { toast } from '@/lib/toast';
-import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
-import { decimalText, decimalUnits, localDay } from '@/lib/money';
+import AccountingDialog from '@/app/components/AccountingDialog';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
-function formatCurrency(v: string | number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
+type StatementRow = StatementReview['bankTransactions'][number];
+type Action = { kind: 'match' | 'fee'; row: StatementRow } | { kind: 'manual' } | { kind: 'proof'; record: ReconciliationRecord };
+const stepLabels = ['Statement details', 'Match transactions', 'Review and finish'];
+
+function nextDate(value: string) {
+  const date = new Date(value.slice(0, 10) + 'T00:00:00Z');
+  date.setUTCDate(date.getUTCDate() + 1);
+  return date.toISOString().slice(0, 10);
 }
 
-function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
-}
-
-interface ImportRow {
-  date: string;
-  description: string;
-  amount: string;
+function Amounts({ rows }: { rows: [string, string][] }) {
+  return <dl className="divide-y divide-slate-100 px-4 sm:px-5">
+    {rows.map(([label, amount]) => <div key={label} className="flex justify-between gap-3 py-2.5 text-sm last:font-semibold">
+      <dt>{label}</dt><dd className="shrink-0 tabular-nums">{formatUsd(amount)}</dd>
+    </div>)}
+  </dl>;
 }
 
 export function ReconciliationPage() {
-  const [step, setStep] = useState<1 | 2>(1);
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [selectedAccountId, setSelectedAccountId] = useState('');
-  const [statementDate, setStatementDate] = useState(localDay);
-  const [statementBalance, setStatementBalance] = useState('');
-  const [data, setData] = useState<ReconciliationData | null>(null);
-  const [suggestions, setSuggestions] = useState<BankMatchSuggestion[]>([]);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [selectedBank, setSelectedBank] = useState<string | null>(null);
-  const [selectedLine, setSelectedLine] = useState<string | null>(null);
-  const [matching, setMatching] = useState(false);
-  const [completing, setCompleting] = useState(false);
-  const [importOpen, setImportOpen] = useState(false);
-  const [importRows, setImportRows] = useState<ImportRow[]>([{ date: '', description: '', amount: '' }]);
-  const [importing, setImporting] = useState(false);
-  const [csvModalOpen, setCsvModalOpen] = useState(false);
-  const [csvFile, setCsvFile] = useState<File | null>(null);
-  const [csvImporting, setCsvImporting] = useState(false);
-  const csvInputRef = useRef<HTMLInputElement>(null);
+  const accounts = useWorkspaceData(getAccounts);
+  const [tab, setTab] = useState<'reconcile' | 'history'>('reconcile');
+  const [step, setStep] = useState(0);
+  const [input, setInput] = useState<StatementInput>(() => ({
+    accountId: '', statementStart: localDay().slice(0, 8) + '01', statementDate: localDay(), openingBalance: '', statementBalance: '', statementLineCount: '',
+  }));
+  const [review, setReview] = useState<StatementReview | null>(null);
+  const [confirmed, setConfirmed] = useState<string[]>([]);
+  const [action, setAction] = useState<Action | null>(null);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [importNote, setImportNote] = useState('');
+  const [dialogError, setDialogError] = useState('');
+  const loadHistory = useCallback(() => input.accountId ? getReconciliationHistory(input.accountId) : Promise.resolve([]), [input.accountId]);
+  const history = useWorkspaceData(loadHistory);
+  const bankAccounts = accounts.data?.filter(account => account.isBankAccount && (tab === 'history' || account.isActive)) ?? [];
+  const prior = history.data?.find(item => item.proof);
+  const expenseAccounts = accounts.data?.filter(account => account.type === 'EXPENSE' && account.isActive) ?? [];
 
-  useEffect(() => {
-    getAccounts().then((accs) =>
-      setAccounts(accs.filter((a) => a.isActive && a.type === 'ASSET'))
-    ).catch(() => setError('Bank accounts could not load.'));
-  }, []);
+  function field(name: keyof StatementInput, value: string) {
+    setInput(current => ({ ...current, [name]: value }));
+    setStep(0);
+    setReview(null);
+    setConfirmed([]);
+    setError('');
+    if (name === 'accountId') setImportNote('');
+  }
 
-  async function proceed() {
-    if (!selectedAccountId || !statementDate || !statementBalance) {
-      setError('Enter the bank account, statement date, and ending balance.');
-      return;
-    }
-    if (!/^-?(?:\d+|\d*\.\d{1,2})$/.test(statementBalance)) {
-      setError('Enter a statement ending balance with up to two decimal places.');
-      return;
-    }
-    setLoading(true);
-    setError(null);
+  async function loadReview() {
+    const result = await reviewStatement(input);
+    setReview(result);
+    setConfirmed(previous => previous.filter(id => result.outstanding.some(line => line.id === id)));
+  }
+
+  async function run(work: () => Promise<void>, inDialog = false) {
+    setBusy(true);
+    setError('');
+    setDialogError('');
+    try { await work(); }
+    catch (cause) {
+      const message = cause instanceof Error ? cause.message : 'The request could not finish.';
+      (inDialog ? setDialogError : setError)(message);
+    } finally { setBusy(false); }
+  }
+
+  function open(next: Action) {
+    setDialogError('');
+    setAction(next);
+  }
+
+  const remaining = review ? decimalUnits(review.statementBalance) - decimalUnits(review.clearedBalance) : BigInt(0);
+  const importedAgrees = Boolean(review && decimalUnits(review.importedEnding) === decimalUnits(review.statementBalance) &&
+    review.bankTransactions.length === Number(review.statementLineCount));
+  const adjustedBank = review ? review.outstanding.filter(line => confirmed.includes(line.id))
+    .reduce((sum, line) => sum + decimalUnits(line.amount), decimalUnits(review.statementBalance)) : BigInt(0);
+  const difference = review ? adjustedBank - decimalUnits(review.adjustedBook) : BigInt(0);
+  const ready = Boolean(review && review.openingAgrees && importedAgrees && !review.unresolved &&
+    review.outstanding.length === confirmed.length && remaining === BigInt(0) && difference === BigInt(0));
+
+  async function submitAction(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!action || busy || action.kind === 'proof') return;
+    const values = new FormData(event.currentTarget);
+    await run(async () => {
+      if (action.kind === 'match') await matchTransaction(action.row.id, String(values.get('journalLineId')));
+      if (action.kind === 'fee') await postBankFee(action.row.id, String(values.get('expenseAccountId')));
+      if (action.kind === 'manual') {
+        const result = await importBankTransactions(input.accountId, [{
+          date: String(values.get('date')), description: String(values.get('description')), amount: String(values.get('amount')),
+        }]);
+        setImportNote(result.imported ? 'Statement line added.' : 'This statement line is already imported.');
+      }
+      setAction(null);
+      await runRefresh();
+    }, true);
+  }
+
+  async function runRefresh() {
     try {
-      const [rec, suggestionData] = await Promise.all([
-        getReconciliationData(selectedAccountId),
-        getBankMatchSuggestions(selectedAccountId),
-      ]);
-      setData(rec);
-      setSuggestions(suggestionData.suggestions);
-      setStep(2);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load reconciliation data');
-    } finally {
-      setLoading(false);
+      if (step > 0) await loadReview();
+    } catch (cause) {
+      setReview(null);
+      setStep(0);
+      setError(cause instanceof Error ? cause.message : 'Open the statement again to refresh.');
     }
   }
 
-  async function refreshTransactions() {
-    const [transactions, matches] = await Promise.all([
-      getReconciliationData(selectedAccountId), getBankMatchSuggestions(selectedAccountId),
-    ]);
-    setData(transactions);
-    setSuggestions(matches.suggestions);
+  async function finish() {
+    await run(async () => {
+      try {
+        await completeReconciliation(input, confirmed);
+        history.retry();
+        setReview(null);
+        setConfirmed([]);
+        setStep(0);
+        setTab('history');
+        toast.success('Reconciliation saved to History.');
+      } catch (cause) {
+        await runRefresh();
+        throw cause;
+      }
+    });
   }
 
-  async function handleMatch() {
-    if (!selectedBank || !selectedLine || matching) return;
-    setMatching(true);
-    setError(null);
-    try {
-      await matchTransaction(selectedBank, selectedLine);
-      setSelectedBank(null);
-      setSelectedLine(null);
-      toast.success('Bank transaction matched');
-      await refreshTransactions().catch(() => {
-        setStep(1);
-        setData(null);
-        setError('The match was recorded. Open reconciliation again to reload transactions.');
-      });
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to match transaction');
-    } finally {
-      setMatching(false);
-    }
-  }
+  const accountSelect = <div className="grid gap-1 text-sm font-semibold">
+    <label htmlFor="statement-bank-account">Bank account</label>
+    <select id="statement-bank-account" className="workspace-field" value={input.accountId} required disabled={busy || accounts.loading}
+      onChange={event => field('accountId', event.target.value)}>
+      <option value="">Select bank account…</option>
+      {bankAccounts.map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+    </select>
+  </div>;
 
-  async function handleComplete() {
-    if (!selectedAccountId || !statementDate || !statementBalance) return;
-    setCompleting(true);
-    try {
-      await completeReconciliation(selectedAccountId, statementDate, parseFloat(statementBalance));
-      toast.success('Reconciliation completed successfully!');
-      setStep(1);
-      setData(null);
-      setSelectedBank(null);
-      setSelectedLine(null);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to complete reconciliation');
-    } finally {
-      setCompleting(false);
-    }
-  }
+  const importActions = input.accountId && <div className="flex flex-wrap items-center gap-2">
+    <label className="workspace-button cursor-pointer focus-within:ring-2 focus-within:ring-blue-700">
+      <FileSpreadsheet className="size-4" aria-hidden="true" />Import statement CSV
+      <input type="file" accept=".csv,text/csv" aria-label="Import statement CSV" className="sr-only" disabled={busy}
+        onChange={event => {
+          const file = event.currentTarget.files?.[0];
+          event.currentTarget.value = '';
+          if (file) void run(async () => {
+            const result = await importCSVTransactions(input.accountId, file);
+            setImportNote(result.imported ? result.imported + ' statement lines imported.' : 'These statement lines are already imported.');
+            await runRefresh();
+          });
+        }} />
+    </label>
+    <button type="button" className="workspace-button" disabled={busy} onClick={() => open({ kind: 'manual' })}>Add statement line</button>
+  </div>;
 
-  async function handleImport() {
-    const valid = importRows.filter((r) => r.date && r.description && r.amount);
-    if (valid.length === 0) { setError('Add at least one valid transaction'); return; }
-    setImporting(true);
-    try {
-      await importBankTransactions(selectedAccountId, valid.map((r) => ({
-        date: r.date,
-        description: r.description,
-        amount: parseFloat(r.amount),
-      })));
-      setImportOpen(false);
-      setImportRows([{ date: '', description: '', amount: '' }]);
-      await refreshTransactions();
-      toast.success(`${valid.length} transaction${valid.length !== 1 ? 's' : ''} imported`);
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to import transactions');
-    } finally {
-      setImporting(false);
-    }
-  }
-
-  async function handleCsvImport() {
-    if (!csvFile || !selectedAccountId) return;
-    setCsvImporting(true);
-    setError(null);
-    try {
-      const result = await importCSVTransactions(selectedAccountId, csvFile);
-      setCsvModalOpen(false);
-      setCsvFile(null);
-      await refreshTransactions();
-      toast.success(
-        `Imported ${result.imported} transaction${result.imported !== 1 ? 's' : ''}${result.suggestions > 0 ? `, auto-matched ${result.suggestions}` : ''}`
-      );
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to import CSV');
-    } finally {
-      setCsvImporting(false);
-    }
-  }
-
-  const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
-  const bookBalance = decimalUnits(selectedAccount?.balance ?? '0');
-  const stmtBal = decimalUnits(statementBalance);
-  const difference = stmtBal - bookBalance;
-  const canComplete = difference === BigInt(0) && data !== null;
-  const bank = data?.bankTransactions.find(transaction => transaction.id === selectedBank);
-  const journal = data?.journalLines.find(line => line.id === selectedLine);
-  const candidates = suggestions.find(suggestion => suggestion.bankTransactionId === selectedBank)?.candidates ?? [];
-
-  return (
-    <div className="workspace-page">
-      <div className="workspace-content">
-        <div className="mb-5">
-          <WorkspaceHeading section="Daily work" title={step === 1 ? 'Reconciliation setup' : 'Banking'}
-            description={step === 1 ? 'Choose the bank account and statement you want to reconcile.' : 'Compare bank statement lines with posted journal entries.'}
-            actions={step === 2 ? <>
-              <button type="button" className="workspace-primary" onClick={() => setCsvModalOpen(true)}><FileSpreadsheet className="size-4" aria-hidden="true" />Import CSV</button>
-              <button type="button" className="workspace-button" disabled={matching || completing} onClick={() => {
-                setStep(1); setData(null); setSelectedBank(null); setSelectedLine(null); setError(null);
-              }}>Reconciliation setup</button>
-            </> : undefined} />
-        </div>
-
-        {error && <div className="mb-5"><WorkspaceNotice title="Reconciliation needs attention">{error}</WorkspaceNotice></div>}
-
-        {/* Step 1 */}
-        {step === 1 && (
-          <div className="workspace-panel max-w-2xl p-4 sm:p-5">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-5">Statement details</h2>
-            <div className="space-y-4">
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-account">Bank account</label>
-                <select
-                  id="reconciliation-account"
-                  value={selectedAccountId}
-                  onChange={(e) => setSelectedAccountId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="">Select account…</option>
-                  {accounts.map((a) => (
-                    <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-date">Statement ending date</label>
-                <input
-                  type="date"
-                  id="reconciliation-date"
-                  value={statementDate}
-                  onChange={(e) => setStatementDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-balance">Statement ending balance</label>
-                <input
-                  type="number"
-                  step="0.01"
-                  id="reconciliation-balance"
-                  value={statementBalance}
-                  onChange={(e) => setStatementBalance(e.target.value)}
-                  placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                />
-              </div>
-              <button
-                onClick={proceed}
-                disabled={loading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-blue-700 text-white text-sm font-medium disabled:opacity-50"
-              >
-                {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
-                Start Reconciliation
-              </button>
-            </div>
-          </div>
-        )}
-
-        {/* Step 2 */}
-        {step === 2 && data && (
-          <>
-            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
-              <WorkspaceMetric label="Book balance" value={formatCurrency(decimalText(bookBalance))} detail={selectedAccount?.name ?? 'Bank account'} icon={BookOpenCheck} />
-              <WorkspaceMetric label="Statement ending" value={formatCurrency(decimalText(stmtBal))} detail={statementDate} icon={Landmark} />
-              <WorkspaceMetric label="Difference" value={formatCurrency(decimalText(difference))} detail={canComplete ? 'Balances agree' : 'Review the difference'} icon={ArrowLeftRight} />
-            </div>
-
-            <div className="mb-5 grid items-start gap-4 xl:grid-cols-[1.15fr_1fr]">
-              <WorkspacePanel title="Bank transactions" description={data.bankTransactions.length + ' unmatched'}>
-                {data.bankTransactions.length ? (
-                  <div className="workspace-table-wrap">
-                    <table className="workspace-table">
-                      <thead><tr><th scope="col">Transaction</th><th scope="col">Date</th><th scope="col" className="workspace-number">Amount</th></tr></thead>
-                      <tbody>{data.bankTransactions.map(transaction => (
-                        <tr key={transaction.id} className={transaction.id === selectedBank ? 'bg-blue-50' : undefined}>
-                          <td><button type="button" aria-pressed={transaction.id === selectedBank} disabled={matching}
-                            className="workspace-text-action px-0 text-left"
-                            onClick={() => { setSelectedBank(transaction.id === selectedBank ? null : transaction.id); setSelectedLine(null); }}>
-                            {transaction.description}
-                          </button></td>
-                          <td className="whitespace-nowrap">{formatDate(transaction.date)}</td>
-                          <td className="workspace-number">{formatCurrency(transaction.amount)}</td>
-                        </tr>
-                      ))}</tbody>
-                    </table>
-                  </div>
-                ) : <p className="p-4 text-sm text-slate-600">No unmatched bank transactions.</p>}
-              </WorkspacePanel>
-
-              <WorkspacePanel title="Match review" description={bank ? bank.description + ' · ' + formatDate(bank.date) : 'Select a bank transaction to review matching entries.'}>
-                {bank && (
-                  <div className="divide-y divide-slate-200">
-                    <WorkspaceRow icon={Landmark} title="Statement line" detail={formatCurrency(bank.amount)} />
-                    {candidates.length > 0 && <div className="space-y-2 p-4 sm:px-5">
-                      <h3 className="text-sm font-semibold">Suggested journal lines</h3>
-                      {candidates.map(candidate => (
-                        <button key={candidate.journalLineId} type="button" disabled={matching} aria-pressed={selectedLine === candidate.journalLineId}
-                          onClick={() => setSelectedLine(candidate.journalLineId)}
-                          className={'block w-full rounded-lg border px-3 py-2 text-left text-sm ' + (selectedLine === candidate.journalLineId ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-blue-50')}>
-                          <strong>{candidate.source.label} · {candidate.description}</strong>
-                          <span className="block text-xs text-slate-600">{formatCurrency(candidate.amount)} · {candidate.exactAmount ? 'Exact amount' : 'Near match'} · {Math.round(candidate.dateDistance)} days apart</span>
-                        </button>
-                      ))}
-                    </div>}
-                    <div className="space-y-2 p-4 sm:px-5">
-                      <label htmlFor="reconciliation-journal" className="text-sm font-semibold">Journal line</label>
-                      <select id="reconciliation-journal" className="workspace-field" disabled={matching || !data.journalLines.length}
-                        value={selectedLine ?? ''} onChange={event => setSelectedLine(event.target.value || null)}>
-                        <option value="">Select an unmatched journal line</option>
-                        {data.journalLines.map(line => <option key={line.id} value={line.id}>
-                          {line.journalEntry.description} · {formatDate(line.journalEntry.date)} · {formatCurrency(decimalText(decimalUnits(line.debit) - decimalUnits(line.credit)))}
-                        </option>)}
-                      </select>
-                      {journal && <p className="text-xs text-slate-600">{journal.journalEntry.referenceNo || 'Posted journal line'} · {formatDate(journal.journalEntry.date)}</p>}
-                      <button type="button" className="workspace-primary" onClick={handleMatch} disabled={!journal || matching}>
-                        <CheckCircle className="size-4" aria-hidden="true" />{matching ? 'Matching…' : 'Confirm match'}
-                      </button>
-                    </div>
-                  </div>
-                )}
-              </WorkspacePanel>
-            </div>
-
-            <div className="flex flex-wrap justify-between gap-2">
-              <button type="button" className="workspace-button" onClick={() => setImportOpen(true)}><Upload className="size-4" aria-hidden="true" />Enter transactions</button>
-              <button type="button" className="workspace-primary" onClick={handleComplete} disabled={!canComplete || completing || matching}>
-                {completing ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <CheckCircle className="size-4" aria-hidden="true" />}
-                Complete reconciliation
-              </button>
-            </div>
-
-            {/* Import Modal */}
-            {importOpen && (
-              <div className="fixed inset-0 z-50 flex items-center justify-center">
-                <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setImportOpen(false)} />
-                <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-2xl mx-4 max-h-[80vh] overflow-y-auto">
-                  <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Import Bank Transactions</h3>
-                  <table className="w-full text-sm mb-4">
-                    <thead>
-                      <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                        <th className="text-left py-2 text-xs font-medium text-zinc-500">Date</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-zinc-500">Description</th>
-                        <th className="text-left py-2 px-2 text-xs font-medium text-zinc-500">Amount (+/-)</th>
-                        <th className="w-8" />
-                      </tr>
-                    </thead>
-                    <tbody>
-                      {importRows.map((row, i) => (
-                        <tr key={i} className="border-b border-zinc-100 dark:border-zinc-800">
-                          <td className="py-1.5">
-                            <input type="date" value={row.date} onChange={(e) => {
-                              const r = [...importRows]; r[i].date = e.target.value; setImportRows(r);
-                            }} className="w-full px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none" />
-                          </td>
-                          <td className="py-1.5 px-2">
-                            <input value={row.description} onChange={(e) => {
-                              const r = [...importRows]; r[i].description = e.target.value; setImportRows(r);
-                            }} placeholder="Description" className="w-full px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none" />
-                          </td>
-                          <td className="py-1.5 px-2">
-                            <input type="number" step="0.01" value={row.amount} onChange={(e) => {
-                              const r = [...importRows]; r[i].amount = e.target.value; setImportRows(r);
-                            }} placeholder="100.00" className="w-full px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none" />
-                          </td>
-                          <td className="py-1.5 pl-1">
-                            {importRows.length > 1 && (
-                              <button onClick={() => setImportRows(importRows.filter((_, j) => j !== i))} className="p-1 text-zinc-400 hover:text-red-500">
-                                <Trash2 className="h-3.5 w-3.5" />
-                              </button>
-                            )}
-                          </td>
-                        </tr>
-                      ))}
-                    </tbody>
-                  </table>
-                  <button
-                    onClick={() => setImportRows([...importRows, { date: '', description: '', amount: '' }])}
-                    className="flex items-center gap-1 text-sm text-zinc-500 hover:text-zinc-900 mb-4"
-                  >
-                    <Plus className="h-3.5 w-3.5" /> Add row
-                  </button>
-                  <div className="flex gap-3">
-                    <button onClick={() => setImportOpen(false)} className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
-                      Cancel
-                    </button>
-                    <button onClick={handleImport} disabled={importing} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
-                      {importing && <Loader2 className="h-4 w-4 animate-spin" />}
-                      Import
-                    </button>
-                  </div>
-                </div>
-              </div>
-            )}
-          </>
-        )}
-
-        {/* CSV Import Modal */}
-        {csvModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setCsvModalOpen(false)} />
-            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-md mx-4">
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-1">Import CSV Bank Statement</h3>
-              <p className="text-sm text-zinc-500 dark:text-zinc-400 mb-4">
-                Upload a CSV exported from your bank. We auto-detect columns for date, description, and amount.
-                After import, transactions are auto-matched to journal lines within ±3 days.
-              </p>
-              <div
-                className="border-2 border-dashed border-zinc-200 dark:border-zinc-700 rounded-lg p-6 text-center cursor-pointer hover:border-blue-400 transition-colors mb-4"
-                onClick={() => csvInputRef.current?.click()}
-              >
-                <FileSpreadsheet className="h-8 w-8 text-zinc-400 mx-auto mb-2" />
-                {csvFile ? (
-                  <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{csvFile.name}</p>
-                ) : (
-                  <p className="text-sm text-zinc-500">Click to select CSV file</p>
-                )}
-                <input
-                  ref={csvInputRef}
-                  type="file"
-                  accept=".csv,text/csv"
-                  className="hidden"
-                  onChange={(e) => setCsvFile(e.target.files?.[0] ?? null)}
-                />
-              </div>
-              <p className="text-xs text-zinc-400 mb-4">
-                Accepted columns: <code>date</code>, <code>description</code> (or memo/narrative), <code>amount</code> (or separate debit/credit columns)
-              </p>
-              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-              <div className="flex gap-3">
-                <button onClick={() => { setCsvModalOpen(false); setCsvFile(null); }} className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
-                  Cancel
-                </button>
-                <button
-                  onClick={handleCsvImport}
-                  disabled={!csvFile || csvImporting}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {csvImporting && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Import CSV
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
+  return <div className="workspace-page"><div className="workspace-content space-y-5">
+    <WorkspaceHeading section="Daily work" title="Bank reconciliation" description="Match a bank statement to posted transactions and save the reconciliation proof." />
+    <nav className="workspace-tabs" aria-label="Bank reconciliation views">
+      {(['reconcile', 'history'] as const).map(view => <button key={view} type="button" className="workspace-tab"
+        aria-current={tab === view ? 'page' : undefined} disabled={busy} onClick={() => { setTab(view); setError(''); }}>
+        {view === 'reconcile' ? 'Reconcile' : 'History'}
+      </button>)}
+    </nav>
+    {error && <WorkspaceNotice title="Reconciliation needs attention">{error}</WorkspaceNotice>}
+    {accounts.error && <WorkspaceNotice title="Bank accounts could not load" onRetry={accounts.retry} />}
+    {tab === 'history' ? <WorkspacePanel title="Reconciliation history" description="Review completed statements and their saved proof.">
+      <div className="space-y-3 p-4">
+        {accountSelect}
+        {history.loading && <p role="status" className="text-sm text-slate-600">Loading history…</p>}
+        {history.error && <WorkspaceNotice title="History could not load" onRetry={history.retry} />}
+        {input.accountId && history.data?.length === 0 && <p className="text-sm text-slate-600">No reconciliations for this account yet.</p>}
+        {history.data?.map(record => <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-3">
+          <div><p className="text-sm font-semibold">{record.statementDate.slice(0, 10)} · {formatUsd(record.statementBalance)}</p>
+            <p className="text-xs text-slate-600">{record.proof ? 'Verified reconciliation' : 'Legacy record · saved proof unavailable'}</p></div>
+          {record.proof && <button type="button" className="workspace-button" onClick={() => open({ kind: 'proof', record })}>View proof</button>}
+        </div>)}
       </div>
-    </div>
-  );
+    </WorkspacePanel> : <>
+      <ol aria-label="Reconciliation steps" className="grid grid-cols-3 gap-2 text-xs font-semibold sm:text-sm">
+        {stepLabels.map((label, index) => <li key={label} aria-current={step === index ? 'step' : undefined}
+          className={'flex flex-wrap items-center gap-1.5 ' + (step === index ? 'text-blue-800' : 'text-slate-600')}>
+          <span className="grid size-6 shrink-0 place-items-center rounded-full border border-slate-200 bg-white">{step > index ? '✓' : index + 1}</span>{label}
+        </li>)}
+      </ol>
+      {step === 0 && <div className="grid items-start gap-4 xl:grid-cols-[1.3fr_1fr]">
+        <WorkspacePanel title="Statement details" description="Use the dates and balances printed on your bank statement.">
+          <form className="grid gap-4 p-4 sm:p-5" onSubmit={event => {
+            event.preventDefault();
+            void run(async () => { await loadReview(); setStep(1); });
+          }}>
+            {accountSelect}
+            {!accounts.loading && !accounts.error && !bankAccounts.length && <p className="text-sm text-slate-600">
+              Mark an active asset as a bank account in <Link className="font-semibold text-blue-800 underline" href="/ledger?tab=accounts">Chart of accounts</Link>.
+            </p>}
+            {prior?.proof && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
+              <p>Last statement ended {prior.statementDate.slice(0, 10)} with {formatUsd(prior.statementBalance)}.</p>
+              <button type="button" className="workspace-button" disabled={busy} onClick={() => {
+                field('statementStart', nextDate(prior.statementDate));
+                field('openingBalance', prior.statementBalance);
+              }}>Use as opening balance</button>
+            </div>}
+            <div className="grid gap-3 sm:grid-cols-2">
+              <label className="grid gap-1 text-sm font-semibold">Statement starting date<input required type="date" className="workspace-field" value={input.statementStart} disabled={busy} onChange={event => field('statementStart', event.target.value)} /></label>
+              <label className="grid gap-1 text-sm font-semibold">Statement ending date<input required type="date" min={input.statementStart} className="workspace-field" value={input.statementDate} disabled={busy} onChange={event => field('statementDate', event.target.value)} /></label>
+              <label className="grid gap-1 text-sm font-semibold">Statement opening balance<input required inputMode="decimal" className="workspace-field" placeholder="0.00" value={input.openingBalance} disabled={busy} onChange={event => field('openingBalance', event.target.value)} /></label>
+              <label className="grid gap-1 text-sm font-semibold">Statement ending balance<input required inputMode="decimal" className="workspace-field" placeholder="0.00" value={input.statementBalance} disabled={busy} onChange={event => field('statementBalance', event.target.value)} /></label>
+              <label className="grid gap-1 text-sm font-semibold">Statement transaction count<input required inputMode="numeric" pattern="[0-9]{1,7}" className="workspace-field" placeholder="0 for no activity" value={input.statementLineCount} disabled={busy} onChange={event => field('statementLineCount', event.target.value)} /></label>
+            </div>
+            <div className="flex justify-end"><button type="submit" className="workspace-primary" disabled={busy || !input.accountId}>Start reconciliation</button></div>
+          </form>
+        </WorkspacePanel>
+        <WorkspacePanel title="Statement transactions" description="Load the lines from the same statement before matching them.">
+          <div className="space-y-3 p-4">
+            <p className="text-sm text-slate-600">The CSV needs a date, description, and signed amount, or separate debit and credit columns.</p>
+            {importActions || <p className="text-sm text-slate-600">Select a bank account to import transactions.</p>}
+            {importNote && <p role="status" className="text-sm font-semibold text-blue-800">{importNote}</p>}
+          </div>
+        </WorkspacePanel>
+      </div>}
+      {step === 1 && review && <>
+        <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
+          <WorkspaceMetric icon={Landmark} label="Statement ending balance" value={formatUsd(review.statementBalance)} detail={'Through ' + review.statementDate} />
+          <WorkspaceMetric icon={BookOpenCheck} label="Cleared book balance" value={formatUsd(review.clearedBalance)} detail="Opening balance plus matched lines" />
+          <WorkspaceMetric icon={ArrowLeftRight} label="Remaining to clear" value={formatUsd(decimalText(remaining))} detail={review.unresolved + ' statement lines to review'} />
+        </div>
+        {!importedAgrees && <WorkspaceNotice title="Imported lines do not tie to the statement">
+          {review.bankTransactions.length} of {review.statementLineCount} statement lines are loaded. Opening balance plus imported activity is {formatUsd(review.importedEnding)}.
+        </WorkspaceNotice>}
+        <WorkspacePanel title="Statement transactions" description={review.statementStart + ' through ' + review.statementDate} action={importActions}>
+          {importNote && <p role="status" className="px-4 pt-3 text-sm font-semibold text-blue-800">{importNote}</p>}
+          {review.bankTransactions.length === 0 && <p className="p-4 text-sm text-slate-600">No statement lines for these dates.</p>}
+          {review.bankTransactions.map(row => {
+            const eligible = review.outstanding.filter(line => decimalUnits(line.amount) === decimalUnits(row.amount));
+            const suggested = eligible.some(line => Math.abs(Date.parse(line.date) - Date.parse(row.date)) <= 5 * 86400000);
+            return <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4 last:border-0">
+              <div className="min-w-0"><p className="break-words text-sm font-semibold">{row.description}</p>
+                <p className="text-xs text-slate-600">{row.date.slice(0, 10)} · {formatUsd(row.amount)}{row.matchDescription ? ' · ' + row.matchDescription : ''}</p></div>
+              <div className="flex flex-wrap items-center gap-2">
+                <WorkspaceStatus>{row.validMatch ? 'Matched' : row.isMatched ? 'Check match' : suggested ? 'Suggested match' : 'Unmatched'}</WorkspaceStatus>
+                {row.isMatched ? <button type="button" className="workspace-button" disabled={busy}
+                  onClick={() => void run(async () => { await unmatchTransaction(row.id); await runRefresh(); })}>Undo match</button> :
+                  <>
+                    {eligible.length > 0 && <button type="button" className="workspace-button" disabled={busy} onClick={() => open({ kind: 'match', row })}>Review match</button>}
+                    {decimalUnits(row.amount) < BigInt(0) && <button type="button" className="workspace-button" disabled={busy}
+                      onClick={() => open({ kind: 'fee', row })}>Record bank fee</button>}
+                  </>}
+              </div>
+            </div>;
+          })}
+        </WorkspacePanel>
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="workspace-button" disabled={busy} onClick={() => setStep(0)}>Statement details</button>
+          <button type="button" className="workspace-primary" disabled={busy} onClick={() => setStep(2)}>Review reconciliation</button>
+        </div>
+      </>}
+      {step === 2 && review && <>
+        <WorkspacePanel title="Confirm outstanding items" description="Confirm that each item is on the books and has yet to clear the bank.">
+          {review.outstanding.length === 0 && <p className="p-4 text-sm text-slate-600">No outstanding items.</p>}
+          {review.outstanding.map(line => <label key={line.id} className="flex cursor-pointer items-center gap-3 border-b border-slate-200 p-4 text-sm last:border-0">
+            <input type="checkbox" className="size-4 shrink-0" checked={confirmed.includes(line.id)} disabled={busy} onChange={event => {
+              const checked = event.target.checked;
+              setConfirmed(current => checked ? [...current, line.id] : current.filter(id => id !== line.id));
+            }} />
+            <span className="min-w-0 flex-1"><strong className="break-words">{line.description}</strong>
+              <span className="block text-xs text-slate-600">{decimalUnits(line.amount) > BigInt(0) ? 'Deposit in transit' : 'Outstanding payment'} · {line.date.slice(0, 10)}{line.referenceNo ? ' · ' + line.referenceNo : ''}</span>
+            </span><span className="shrink-0 tabular-nums">{formatUsd(line.amount)}</span>
+          </label>)}
+        </WorkspacePanel>
+        <div className="grid items-start gap-3 md:grid-cols-2">
+          <WorkspacePanel title="Bank statement"><Amounts rows={[
+            ['Statement ending balance', review.statementBalance],
+            ['Confirmed timing items', decimalText(adjustedBank - decimalUnits(review.statementBalance))],
+            ['Adjusted bank balance', decimalText(adjustedBank)],
+          ]} /></WorkspacePanel>
+          <WorkspacePanel title="General ledger" description={'Posted activity through ' + review.statementDate}>
+            <Amounts rows={[
+              ['Opening book balance', review.openingBook],
+              ['Other posted activity', decimalText(decimalUnits(review.adjustedBook) - decimalUnits(review.openingBook) - decimalUnits(review.bankFees))],
+              ['Bank fees posted', review.bankFees], ['Adjusted book balance', review.adjustedBook],
+            ]} />
+          </WorkspacePanel>
+        </div>
+        {ready ? <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-900">Unexplained difference · {formatUsd(decimalText(difference))}. Ready to complete.</p> :
+          <WorkspaceNotice title={'Unexplained difference · ' + formatUsd(decimalText(difference))}>
+            {!review.openingAgrees ? 'The posted opening book balance does not tie to the statement or previous verified proof. Review the opening entries.' :
+              !importedAgrees ? 'Verify that the imported transactions add up to the statement ending balance.' :
+              review.unresolved ? 'Resolve all unmatched statement lines before finishing.' :
+              review.outstanding.length !== confirmed.length ? 'Confirm every outstanding item before finishing.' : 'The adjusted balances must agree before finishing.'}
+          </WorkspaceNotice>}
+        <div className="flex flex-wrap gap-2">
+          <button type="button" className="workspace-button" disabled={busy} onClick={() => setStep(1)}>Back to matches</button>
+          <button type="button" className="workspace-primary" disabled={busy || !ready} onClick={() => void finish()}>
+            {busy ? 'Saving…' : 'Complete reconciliation'}
+          </button>
+        </div>
+      </>}
+    </>}
+    {action?.kind === 'proof' && action.record.proof && <AccountingDialog title="Saved reconciliation proof" onDismiss={() => setAction(null)}>
+      <div className="space-y-3">
+        <p className="text-sm text-slate-600">{action.record.proof.statementStart} through {action.record.proof.statementDate}</p>
+        <Amounts rows={[[ 'Statement ending balance', action.record.proof.statementBalance], ['Cleared book balance', action.record.proof.clearedBalance], ['Adjusted bank balance', action.record.proof.adjustedBank], ['Adjusted book balance', action.record.proof.adjustedBook], ['Unexplained difference', action.record.proof.difference]]} />
+        <details className="rounded-lg border border-slate-200 p-3 text-sm"><summary>{action.record.proof.matches.length} matched statement lines</summary>
+          <ul className="mt-2 space-y-2">{action.record.proof.matches.map(row => <li key={row.id}>{row.date.slice(0, 10)} · {row.description} · {formatUsd(row.amount)}<br /><span className="text-slate-600">{row.matchDescription}</span></li>)}</ul>
+        </details>
+        <details className="rounded-lg border border-slate-200 p-3 text-sm"><summary>{action.record.proof.outstanding.length} confirmed outstanding items</summary>
+          <ul className="mt-2 space-y-2">{action.record.proof.outstanding.map(line => <li key={line.id}>{line.date.slice(0, 10)} · {line.description} · {formatUsd(line.amount)}</li>)}</ul>
+        </details>
+      </div>
+    </AccountingDialog>}
+    {action && action.kind !== 'proof' && <AccountingDialog title={action.kind === 'match' ? 'Review transaction match' : action.kind === 'fee' ? 'Record bank fee' : 'Add statement line'} busy={busy} onDismiss={() => setAction(null)}>
+      <form onSubmit={submitAction} className="space-y-3">
+        {action.kind !== 'manual' && <p className="text-sm font-semibold">{action.row.description} · {action.row.date.slice(0, 10)} · {formatUsd(action.row.amount)}</p>}
+        {action.kind === 'match' && <label className="grid gap-1 text-sm font-semibold">Posted ledger transaction
+          <select name="journalLineId" className="workspace-field" required disabled={busy}>
+            <option value="">Choose the matching transaction…</option>
+            {review?.outstanding.filter(line => decimalUnits(line.amount) === decimalUnits(action.row.amount))
+              .sort((a, b) => Math.abs(Date.parse(a.date) - Date.parse(action.row.date)) - Math.abs(Date.parse(b.date) - Date.parse(action.row.date)))
+              .map(line => <option key={line.id} value={line.id}>{line.date.slice(0, 10)} · {line.description}</option>)}
+          </select>
+        </label>}
+        {action.kind === 'fee' && <>
+          <p className="text-sm text-slate-600">Post only an unrecorded bank charge. This debits the selected expense account and credits the bank account on the transaction date.</p>
+          <label className="grid gap-1 text-sm font-semibold">Bank fees expense account
+            <select name="expenseAccountId" className="workspace-field" required disabled={busy}>
+              <option value="">Select expense account…</option>
+              {expenseAccounts.map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+            </select>
+          </label>
+        </>}
+        {action.kind === 'manual' && <>
+          <label className="grid gap-1 text-sm font-semibold">Transaction date<input className="workspace-field" name="date" type="date" required disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-semibold">Description<input className="workspace-field" name="description" required disabled={busy} /></label>
+          <label className="grid gap-1 text-sm font-semibold">Amount<input className="workspace-field" name="amount" inputMode="decimal" placeholder="Negative for a withdrawal" required disabled={busy} /></label>
+        </>}
+        {dialogError && <WorkspaceNotice title="Could not save">{dialogError}</WorkspaceNotice>}
+        <div className="flex justify-end gap-2">
+          <button type="button" className="workspace-button" disabled={busy} onClick={() => setAction(null)}>Cancel</button>
+          <button type="submit" className="workspace-primary" disabled={busy}>{action.kind === 'match' ? 'Confirm match' : action.kind === 'fee' ? 'Post fee and match' : 'Add line'}</button>
+        </div>
+      </form>
+    </AccountingDialog>}
+  </div></div>;
 }
 
 export default function LegacyReconciliationPage() {

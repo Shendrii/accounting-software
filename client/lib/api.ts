@@ -76,6 +76,7 @@ export interface Account {
   balance: string;
   description?: string | null;
   isActive: boolean;
+  isBankAccount?: boolean;
   createdAt: string;
   updatedAt: string;
 }
@@ -86,6 +87,7 @@ export interface CreateAccountInput {
   type: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   description?: string;
   isActive?: boolean;
+  isBankAccount?: boolean;
 }
 
 export interface UpdateAccountInput {
@@ -94,6 +96,7 @@ export interface UpdateAccountInput {
   type?: 'ASSET' | 'LIABILITY' | 'EQUITY' | 'REVENUE' | 'EXPENSE';
   description?: string;
   isActive?: boolean;
+  isBankAccount?: boolean;
 }
 
 /**
@@ -177,6 +180,8 @@ export interface JournalEntry {
   bills?: Array<{ id: string; billNo: string; vendor?: { name: string } | null }>;
   invoicePosting?: { id: string; invoiceNo: string } | null;
   invoicePayment?: { invoice: { id: string; invoiceNo: string } } | null;
+  billPosting?: { id: string; billNo: string } | null;
+  billPayment?: { bill: { id: string; billNo: string } } | null;
   reversalOfId?: string | null;
   reversal?: { id: string } | null;
 }
@@ -337,6 +342,10 @@ export interface Receipt {
   extractedData: ReceiptExtractedData;
   status: 'PENDING' | 'APPROVED' | 'REJECTED';
   journalEntryId: string | null;
+  vendorId?: string | null;
+  category?: string | null;
+  billId?: string | null;
+  bill?: { id: string; billNo: string } | null;
   createdAt: string;
   updatedAt: string;
   journalEntry?: JournalEntry | null;
@@ -416,6 +425,13 @@ export async function approveReceipt(
     body: JSON.stringify({ expenseAccountId, paymentAccountId }),
   });
   return handleResponse<{ receipt: Receipt; journalEntry: JournalEntry }>(response);
+}
+
+export async function attachReceiptToBill(id: string, data: { billId: string; vendorId: string | null; category: string | null }): Promise<Receipt> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}/attach-to-bill`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  return handleResponse<Receipt>(response);
 }
 
 export async function rejectReceipt(id: string): Promise<Receipt> {
@@ -753,6 +769,11 @@ export interface Bill {
   dueDate: string;
   status: BillStatus;
   total: string;
+  amountPaid?: string;
+  balanceDue?: string;
+  postingEntryId?: string | null;
+  payments?: { id: string; amount: string; journalEntry: { id: string; date: string } }[];
+  receipts?: { id: string; createdAt: string }[];
   notes?: string | null;
   isRecurring?: boolean;
   recurrenceInterval?: string | null;
@@ -825,11 +846,11 @@ export async function receiveBill(id: string): Promise<Bill> {
   return handleResponse<Bill>(response);
 }
 
-export async function payBill(id: string, paymentAccountId: string): Promise<Bill> {
+export async function payBill(id: string, payment: { paymentAccountId: string; amount: string; date: string; requestId: string }): Promise<Bill> {
   const response = await fetch(`${API_URL}/api/bills/${id}/pay`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paymentAccountId }),
+    body: JSON.stringify(payment),
   });
   return handleResponse<Bill>(response);
 }
@@ -857,6 +878,54 @@ export interface BankTransaction {
   createdAt: string;
 }
 
+export interface StatementInput {
+  accountId: string;
+  statementStart: string;
+  statementDate: string;
+  openingBalance: string;
+  statementBalance: string;
+  statementLineCount: string;
+}
+
+export interface OutstandingBankItem {
+  id: string;
+  date: string;
+  description: string;
+  referenceNo: string | null;
+  amount: string;
+}
+
+interface StatementTotals extends Omit<StatementInput, 'accountId'> {
+  openingBook: string;
+  deposits: string;
+  withdrawals: string;
+  bankFees: string;
+  importedEnding: string;
+  clearedBalance: string;
+  adjustedBank: string;
+  adjustedBook: string;
+  difference: string;
+  unresolved: number;
+  openingAgrees: boolean;
+  canComplete: boolean;
+  outstanding: OutstandingBankItem[];
+}
+
+export interface StatementReview extends StatementTotals {
+  bankTransactions: (BankTransaction & { validMatch: boolean; matchDescription: string | null })[];
+}
+
+export interface ReconciliationRecord {
+  id: string;
+  statementDate: string;
+  statementBalance: string;
+  status: string;
+  proof: (StatementTotals & {
+    completedById: string;
+    matches: { id: string; date: string; description: string; amount: string; matchDescription: string }[];
+  }) | null;
+}
+
 export interface ReconciliationData {
   bankTransactions: BankTransaction[];
   journalLines: (JournalLine & { journalEntry: { date: string; description: string; referenceNo?: string | null } })[];
@@ -881,7 +950,7 @@ export async function getBankMatchSuggestions(accountId: string, windowDays = 5)
   return handleResponse<{ windowDays: number; suggestions: BankMatchSuggestion[] }>(response);
 }
 
-export async function importBankTransactions(accountId: string, transactions: { date: string; description: string; amount: number }[]): Promise<{ imported: number }> {
+export async function importBankTransactions(accountId: string, transactions: { date: string; description: string; amount: string | number }[]): Promise<{ imported: number }> {
   const response = await fetch(`${API_URL}/api/reconciliation/import`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
@@ -913,13 +982,32 @@ export async function unmatchTransaction(bankTransactionId: string): Promise<{ s
   return handleResponse<{ success: boolean }>(response);
 }
 
-export async function completeReconciliation(accountId: string, statementDate: string, statementBalance: number): Promise<{ id: string }> {
+export async function reviewStatement(input: StatementInput): Promise<StatementReview> {
+  const response = await fetch(`${API_URL}/api/reconciliation/review`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(input),
+  });
+  return handleResponse<StatementReview>(response);
+}
+
+export async function completeReconciliation(input: StatementInput, outstandingIds: string[]): Promise<ReconciliationRecord> {
   const response = await fetch(`${API_URL}/api/reconciliation/complete`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ accountId, statementDate, statementBalance }),
+    body: JSON.stringify({ ...input, outstandingIds }),
   });
-  return handleResponse<{ id: string }>(response);
+  return handleResponse<ReconciliationRecord>(response);
+}
+
+export async function getReconciliationHistory(accountId: string): Promise<ReconciliationRecord[]> {
+  const response = await fetch(`${API_URL}/api/reconciliation/history/${encodeURIComponent(accountId)}`);
+  return handleResponse<ReconciliationRecord[]>(response);
+}
+
+export async function postBankFee(bankTransactionId: string, expenseAccountId: string): Promise<void> {
+  const response = await fetch(`${API_URL}/api/reconciliation/post-fee`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ bankTransactionId, expenseAccountId }),
+  });
+  await handleResponse(response);
 }
 
 // ==================== REPORTS API ====================
