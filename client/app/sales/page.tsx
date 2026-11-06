@@ -1,38 +1,40 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { FileText, Users } from 'lucide-react';
-import { getInvoices, type Invoice } from '@/lib/api';
-import { decimalText, decimalUnits, formatUsd } from '@/lib/money';
+import { CalendarClock, FilePenLine, Plus, ReceiptText } from 'lucide-react';
+import { getInvoices } from '@/lib/api';
+import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
+import { InvoiceActivity } from '@/app/components/WorkspaceActivity';
+import { WorkflowTabs, WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
 export default function SalesPage() {
-  const [invoices, setInvoices] = useState<Invoice[]>([]);
-
-  useEffect(() => {
-    getInvoices({ status: 'SENT' }).then(setInvoices).catch(() => {});
-  }, []);
-
-  const overdue = invoices.filter((invoice) => new Date(invoice.dueDate) < new Date());
-  const outstanding = decimalText(invoices.reduce((sum, invoice) => sum + decimalUnits(invoice.balanceDue), BigInt(0)));
+  const { data: invoices, loading, error, retry } = useWorkspaceData(getInvoices);
+  const open = invoices?.filter(invoice => invoice.status === 'SENT');
+  const overdue = open?.filter(invoice => invoice.dueDate.slice(0, 10) < localDay());
+  const drafts = invoices?.filter(invoice => invoice.status === 'DRAFT');
+  const sum = (rows: typeof open) => rows
+    ? formatUsd(decimalText(rows.reduce((total, invoice) => total + decimalUnits(invoice.balanceDue), BigInt(0))))
+    : '—';
+  const detail = (count: number | undefined, unit: string) => count === undefined ? loading ? 'Loading…' : 'Unavailable' : `${count} ${unit}`;
 
   return (
-    <div className="min-h-screen lg:pl-64">
-      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Sales (AR)</h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">Customers, invoices, and collections in one workflow.</p>
-        <div className="mt-6 rounded-xl border border-amber-200 bg-amber-50 p-5 dark:border-amber-900/50 dark:bg-amber-950/30">
-          <p className="text-sm font-medium text-amber-900 dark:text-amber-200">{overdue.length} invoice{overdue.length === 1 ? '' : 's'} overdue</p>
-          <p className="mt-1 text-2xl font-semibold text-amber-950 dark:text-amber-100">{formatUsd(outstanding)} outstanding</p>
+    <div className="workspace-page">
+      <div className="workspace-content space-y-5">
+        <WorkspaceHeading section="Daily work" title="Sales" description="Manage customers, invoices, and collections."
+          actions={<Link href="/sales/invoices/new" className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New invoice</Link>} />
+        <WorkflowTabs area="sales" active="summary" />
+        {error && <WorkspaceNotice title="Sales activity could not load" onRetry={retry} />}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <WorkspaceMetric label="Outstanding" value={sum(open)} detail={detail(open?.length, 'open invoices')} icon={ReceiptText} href="/sales/invoices" />
+          <WorkspaceMetric label="Overdue" value={sum(overdue)} detail={detail(overdue?.length, 'past due')} icon={CalendarClock} href="/sales/invoices" />
+          <WorkspaceMetric label="Draft invoices" value={drafts ? String(drafts.length) : '—'} detail={drafts ? 'Awaiting review and posting' : detail(undefined, '')} icon={FilePenLine} href="/sales/invoices" />
         </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Link href="/sales/customers" className="rounded-xl border border-zinc-200 bg-white p-6 transition hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <Users className="h-6 w-6 text-blue-600" /><h2 className="mt-3 font-semibold">Customers</h2><p className="mt-1 text-sm text-zinc-500">Manage customer records and contact details.</p>
-          </Link>
-          <Link href="/sales/invoices" className="rounded-xl border border-zinc-200 bg-white p-6 transition hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <FileText className="h-6 w-6 text-blue-600" /><h2 className="mt-3 font-semibold">Invoices</h2><p className="mt-1 text-sm text-zinc-500">Create, send, and collect customer invoices.</p>
-          </Link>
-        </div>
+        <WorkspacePanel title="Invoice activity" description="See what is drafted, posted, or collected."
+          action={<Link href="/sales/invoices" className="workspace-text-action">All invoices</Link>}>
+          {invoices?.length ? <InvoiceActivity invoices={invoices.slice(0, 6)} /> :
+            <p className="p-4 text-sm text-slate-600" role="status">{loading ? 'Loading invoices…' : error ? 'Invoice activity is unavailable.' : 'No invoices yet. Create an invoice to get started.'}</p>}
+        </WorkspacePanel>
       </div>
     </div>
   );

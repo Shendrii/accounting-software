@@ -12,11 +12,12 @@ import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
 import { toast } from '@/lib/toast';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { PostingTable, postedLines, type PostingLine } from '@/app/components/PostingTable';
+import { WorkspaceHeading } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-const panel = 'min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-5';
-const button = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50';
-const primary = 'inline-flex min-h-11 items-center justify-center rounded-lg bg-blue-700 px-4 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50';
+const panel = 'workspace-panel min-w-0 p-4 sm:p-5';
+const button = 'workspace-button';
+const primary = 'workspace-primary';
 const field = 'mt-1 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900';
 const textLink = 'inline-flex min-h-10 items-center text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-4';
 
@@ -128,7 +129,7 @@ export function InvoiceDetailPage() {
 
   if (!invoice) {
     return (
-      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-5 lg:pl-64">
+      <div className="workspace-page grid place-items-center">
         {loading ? <Loader2 className="size-8 animate-spin text-slate-500" aria-label="Loading invoice" /> : (
           <div className="text-center"><p role="alert">{error || 'Invoice not found.'}</p><Link className={textLink} href="/sales/invoices">Back to invoices</Link></div>
         )}
@@ -208,32 +209,25 @@ export function InvoiceDetailPage() {
   }
 
   return (
-    <div className="min-h-screen bg-slate-50 lg:pl-64">
-      <main className="mx-auto grid max-w-6xl gap-4 px-4 pb-10 pt-16 sm:px-6 lg:pt-10">
-        <Link className="inline-flex w-fit items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900" href="/sales/invoices">
-          <ArrowLeft className="size-4" aria-hidden="true" /> Invoices
-        </Link>
-        <header className="flex flex-wrap items-start justify-between gap-4">
-          <div>
-            <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Sales / Invoices</p>
-            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">{invoice.invoiceNo}</h1>
-            <p className="mt-1 text-sm text-slate-600">{invoice.customer?.name ?? 'Customer'} · Invoice date {formatDate(invoice.date)} · Due {formatDate(invoice.dueDate)}</p>
-          </div>
-          <div className="flex flex-wrap gap-2">
+    <div className="workspace-page">
+      <div className="workspace-content grid gap-4">
+        <WorkspaceHeading section="Sales / Invoices" title={invoice.invoiceNo}
+          description={<>{invoice.customer?.name ?? 'Customer'} · Invoice date {formatDate(invoice.date)} · Due {formatDate(invoice.dueDate)}</>}
+          actions={<>
+            {canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
+            {canPay && <button type="button" className={primary} onClick={() => open({ kind: 'payment' })}>Record payment</button>}
             <button type="button" onClick={download} className={button}><Download className="size-4" aria-hidden="true" /> PDF</button>
             {!isVoid && (posted || invoice.status !== 'DRAFT') && (
               <button type="button" onClick={() => open({ kind: 'email' })} className={button}><Mail className="size-4" aria-hidden="true" /> Send email</button>
             )}
-            {canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
-            {canPay && <button type="button" className={primary} onClick={() => open({ kind: 'payment' })}>Record payment</button>}
-          </div>
-        </header>
+            <Link className={button} href="/sales/invoices"><ArrowLeft className="size-4" aria-hidden="true" />Invoices</Link>
+          </>} />
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {!posted && invoice.status === 'SENT' && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Review this older invoice against the ledger before posting or recording a payment.</p>}
-        <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-live="polite">
-          {metrics.map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 sm:p-4">
+        <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3" aria-live="polite">
+          {metrics.map(([label, value]) => <div key={label} className="workspace-panel min-w-0 p-3.5 sm:p-4">
             <p className="text-xs text-slate-600 sm:text-sm">{label}</p>
-            <p className="mt-2 break-words text-base font-semibold tracking-tight text-slate-900 tabular-nums sm:text-2xl">{formatUsd(value)}</p>
+            <p className="mt-2 text-lg font-semibold tracking-tight break-words text-slate-950 tabular-nums sm:text-2xl">{formatUsd(value)}</p>
           </div>)}
         </div>
         <div className="grid items-start gap-3 md:grid-cols-[1.25fr_1fr]">
@@ -298,7 +292,7 @@ export function InvoiceDetailPage() {
             </div>
           </form>}
         </AccountingDialog>}
-      </main>
+      </div>
     </div>
   );
 }

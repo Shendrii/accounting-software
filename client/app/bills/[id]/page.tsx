@@ -9,14 +9,9 @@ import {
   type Bill, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
-
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
-  RECEIVED: 'bg-amber-50 text-amber-700 dark:bg-amber-900/30 dark:text-amber-400',
-  PAID: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  VOID: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
-};
 
 function formatCurrency(v: string | number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
@@ -98,7 +93,7 @@ export function BillDetailPage() {
 
   if (loading) {
     return (
-      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+      <div className="workspace-page grid place-items-center">
         <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
       </div>
     );
@@ -106,23 +101,19 @@ export function BillDetailPage() {
 
   if (!bill) {
     return (
-      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
+      <div className="workspace-page grid place-items-center">
         <p className="text-zinc-500">Bill not found.</p>
       </div>
     );
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-8">
-          <Link href="/purchases/bills" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <ArrowLeft className="h-5 w-5 text-zinc-600" />
-          </Link>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">{bill.billNo}</h1>
-          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[bill.status]}`}>
-            {bill.status}
-          </span>
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5">
+          <WorkspaceHeading section="Purchases / Bills" title={bill.billNo}
+            description={<>{bill.vendor?.name ?? 'Vendor'} · Due {formatDate(bill.dueDate)}</>}
+            actions={<><WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus><Link href="/purchases/bills" className="workspace-button"><ArrowLeft className="size-4" aria-hidden="true" />Bills</Link></>} />
         </div>
 
         {error && (
@@ -137,7 +128,7 @@ export function BillDetailPage() {
               <button
                 onClick={handleReceive}
                 disabled={actionLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-amber-600 text-white text-sm font-medium hover:bg-amber-700 disabled:opacity-50"
+                className="workspace-primary"
               >
                 {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
                 Mark as Received
@@ -147,7 +138,7 @@ export function BillDetailPage() {
               <button
                 onClick={() => setPayModalOpen(true)}
                 disabled={actionLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
+                className="workspace-primary"
               >
                 Pay Bill
               </button>
@@ -162,7 +153,9 @@ export function BillDetailPage() {
           </div>
         )}
 
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
+        <div className="grid items-start gap-4 xl:grid-cols-[1.3fr_1fr]">
+        <section className="workspace-panel min-w-0 p-4 sm:p-5">
+          <h2 className="mb-4 font-semibold">Bill details</h2>
           <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 mb-6">
             <div>
               <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Vendor</p>
@@ -178,6 +171,7 @@ export function BillDetailPage() {
             </div>
           </div>
 
+          <div className="workspace-table-wrap">
           <table className="w-full text-sm">
             <thead>
               <tr className="border-b border-zinc-200 dark:border-zinc-800">
@@ -198,6 +192,7 @@ export function BillDetailPage() {
               ))}
             </tbody>
           </table>
+          </div>
 
           <div className="mt-4 border-t border-zinc-100 dark:border-zinc-800 pt-4 max-w-xs ml-auto">
             <div className="flex justify-between text-base font-bold">
@@ -212,6 +207,14 @@ export function BillDetailPage() {
               <p className="text-sm text-zinc-700 dark:text-zinc-300">{bill.notes}</p>
             </div>
           )}
+        </section>
+        <WorkspacePanel title="Payment summary">
+          <div className="space-y-2 p-4 sm:p-5">
+            <p className="text-sm text-slate-600">{bill.status === 'RECEIVED' ? 'Amount due' : 'Bill total'}</p>
+            <p className="text-2xl font-semibold tracking-tight tabular-nums">{formatCurrency(bill.total)}</p>
+            <WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus>
+          </div>
+        </WorkspacePanel>
         </div>
 
         {/* Pay Modal */}
@@ -231,7 +234,7 @@ export function BillDetailPage() {
               <select
                 value={payAccountId}
                 onChange={(e) => setPayAccountId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-blue-500"
               >
                 <option value="">Select payment account…</option>
                 {accounts.map((a) => (

@@ -3,21 +3,15 @@
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
-import { Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
+import { ArrowLeft, Loader2 } from 'lucide-react';
 import { getCustomers, getAccounts, createInvoice, type Customer, type Account, type InvoiceLineInput } from '@/lib/api';
 import { decimalText, decimalUnits } from '@/lib/money';
 import { toast } from '@/lib/toast';
+import { DocumentLines, type DocumentLine } from '@/app/components/DocumentLines';
+import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-interface LineItem {
-  description: string;
-  quantity: string;
-  unitPrice: string;
-  amount: string;
-  accountId: string;
-}
-
-const emptyLine = (): LineItem => ({
+const emptyLine = (): DocumentLine => ({
   description: '',
   quantity: '1',
   unitPrice: '0.00',
@@ -36,7 +30,7 @@ export function NewInvoicePage() {
     d.setDate(d.getDate() + 30);
     return d.toISOString().split('T')[0];
   });
-  const [lines, setLines] = useState<LineItem[]>([emptyLine()]);
+  const [lines, setLines] = useState<DocumentLine[]>([emptyLine()]);
   const [notes, setNotes] = useState('');
   const [tax, setTax] = useState('0.00');
   const [saving, setSaving] = useState(false);
@@ -47,10 +41,10 @@ export function NewInvoicePage() {
     Promise.all([getCustomers({ isActive: true }), getAccounts()]).then(([c, a]) => {
       setCustomers(c);
       setAccounts(a.filter((acc) => acc.isActive));
-    }).finally(() => setInitLoading(false));
+    }).catch(() => setError('Could not load customers and accounts.')).finally(() => setInitLoading(false));
   }, []);
 
-  function updateLine(index: number, field: keyof LineItem, value: string) {
+  function updateLine(index: number, field: keyof DocumentLine, value: string) {
     setLines((prev) => {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
@@ -100,13 +94,13 @@ export function NewInvoicePage() {
 
   if (initLoading) {
     return (
-      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-        <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+      <div className="workspace-page">
+        <div className="workspace-content">
           <div className="flex items-center gap-3 mb-8">
             <div className="w-9 h-9 rounded-lg bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
             <div className="h-8 w-40 rounded bg-zinc-200 dark:bg-zinc-800 animate-pulse" />
           </div>
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6 space-y-4">
+          <div className="workspace-panel mb-5 p-4 sm:p-5 space-y-4">
             {[1, 2, 3].map((i) => (
               <div key={i} className="h-10 rounded bg-zinc-100 dark:bg-zinc-800 animate-pulse" />
             ))}
@@ -117,13 +111,11 @@ export function NewInvoicePage() {
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-8">
-          <Link href="/sales/invoices" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <ArrowLeft className="h-5 w-5 text-zinc-600" />
-          </Link>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">New Invoice</h1>
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5">
+          <WorkspaceHeading section="Sales / Invoices" title="New invoice" description="Prepare a draft with the customer, dates, and line items."
+            actions={<Link href="/sales/invoices" className="workspace-button"><ArrowLeft className="size-4" aria-hidden="true" />Back to invoices</Link>} />
         </div>
 
         {error && (
@@ -133,166 +125,75 @@ export function NewInvoicePage() {
         )}
 
         <form onSubmit={handleSubmit}>
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Invoice Details</h2>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
-              <div className="sm:col-span-1">
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Customer *</label>
-                <select
-                  value={customerId}
-                  onChange={(e) => setCustomerId(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                >
-                  <option value="">Select customer…</option>
-                  {customers.map((c) => (
-                    <option key={c.id} value={c.id}>{c.name}</option>
-                  ))}
-                </select>
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Invoice Date *</label>
-                <input
-                  type="date"
-                  value={date}
-                  onChange={(e) => setDate(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                />
-              </div>
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Due Date *</label>
-                <input
-                  type="date"
-                  value={dueDate}
-                  onChange={(e) => setDueDate(e.target.value)}
-                  required
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
-                />
+          <div className="mb-5 grid items-start gap-4 xl:grid-cols-[1.65fr_1fr]">
+            <div className="workspace-panel p-4 sm:p-5">
+              <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Invoice details</h2>
+              <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
+                <div className="sm:col-span-1">
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="invoices-customerId">Customer *</label>
+                  <select
+                    id="invoices-customerId"
+                    value={customerId}
+                    onChange={(e) => setCustomerId(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  >
+                    <option value="">Select customer…</option>
+                    {customers.map((c) => (
+                      <option key={c.id} value={c.id}>{c.name}</option>
+                    ))}
+                  </select>
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="invoices-date">Invoice Date *</label>
+                  <input
+                    type="date"
+                    id="invoices-date"
+                    value={date}
+                    onChange={(e) => setDate(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
+                <div>
+                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="invoices-dueDate">Due Date *</label>
+                  <input
+                    type="date"
+                    id="invoices-dueDate"
+                    value={dueDate}
+                    onChange={(e) => setDueDate(e.target.value)}
+                    required
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
+                  />
+                </div>
               </div>
             </div>
+              <WorkspacePanel title="Totals" description="USD">
+                <div className="space-y-2 p-4 text-sm sm:p-5">
+                  <div className="flex justify-between gap-2"><span>Subtotal</span><strong className="tabular-nums">${decimalText(subtotal)}</strong></div>
+                  <label className="flex items-center justify-between gap-3">Tax
+                    <input type="number" min="0" step="0.01" value={tax} onChange={event => setTax(event.target.value)} className="workspace-field max-w-28 text-right" />
+                  </label>
+                  <div className="flex justify-between gap-2 rounded-lg bg-blue-50 p-3 font-semibold"><span>Total</span><span className="tabular-nums">${decimalText(total)}</span></div>
+                </div>
+              </WorkspacePanel>
           </div>
 
-          {/* Line Items */}
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Line Items</h2>
-            <div className="overflow-x-auto">
-              <table className="w-full text-sm">
-                <thead>
-                  <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                    <th className="text-left py-2 pr-2 text-xs font-medium text-zinc-500 uppercase">Description</th>
-                    <th className="text-left py-2 px-2 w-24 text-xs font-medium text-zinc-500 uppercase">Qty</th>
-                    <th className="text-left py-2 px-2 w-32 text-xs font-medium text-zinc-500 uppercase">Unit Price</th>
-                    <th className="text-left py-2 px-2 w-28 text-xs font-medium text-zinc-500 uppercase">Account</th>
-                    <th className="text-right py-2 pl-2 w-28 text-xs font-medium text-zinc-500 uppercase">Amount</th>
-                    <th className="w-8" />
-                  </tr>
-                </thead>
-                <tbody>
-                  {lines.map((line, i) => (
-                    <tr key={i} className="border-b border-zinc-100 dark:border-zinc-800">
-                      <td className="py-2 pr-2">
-                        <input
-                          value={line.description}
-                          onChange={(e) => updateLine(i, 'description', e.target.value)}
-                          placeholder="Item description"
-                          className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.0001"
-                          value={line.quantity}
-                          onChange={(e) => updateLine(i, 'quantity', e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <input
-                          type="number"
-                          min="0"
-                          step="0.01"
-                          value={line.unitPrice}
-                          onChange={(e) => updateLine(i, 'unitPrice', e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                        />
-                      </td>
-                      <td className="py-2 px-2">
-                        <select
-                          value={line.accountId}
-                          onChange={(e) => updateLine(i, 'accountId', e.target.value)}
-                          className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                        >
-                          <option value="">None</option>
-                          {revenueAccounts.map((a) => (
-                            <option key={a.id} value={a.id}>{a.name}</option>
-                          ))}
-                        </select>
-                      </td>
-                      <td className="py-2 pl-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                        ${line.amount}
-                      </td>
-                      <td className="py-2 pl-1">
-                        {lines.length > 1 && (
-                          <button
-                            type="button"
-                            onClick={() => setLines((l) => l.filter((_, j) => j !== i))}
-                            className="p-1 rounded hover:bg-zinc-100 dark:hover:bg-zinc-700 text-zinc-400 hover:text-red-500"
-                          >
-                            <Trash2 className="h-4 w-4" />
-                          </button>
-                        )}
-                      </td>
-                    </tr>
-                  ))}
-                </tbody>
-              </table>
-            </div>
-
-            <button
-              type="button"
-              onClick={() => setLines((l) => [...l, emptyLine()])}
-              className="mt-3 flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50"
-            >
-              <Plus className="h-4 w-4" />
-              Add line item
-            </button>
-
-            {/* Totals */}
-            <div className="mt-4 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-2 max-w-xs ml-auto">
-              <div className="flex justify-between text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Subtotal</span>
-                <span className="font-medium">${decimalText(subtotal)}</span>
-              </div>
-              <div className="flex items-center justify-between text-sm">
-                <span className="text-zinc-600 dark:text-zinc-400">Tax</span>
-                <input
-                  type="number"
-                  min="0"
-                  step="0.01"
-                  value={tax}
-                  onChange={(e) => setTax(e.target.value)}
-                  className="w-28 text-right px-2 py-1 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-1 focus:ring-zinc-400"
-                />
-              </div>
-              <div className="flex justify-between text-base font-semibold border-t border-zinc-200 dark:border-zinc-700 pt-2">
-                <span>Total</span>
-                <span>${decimalText(total)}</span>
-              </div>
-            </div>
+          <div className="mb-5">
+            <DocumentLines lines={lines} accounts={revenueAccounts}
+              onChange={updateLine} onAdd={() => setLines(current => [...current, emptyLine()])}
+              onRemove={index => setLines(current => current.filter((_, position) => position !== index))} />
           </div>
 
           {/* Notes */}
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
+          <div className="workspace-panel mb-5 p-4 sm:p-5">
             <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Notes</label>
             <textarea
               value={notes}
               onChange={(e) => setNotes(e.target.value)}
               rows={3}
               placeholder="Additional notes or payment terms…"
-              className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400 resize-none"
+              className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500 resize-none"
             />
           </div>
 
@@ -306,7 +207,7 @@ export function NewInvoicePage() {
             <button
               type="submit"
               disabled={saving}
-              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 disabled:opacity-50"
+              className="flex items-center gap-2 px-5 py-2.5 rounded-lg bg-blue-700 text-white text-sm font-medium hover:bg-blue-800 disabled:opacity-50"
             >
               {saving && <Loader2 className="h-4 w-4 animate-spin" />}
               Create Invoice

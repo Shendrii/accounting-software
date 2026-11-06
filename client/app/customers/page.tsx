@@ -2,7 +2,7 @@
 
 import { useEffect, useState } from 'react';
 import {
-  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2, Users, AlertCircle, RefreshCw,
+  Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2,
 } from 'lucide-react';
 import {
   getCustomers, createCustomer, updateCustomer, deleteCustomer,
@@ -17,6 +17,8 @@ import { COUNTRY_NAMES, getCities } from '@/lib/countries';
 const emptyForm: CreateCustomerInput = {
   name: '', email: '', phone: '', address: '', city: '', country: '',
 };
+
+import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice } from '@/app/components/WorkspaceUI';
 
 export function CustomersPage() {
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -109,31 +111,17 @@ export function CustomersPage() {
   }
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
+    <div className="workspace-page">
+      <div className="workspace-content">
         {/* Header */}
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <Users className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
-            <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Customers</h1>
-          </div>
-          <button
-            onClick={openCreate}
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            New Customer
-          </button>
+        <div className="mb-5 space-y-4">
+          <WorkspaceHeading section="Sales" title="Customers" description="Manage customer records and billing contacts."
+            actions={<button type="button" onClick={openCreate} className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New customer</button>} />
+          <WorkflowTabs area="sales" active="customers" />
         </div>
 
         {loadError && (
-          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span className="flex-1">{loadError}</span>
-            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
-              <RefreshCw className="h-3.5 w-3.5" /> Retry
-            </button>
-          </div>
+          <div className="mb-5"><WorkspaceNotice title="Customers could not load" onRetry={load}>{loadError}</WorkspaceNotice></div>
         )}
 
         {/* Filters */}
@@ -145,7 +133,7 @@ export function CustomersPage() {
               placeholder="Search customers…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <label className="flex items-center gap-2 text-sm text-zinc-600 dark:text-zinc-400 cursor-pointer select-none">
@@ -160,7 +148,7 @@ export function CustomersPage() {
         </div>
 
         {/* Table */}
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+        <div className="workspace-panel overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -259,7 +247,7 @@ export function CustomersPage() {
                     required
                     value={form.name}
                     onChange={(e) => setForm((f) => ({ ...f, name: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -272,7 +260,7 @@ export function CustomersPage() {
                     type="email"
                     value={form.email}
                     onChange={(e) => setForm((f) => ({ ...f, email: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -297,7 +285,7 @@ export function CustomersPage() {
                     type="text"
                     value={form.address}
                     onChange={(e) => setForm((f) => ({ ...f, address: e.target.value }))}
-                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                    className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-blue-500"
                   />
                 </div>
 
@@ -344,7 +332,7 @@ export function CustomersPage() {
                   <button
                     type="submit"
                     disabled={saving}
-                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 disabled:opacity-50"
+                    className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-700 text-white text-sm font-medium hover:bg-blue-800 disabled:opacity-50"
                   >
                     {saving && <Loader2 className="h-4 w-4 animate-spin" />}
                     {editTarget ? 'Save Changes' : 'Create Customer'}

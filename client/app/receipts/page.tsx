@@ -19,6 +19,9 @@ import {
 } from '@/lib/api';
 import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
 import { toast } from '@/lib/toast';
+import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { formatUsd } from '@/lib/money';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 export function ReceiptsPage({
@@ -37,8 +40,9 @@ export function ReceiptsPage({
   const [loading, setLoading] = useState(true);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<string>('all');
+  const [statusFilter, setStatusFilter] = useState<string>(title === 'Inbox' ? 'PENDING' : 'all');
   const [search, setSearch] = useState('');
+  const [selectedId, setSelectedId] = useState<string | null>(null);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [approveModal, setApproveModal] = useState<{ receipt: Receipt } | null>(null);
   const [approveExpenseId, setApproveExpenseId] = useState('');
@@ -158,44 +162,31 @@ export function ReceiptsPage({
     return match;
   });
 
+  const selected = filteredReceipts.find(receipt => receipt.id === selectedId);
+
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        <div className="mb-8 flex flex-col gap-4 sm:flex-row sm:items-start sm:justify-between">
-          <div>
-            <h1 className="text-3xl font-bold text-zinc-900 mb-2">{title}</h1>
-            <p className="text-zinc-600">{subtitle}</p>
-          </div>
-          {headerAction}
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5">
+          <WorkspaceHeading section="Daily work" title={title} description={subtitle}
+            actions={<><a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>{headerAction}</>} />
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-800 dark:text-red-200 text-sm">
-            {error}
-          </div>
-        )}
+        {error && <div className="mb-5"><WorkspaceNotice title="Receipt action could not finish">{error}</WorkspaceNotice></div>}
 
-        {/* Upload */}
-        <div className="mb-6 p-6 rounded-lg border-2 border-dashed border-zinc-300 dark:border-zinc-700 bg-white dark:bg-zinc-900">
-          <label className="flex flex-col items-center gap-2 cursor-pointer">
-            <input
-              type="file"
-              accept="image/jpeg,image/png,image/webp"
-              onChange={handleFileSelect}
-              disabled={uploading}
-              className="hidden"
-            />
-            {uploading ? (
-              <Loader2 className="h-10 w-10 text-zinc-500 animate-spin" />
-            ) : (
-              <Upload className="h-10 w-10 text-zinc-500" />
-            )}
-            <span className="text-sm font-medium text-zinc-700 dark:text-zinc-300">
-              {uploading ? 'Processing…' : 'Drop receipt image or click to upload'}
+        <section id="upload-receipt" className="workspace-panel mb-5 scroll-mt-4 px-4 py-3 sm:px-5">
+          <label className="flex cursor-pointer flex-wrap items-center gap-3">
+            <span className="workspace-icon">
+              {uploading ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}
             </span>
-            <span className="text-xs text-zinc-500">JPEG, PNG, or WebP — OCR will extract vendor, date, amount, category</span>
+            <span className="min-w-32 flex-1">
+              <span className="block text-sm font-semibold">{uploading ? 'Processing receipt…' : 'Add a receipt image'}</span>
+              <span className="block text-xs text-slate-600">JPEG, PNG, or WebP</span>
+            </span>
+            <input type="file" aria-label="Choose receipt image" accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect}
+              disabled={uploading} className="max-w-full text-sm text-slate-700 file:mr-2 file:min-h-10 file:cursor-pointer file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:font-semibold file:text-blue-900" />
           </label>
-        </div>
+        </section>
 
         {/* Filters */}
         <div className="mb-6 flex flex-wrap gap-4 items-center">
@@ -203,55 +194,63 @@ export function ReceiptsPage({
             <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
             <input
               type="text"
-              placeholder="Search by vendor or category..."
+              aria-label="Search receipts" placeholder="Search by vendor or category…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
               className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
             />
           </div>
           <select
+            aria-label="Receipt status"
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value)}
             className="px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
           >
             <option value="all">All statuses</option>
-            <option value="PENDING">Pending</option>
+            <option value="PENDING">Needs review</option>
             <option value="APPROVED">Approved</option>
             <option value="REJECTED">Rejected</option>
           </select>
         </div>
 
-        {/* List */}
-        {loading ? (
-          <div className="flex justify-center py-12">
-            <Loader2 className="h-8 w-8 text-zinc-500 animate-spin" />
-          </div>
-        ) : filteredReceipts.length === 0 ? (
-          <div className="text-center py-12 text-zinc-500 dark:text-zinc-400">
-            No receipts found. Upload an image to get started.
-          </div>
-        ) : (
-          <div className="space-y-6">
-            {filteredReceipts.map((receipt) => (
-              <ReceiptCard
-                key={receipt.id}
-                receipt={receipt}
-                isEditing={editingId === receipt.id}
-                onStartEdit={() => setEditingId(receipt.id)}
-                onCancelEdit={() => setEditingId(null)}
-                onSave={(data) => handleUpdateExtracted(receipt.id, data)}
-                onApprove={() => setApproveModal({ receipt })}
-                onReject={() => handleReject(receipt.id)}
-                canApprove={receipt.status === 'PENDING'}
-                vendors={vendors}
-                bills={bills}
-                onUpdateMeta={async (vendorId, category, billId) => {
-                  await updateReceipt(receipt.id, { vendorId, category, billId });
-                  await loadData();
-                }}
-              />
-            ))}
-          </div>
+        <WorkspacePanel title="Receipt queue" description={loading ? 'Loading receipts…' : filteredReceipts.length + (filteredReceipts.length === 1 ? ' receipt' : ' receipts')}>
+          {loading ? <p role="status" className="p-4 text-sm text-slate-600">Loading receipts…</p> : filteredReceipts.length === 0 ? (
+            <p className="p-4 text-sm text-slate-600">{error ? 'Receipt data is unavailable.' : 'No receipts match this view.'}</p>
+          ) : (
+            <div className="workspace-table-wrap">
+              <table className="workspace-table">
+                <thead><tr><th scope="col">Receipt</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Amount</th></tr></thead>
+                <tbody>{filteredReceipts.map(receipt => {
+                  const details = receipt.extractedData;
+                  const amount = displayAmount(details);
+                  return <tr key={receipt.id} className={selected?.id === receipt.id ? 'bg-blue-50' : undefined}>
+                    <td><button type="button" aria-expanded={selected?.id === receipt.id}
+                      aria-controls={selected?.id === receipt.id ? 'receipt-review' : undefined}
+                      className="workspace-text-action min-h-10 px-0 text-left"
+                      onClick={() => { setSelectedId(selected?.id === receipt.id ? null : receipt.id); setEditingId(null); }}>
+                      {details?.vendor || details?.invoiceNumber || 'Uploaded receipt'}
+                    </button></td>
+                    <td className="whitespace-nowrap">{details?.invoiceDate || details?.date || '—'}</td>
+                    <td><WorkspaceStatus>{receipt.status === 'PENDING' ? 'Needs review' : receipt.status === 'APPROVED' ? 'Approved' : 'Rejected'}</WorkspaceStatus></td>
+                    <td className="workspace-number">{amount === null ? '—' : formatUsd(amount)}</td>
+                  </tr>;
+                })}</tbody>
+              </table>
+            </div>
+          )}
+        </WorkspacePanel>
+        {selected && (
+          <section className="mt-5 space-y-2" id="receipt-review" aria-label="Receipt review">
+            <h2 className="font-semibold text-slate-950">Receipt review</h2>
+            <ReceiptCard key={selected.id} receipt={selected}
+              isEditing={editingId === selected.id} onStartEdit={() => setEditingId(selected.id)} onCancelEdit={() => setEditingId(null)}
+              onSave={data => handleUpdateExtracted(selected.id, data)} onApprove={() => setApproveModal({ receipt: selected })}
+              onReject={() => handleReject(selected.id)} canApprove={selected.status === 'PENDING'} vendors={vendors} bills={bills}
+              onUpdateMeta={async (vendorId, category, billId) => {
+                await updateReceipt(selected.id, { vendorId, category, billId });
+                await loadData();
+              }} />
+          </section>
         )}
 
         {/* Approve modal */}
@@ -320,7 +319,7 @@ export function ReceiptsPage({
                 <button
                   onClick={handleApprove}
                   disabled={approving || !approveExpenseId || !approvePaymentId}
-                  className="flex-1 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-800 dark:hover:bg-zinc-100 disabled:opacity-50 flex items-center justify-center gap-2"
+                  className="flex-1 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 disabled:opacity-50 flex items-center justify-center gap-2"
                 >
                   {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
                   Approve & create entry
@@ -416,9 +415,9 @@ function ReceiptCard({
   const fmt = (n: number | undefined) => (n != null && typeof n === 'number' ? n.toFixed(2) : '—');
 
   return (
-    <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+    <div className="workspace-panel overflow-hidden">
       <div className="flex flex-col md:flex-row">
-        <div className="md:w-48 shrink-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center min-h-[160px]">
+        <div className="md:w-[32%] shrink-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center min-h-[160px]">
           <a
             href={getReceiptImageUrl(receipt.imageUrl)}
             target="_blank"
@@ -428,11 +427,11 @@ function ReceiptCard({
             <img
               src={getReceiptImageUrl(receipt.imageUrl)}
               alt="Receipt"
-              className="w-full h-full object-contain max-h-48"
+              className="w-full h-full object-contain max-h-80"
             />
           </a>
         </div>
-        <div className="flex-1 p-4">
+        <div className="min-w-0 flex-1 p-4 sm:p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[receipt.status]}`}>
               {receipt.status}
@@ -623,7 +622,7 @@ function ReceiptCard({
                 <select
                   value={metaVendorId}
                   onChange={(e) => { setMetaVendorId(e.target.value); setMetaBillId(''); }}
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="">None</option>
                   {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
@@ -636,7 +635,7 @@ function ReceiptCard({
                   value={metaCategory}
                   onChange={(e) => setMetaCategory(e.target.value)}
                   placeholder="e.g. Travel"
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                 />
                 <datalist id={`cat-list-${receipt.id}`}>
                   {CATEGORY_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
@@ -647,7 +646,7 @@ function ReceiptCard({
                 <select
                   value={metaBillId}
                   onChange={(e) => setMetaBillId(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-zinc-400"
+                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
                 >
                   <option value="">None</option>
                   {vendorBills.map((b) => <option key={b.id} value={b.id}>{b.billNo} ({b.vendor?.name ?? ''})</option>)}
@@ -698,7 +697,7 @@ function ReceiptCard({
               <>
                 <button
                   onClick={() => onSave(editData)}
-                  className="px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-50 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100"
+                  className="px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-50 rounded-lg hover:bg-blue-800"
                 >
                   Save
                 </button>

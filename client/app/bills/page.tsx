@@ -2,10 +2,12 @@
 
 import { useEffect, useState } from 'react';
 import Link from 'next/link';
-import { Plus, Search, FileText, Loader2, AlertCircle, RefreshCw, Repeat } from 'lucide-react';
+import { Plus, Search, Loader2, Repeat } from 'lucide-react';
 import { getBills, getRecurringBills, triggerRecurring, type Bill, type BillStatus } from '@/lib/api';
 import { toast } from '@/lib/toast';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+
+import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice } from '@/app/components/WorkspaceUI';
 
 const STATUS_COLORS: Record<BillStatus, string> = {
   DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
@@ -82,30 +84,16 @@ export function BillsPage() {
   );
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center justify-between mb-8">
-          <div className="flex items-center gap-3">
-            <FileText className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
-            <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Bills</h1>
-          </div>
-          <Link
-            href="/purchases/bills/new"
-            className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg text-sm font-medium hover:bg-zinc-700 dark:hover:bg-zinc-200 transition-colors"
-          >
-            <Plus className="h-4 w-4" />
-            New Bill
-          </Link>
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5 space-y-4">
+          <WorkspaceHeading section="Purchases" title="Bills" description="Review due dates, payment status, and recurring bills."
+            actions={<Link href="/purchases/bills/new" className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New bill</Link>} />
+          <WorkflowTabs area="purchases" active="bills" />
         </div>
 
         {loadError && (
-          <div className="mb-6 flex items-center gap-3 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
-            <AlertCircle className="h-4 w-4 shrink-0" />
-            <span className="flex-1">{loadError}</span>
-            <button onClick={load} className="flex items-center gap-1 font-medium hover:underline">
-              <RefreshCw className="h-3.5 w-3.5" /> Retry
-            </button>
-          </div>
+          <div className="mb-5"><WorkspaceNotice title="Bills could not load" onRetry={load}>{loadError}</WorkspaceNotice></div>
         )}
 
         {/* Tabs */}
@@ -139,13 +127,13 @@ export function BillsPage() {
               placeholder="Search by bill # or vendor…"
               value={search}
               onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="w-full pl-9 pr-4 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           <select
             value={statusFilter}
             onChange={(e) => setStatusFilter(e.target.value as BillStatus | '')}
-            className="px-3 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            className="px-3 py-2.5 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
           >
             <option value="">All Statuses</option>
             {(['DRAFT', 'RECEIVED', 'PAID', 'VOID'] as BillStatus[]).map((s) => (
@@ -156,7 +144,7 @@ export function BillsPage() {
         )}
 
         {tab === 'all' && (
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+        <div className="workspace-panel overflow-hidden">
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -234,7 +222,7 @@ export function BillsPage() {
                 Run Now
               </button>
             </div>
-            <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+            <div className="workspace-panel overflow-hidden">
               {recurringBills.length === 0 ? (
                 <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
                   No recurring bills yet.{' '}

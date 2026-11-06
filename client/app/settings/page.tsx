@@ -1,66 +1,99 @@
 'use client';
 
-import { useEffect, useState } from 'react';
-import { getCurrentUser, getWorkspaceId, setWorkspaceId } from '@/lib/auth';
-import { createWorkspace, fetchWorkspaces, inviteWorkspaceMember, type AuthWorkspace } from '@/lib/api';
+import { useState, type FormEvent } from 'react';
+import { Building2, Mail, Plus, ScanText, UserRound, UserRoundPlus } from 'lucide-react';
+import { getCurrentUser, setWorkspaceId, useActiveWorkspaceId } from '@/lib/auth';
+import { createWorkspace, fetchWorkspaces, inviteWorkspaceMember } from '@/lib/api';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
+import AccountingDialog from '@/app/components/AccountingDialog';
+import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
 export default function SettingsPage() {
-  const [workspaces, setWorkspaces] = useState<AuthWorkspace[]>([]);
-  const [workspaceName, setWorkspaceName] = useState('');
-  const [inviteEmail, setInviteEmail] = useState('');
+  const workspaces = useWorkspaceData(fetchWorkspaces);
+  const [dialog, setDialog] = useState<'workspace' | 'invite' | null>(null);
   const [notice, setNotice] = useState('');
+  const [error, setError] = useState('');
+  const [busy, setBusy] = useState(false);
   const user = getCurrentUser();
+  const workspaceId = useActiveWorkspaceId();
+  const current = workspaces.data?.find(workspace => workspace.id === workspaceId);
 
-  useEffect(() => {
-    fetchWorkspaces().then(setWorkspaces).catch(() => {});
-  }, []);
-
-  async function addWorkspace() {
-    if (!workspaceName.trim()) return;
-    const workspace = await createWorkspace(workspaceName.trim());
-    setWorkspaces((current) => [...current, workspace]);
-    setWorkspaceId(workspace.id);
-    setWorkspaceName('');
-    setNotice(`Created and selected ${workspace.name}.`);
+  function open(kind: 'workspace' | 'invite') {
+    setError('');
+    setDialog(kind);
   }
 
-  async function inviteMember() {
-    const workspaceId = getWorkspaceId();
-    if (!workspaceId || !inviteEmail.trim()) return;
-    const invite = await inviteWorkspaceMember({ workspaceId, email: inviteEmail.trim(), role: 'MEMBER' });
-    setInviteEmail('');
-    setNotice(invite.emailSent ? 'Invite sent.' : `Invite created: ${invite.inviteUrl}`);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy || !dialog) return;
+    const value = String(new FormData(event.currentTarget).get('value')).trim();
+    if (!value) {
+      setError(dialog === 'workspace' ? 'Enter a workspace name.' : 'Enter an email address.');
+      return;
+    }
+    setError('');
+    setBusy(true);
+    try {
+      if (dialog === 'workspace') {
+        const workspace = await createWorkspace(value);
+        setWorkspaceId(workspace.id);
+        workspaces.retry();
+        setNotice('Created and selected ' + workspace.name + '.');
+      } else if (workspaceId) {
+        const invite = await inviteWorkspaceMember({ workspaceId, email: value, role: 'MEMBER' });
+        setNotice(invite.emailSent ? 'Invite sent.' : 'Invite created: ' + invite.inviteUrl);
+      }
+      setDialog(null);
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'This action could not finish.');
+    } finally {
+      setBusy(false);
+    }
   }
 
   return (
-    <div className="min-h-screen lg:pl-64">
-      <div className="mx-auto max-w-4xl px-4 py-12 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Settings</h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">Workspace, team, integration, and account controls.</p>
-        <section className="mt-8 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="font-semibold">Account</h2>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">{user?.name ?? 'Signed in user'} · {user?.email ?? ''}</p>
-        </section>
-        <section className="mt-4 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="font-semibold">Workspaces and team</h2>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Create workspaces and invite collaborators here. The sidebar is only used to switch the active workspace.</p>
-          <ul className="mt-3 space-y-2 text-sm text-zinc-700 dark:text-zinc-300">{workspaces.map((workspace) => <li key={workspace.id}>{workspace.name} · {workspace.role}</li>)}</ul>
-          <div className="mt-4 grid gap-3 sm:grid-cols-2">
-            <form onSubmit={(event) => { event.preventDefault(); addWorkspace().catch((error) => setNotice(error.message)); }} className="flex gap-2">
-              <input value={workspaceName} onChange={(event) => setWorkspaceName(event.target.value)} placeholder="New workspace name" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800" />
-              <button className="rounded-lg bg-zinc-900 px-3 py-2 text-sm text-white dark:bg-zinc-50 dark:text-zinc-900">Create</button>
-            </form>
-            <form onSubmit={(event) => { event.preventDefault(); inviteMember().catch((error) => setNotice(error.message)); }} className="flex gap-2">
-              <input type="email" value={inviteEmail} onChange={(event) => setInviteEmail(event.target.value)} placeholder="member@example.com" className="min-w-0 flex-1 rounded-lg border border-zinc-200 bg-white px-3 py-2 text-sm dark:border-zinc-700 dark:bg-zinc-800" />
-              <button className="rounded-lg border border-zinc-300 px-3 py-2 text-sm dark:border-zinc-700">Invite</button>
-            </form>
+    <div className="workspace-page">
+      <div className="workspace-content space-y-5">
+        <WorkspaceHeading section="Admin" title="Settings" description="Manage your account, workspaces, and integrations." />
+        {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm break-words text-emerald-950">{notice}</p>}
+        <div className="grid items-start gap-4 xl:grid-cols-[1fr_1.25fr]">
+          <WorkspacePanel title="Account" description="The profile you use to sign in.">
+            <WorkspaceRow icon={UserRound} title={user?.name ?? 'Signed in user'} detail={user?.email ?? 'Account email unavailable'} />
+          </WorkspacePanel>
+          <WorkspacePanel title="Workspaces and team" description="Create a workspace or invite someone to the active workspace.">
+            {workspaces.error && <div className="p-4"><WorkspaceNotice title="Workspaces could not load" onRetry={workspaces.retry} /></div>}
+            {workspaces.loading && <p role="status" className="p-4 text-sm text-slate-600">Loading workspaces…</p>}
+            <div className="divide-y divide-slate-200">
+              {workspaces.data?.map(workspace => <WorkspaceRow key={workspace.id} icon={Building2} title={workspace.name}
+                detail={workspace.role.toLowerCase() + (workspace.id === workspaceId ? ' · Active workspace' : '')} />)}
+            </div>
+            <div className="flex flex-wrap gap-2 border-t border-slate-200 p-4">
+              <button type="button" disabled={!workspaceId} className="workspace-primary" onClick={() => open('invite')}><UserRoundPlus className="size-4" aria-hidden="true" />Invite member</button>
+              <button type="button" className="workspace-button" onClick={() => open('workspace')}><Plus className="size-4" aria-hidden="true" />New workspace</button>
+            </div>
+          </WorkspacePanel>
+        </div>
+        <WorkspacePanel title="Integrations" description="Services used by this workspace.">
+          <div className="divide-y divide-slate-200">
+            <WorkspaceRow icon={UserRound} title="Google sign-in" detail="Sign in to Accountrix with a Google account." />
+            <WorkspaceRow icon={Mail} title="Email delivery" detail="Send invoices and workspace invitations." />
+            <WorkspaceRow icon={ScanText} title="Receipt scanning" detail="Extract details from receipt images for review in Inbox." />
           </div>
-          {notice && <p className="mt-3 text-sm text-emerald-600">{notice}</p>}
-        </section>
-        <section className="mt-4 rounded-xl border border-zinc-200 bg-white p-6 dark:border-zinc-800 dark:bg-zinc-900">
-          <h2 className="font-semibold">Integrations</h2>
-          <p className="mt-2 text-sm text-zinc-600 dark:text-zinc-400">Google sign-in and email delivery use the existing server configuration. No integration credentials are exposed in the client.</p>
-        </section>
+        </WorkspacePanel>
+        {dialog && <AccountingDialog title={dialog === 'invite' ? 'Invite a member' : 'New workspace'} busy={busy} onDismiss={() => setDialog(null)}>
+          <form onSubmit={submit} className="space-y-4">
+            {dialog === 'invite' && current && <p className="text-sm text-slate-600">Invite a member to {current.name}.</p>}
+            <label className="grid gap-1.5 text-sm font-semibold">
+              {dialog === 'invite' ? 'Email address' : 'Workspace name'}
+              <input name="value" type={dialog === 'invite' ? 'email' : 'text'} className="workspace-field" required />
+            </label>
+            {error && <WorkspaceNotice title="This action could not finish">{error}</WorkspaceNotice>}
+            <div className="flex flex-wrap justify-end gap-2">
+              <button type="button" disabled={busy} className="workspace-button" onClick={() => setDialog(null)}>Cancel</button>
+              <button type="submit" disabled={busy} className="workspace-primary">{busy ? 'Saving…' : dialog === 'invite' ? 'Send invite' : 'Create workspace'}</button>
+            </div>
+          </form>
+        </AccountingDialog>}
       </div>
     </div>
   );

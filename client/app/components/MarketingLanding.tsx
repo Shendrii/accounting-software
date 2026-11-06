@@ -4,38 +4,38 @@ import { PRODUCT_NAME } from '@/lib/brand';
 
 export function MarketingLanding() {
   return (
-    <main className="min-h-dvh bg-zinc-50 text-zinc-950" style={{ colorScheme: 'light' }}>
+    <div className="min-h-dvh bg-[#f3f6fc] text-slate-950">
       <header className="mx-auto flex max-w-7xl items-center justify-between px-6 py-5">
-        <p className="text-xl font-bold tracking-tight">{PRODUCT_NAME}</p>
+        <Link href="/" className="flex items-center gap-2.5 text-xl font-semibold tracking-tight"><span className="workspace-brand-mark"><BookOpenCheck className="size-5" aria-hidden="true" /></span>{PRODUCT_NAME}</Link>
         <div className="flex gap-2">
-          <Link href="/login" className="inline-flex h-11 items-center rounded-xl px-4 text-sm font-semibold text-zinc-700 hover:bg-zinc-100">
+          <Link href="/login" className="workspace-button">
             Sign in
           </Link>
-          <Link href="/signup" className="inline-flex h-11 items-center rounded-xl bg-zinc-900 px-4 text-sm font-semibold text-white hover:bg-zinc-800">
+          <Link href="/signup" className="workspace-primary hidden sm:inline-flex">
             Create workspace
           </Link>
         </div>
       </header>
 
-      <section className="mx-auto grid max-w-7xl gap-12 px-6 pb-16 pt-10 lg:grid-cols-2 lg:items-center lg:py-20">
+      <section className="mx-auto grid max-w-7xl items-center gap-8 rounded-none bg-[#101b34] bg-linear-to-br from-[#101b34] to-blue-950 px-5 py-10 text-white sm:px-8 lg:grid-cols-2 lg:gap-14 lg:rounded-3xl lg:p-14">
         <div>
-          <p className="font-semibold text-blue-700">Bookkeeping that follows how accountants actually work</p>
-          <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-6xl">Daily books. Period close. No extra tabs.</h1>
-          <p className="mt-5 max-w-xl text-lg leading-8 text-zinc-600">
-            Capture receipts, collect invoices, match the bank, and close the month from one workspace — scoped to your team, not a flat page list.
+          <p className="text-xs font-semibold tracking-[0.14em] text-blue-200 uppercase">Your bookkeeping workspace</p>
+          <h1 className="mt-4 text-4xl font-bold tracking-tight sm:text-6xl">A clearer view <span className="text-blue-200">of your books.</span></h1>
+          <p className="mt-5 max-w-xl text-base leading-7 text-blue-100">
+            Track invoices, reconcile transactions, and see where your business stands in one workspace.
           </p>
           <div className="mt-8 flex flex-wrap gap-3">
-            <Link href="/signup" className="inline-flex h-12 items-center gap-2 rounded-xl bg-blue-600 px-5 font-semibold text-white hover:bg-blue-700">
+            <Link href="/signup" className="workspace-primary min-h-12 px-5">
               Start a workspace <ArrowRight className="h-4 w-4" />
             </Link>
-            <Link href="/login" className="inline-flex h-12 items-center rounded-xl border border-zinc-200 bg-white px-5 font-semibold text-zinc-800 hover:bg-zinc-50">
+            <Link href="/login" className="workspace-button min-h-12 px-5">
               Sign in
             </Link>
           </div>
         </div>
-        <div className="rounded-[2rem] bg-zinc-950 p-7 text-white shadow-2xl">
-          <p className="text-blue-300">This week at Northline Studio</p>
-          <p className="mt-3 text-3xl font-bold">Four numbers that need attention.</p>
+        <div className="rounded-2xl border border-slate-200 bg-white p-5 text-slate-950 sm:p-6">
+          <p className="workspace-eyebrow">Sample workspace</p>
+          <p className="mt-2 text-2xl font-semibold tracking-tight">Northline Studio</p>
           <div className="mt-8 grid grid-cols-2 gap-3">
             {[
               ['Cash', '$84,210'],
@@ -43,16 +43,16 @@ export function MarketingLanding() {
               ['AP due', '$4,180'],
               ['To review', '3 items'],
             ].map(([label, value]) => (
-              <div key={label} className="rounded-2xl bg-white/10 p-4">
-                <p className="text-xs text-zinc-400">{label}</p>
-                <p className="mt-3 text-xl font-semibold">{value}</p>
+              <div key={label} className="rounded-xl border border-slate-200 bg-slate-50 p-4">
+                <p className="text-xs text-slate-600">{label}</p>
+                <p className="mt-2 text-lg font-semibold tabular-nums sm:text-xl">{value}</p>
               </div>
             ))}
           </div>
         </div>
       </section>
 
-      <section className="border-y border-zinc-200 bg-white py-14">
+      <section className="mt-8 border-y border-slate-200 bg-white py-12">
         <div className="mx-auto max-w-7xl px-6">
           <h2 className="text-2xl font-bold">How {PRODUCT_NAME} works</h2>
           <div className="mt-7 grid gap-5 md:grid-cols-3">
@@ -101,6 +101,6 @@ export function MarketingLanding() {
           </div>
         </div>
       </section>
-    </main>
+    </div>
   );
 }

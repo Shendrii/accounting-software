@@ -3,6 +3,8 @@
 import { useEffect, useRef, useState } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
+import { CircleAlert, Loader2 } from 'lucide-react';
+import { AccessStatus } from '@/app/components/AccessStatus';
 import { isAuthenticated, setSession, setWorkspaceId } from '@/lib/auth';
 import type { AuthUser, AuthWorkspace } from '@/lib/api';
 
@@ -61,18 +63,11 @@ export default function OAuthCallbackPage() {
 
   if (error) {
     return (
-      <div className="min-h-screen flex flex-col items-center justify-center px-4 bg-zinc-50 dark:bg-zinc-950 gap-4">
-        <p className="text-sm text-red-600">{error}</p>
-        <Link href="/login" className="text-sm underline text-zinc-900 dark:text-zinc-50">
-          Back to login
-        </Link>
-      </div>
+      <AccessStatus title="Sign-in could not finish" description={error} icon={CircleAlert}>
+        <Link href="/login" className="workspace-primary">Back to sign in</Link>
+      </AccessStatus>
     );
   }
 
-  return (
-    <div className="min-h-screen flex items-center justify-center text-zinc-500 text-sm bg-zinc-50 dark:bg-zinc-950">
-      Completing sign-in...
-    </div>
-  );
+  return <AccessStatus title="Finishing sign-in…" description="Opening your workspace." icon={Loader2} pending />;
 }

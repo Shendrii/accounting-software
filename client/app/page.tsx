@@ -1,143 +1,110 @@
 'use client';
 
 import Link from 'next/link';
-import { BellDot, DollarSign, ReceiptText, ShoppingCart } from 'lucide-react';
-import { useEffect, useState } from 'react';
-import { fetchDashboard, getBills, getReceipts, type DashboardData } from '@/lib/api';
-import { isAuthenticated } from '@/lib/auth';
+import { ArrowUpRight, BookOpenCheck, Inbox, Landmark, Plus, ReceiptText, ShoppingCart, Wallet } from 'lucide-react';
+import { fetchDashboard, getBills, getCloseChecklist, getInvoices, getReceipts } from '@/lib/api';
+import { useIsAuthenticated } from '@/lib/auth';
+import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { MarketingLanding } from '@/app/components/MarketingLanding';
+import { CloseProgress, InvoiceActivity, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
-function formatCurrency(value: string | number): string {
-  const num = typeof value === 'string' ? parseFloat(value) : value;
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(num);
-}
-
-function KpiCard({
-  label,
-  value,
-  icon: Icon,
-  loading,
-  highlight,
-  href,
-}: {
-  label: string;
-  value: string;
-  icon: React.ElementType;
-  loading: boolean;
-  highlight?: 'green' | 'red' | 'blue' | 'default';
-  href: string;
-}) {
-  const colorMap = {
-    green: 'text-emerald-600 dark:text-emerald-400',
-    red: 'text-red-600 dark:text-red-400',
-    blue: 'text-blue-600 dark:text-blue-400',
-    default: 'text-zinc-900 dark:text-zinc-50',
-  };
-  const valueColor = colorMap[highlight ?? 'default'];
-
-  return (
-    <Link href={href} className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 transition hover:border-zinc-300 hover:shadow-sm dark:hover:border-zinc-700">
-      <div className="flex items-center justify-between mb-2">
-        <h3 className="text-sm font-medium text-zinc-600 dark:text-zinc-400">{label}</h3>
-        <Icon className="h-5 w-5 text-zinc-400" />
-      </div>
-      {loading ? (
-        <div className="h-8 w-28 bg-zinc-100 dark:bg-zinc-800 rounded animate-pulse" />
-      ) : (
-        <p className={`text-2xl font-semibold ${valueColor}`}>{value}</p>
-      )}
-    </Link>
-  );
-}
+const openBills = () => getBills({ status: 'RECEIVED' });
+const pendingReceipts = () => getReceipts('PENDING');
+const recentInvoices = () => getInvoices();
 
 function Dashboard() {
-  const [data, setData] = useState<DashboardData | null>(null);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
-  const [apTotal, setApTotal] = useState(0);
-  const [pendingReceipts, setPendingReceipts] = useState(0);
+  const summary = useWorkspaceData(fetchDashboard);
+  const bills = useWorkspaceData(openBills);
+  const receipts = useWorkspaceData(pendingReceipts);
+  const close = useWorkspaceData(getCloseChecklist);
+  const invoices = useWorkspaceData(recentInvoices);
+  const overdueBills = bills.data?.filter(bill => bill.dueDate.slice(0, 10) < localDay());
+  const reviewCount = receipts.data?.length;
+  const unpaidTotal = bills.data?.reduce((total, bill) => total + decimalUnits(bill.total), BigInt(0));
+  const empty = summary.data && bills.data?.length === 0 && invoices.data?.length === 0 && reviewCount === 0
+    && close.data && close.data.draftJournalEntries === 0 && close.data.unmatchedBankTransactions === 0
+    && decimalUnits(summary.data.cashBalance) === BigInt(0);
+  const metricsFailed = summary.error || bills.error || receipts.error;
+  const formatCount = (count: number, noun: string) => `${count} ${noun}${count === 1 ? '' : 's'}`;
 
-  useEffect(() => {
-    fetchDashboard()
-      .then(setData)
-      .catch((e) => setError(e.message))
-      .finally(() => setLoading(false));
-    getBills({ status: 'RECEIVED' }).then((bills) => setApTotal(bills.reduce((sum, bill) => sum + Number(bill.total), 0))).catch(() => {});
-    getReceipts('PENDING').then((receipts) => setPendingReceipts(receipts.length)).catch(() => {});
-  }, []);
+  function retryMetrics() {
+    if (summary.error) summary.retry();
+    if (bills.error) bills.retry();
+    if (receipts.error) receipts.retry();
+  }
 
   return (
-    <div className="lg:pl-64 min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-12">
-        <div className="mb-10">
-          <h1 className="text-4xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-            Accounting overview
-          </h1>
-          <p className="text-lg text-zinc-600 dark:text-zinc-400">
-            The four numbers that need attention today.
-          </p>
+    <div className="workspace-page">
+      <div className="workspace-content space-y-5">
+        <WorkspaceHeading section="Workspace" title="Accounting overview" description="See what needs your attention and pick up the next task."
+          actions={<>
+            <Link href="/sales/invoices/new" className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New invoice</Link>
+            <Link href="/inbox#upload-receipt" className="workspace-button"><Inbox className="size-4" aria-hidden="true" />Upload receipt</Link>
+          </>} />
+
+        {metricsFailed && <WorkspaceNotice title="Some totals could not load" onRetry={retryMetrics}>
+          Figures that could not load are marked unavailable. You can still use the workspace.
+        </WorkspaceNotice>}
+
+        <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
+          <WorkspaceMetric label="Cash position" icon={Wallet} href="/banking" value={summary.data ? formatUsd(summary.data.cashBalance) : '—'} detail={summary.loading ? 'Loading…' : summary.error ? 'Unavailable' : 'Posted cash accounts'} />
+          <WorkspaceMetric label="Outstanding invoices" icon={ReceiptText} href="/sales" value={summary.data ? formatUsd(summary.data.outstandingInvoicesTotal) : '—'}
+            detail={summary.data ? formatCount(summary.data.outstandingInvoicesCount, 'open invoice') : summary.loading ? 'Loading…' : 'Unavailable'} />
+          <WorkspaceMetric label="Bills to pay" icon={ShoppingCart} href="/purchases" value={unpaidTotal === undefined ? '—' : formatUsd(decimalText(unpaidTotal))}
+            detail={bills.data ? formatCount(bills.data.length, 'unpaid bill') : bills.loading ? 'Loading…' : 'Unavailable'} />
+          <WorkspaceMetric label="Items to review" icon={Inbox} href="/inbox" value={reviewCount === undefined ? '—' : String(reviewCount)}
+            detail={receipts.data ? 'Receipts in your inbox' : receipts.loading ? 'Loading…' : 'Unavailable'} />
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 dark:border-red-800 text-red-700 dark:text-red-400 text-sm">
-            Could not load dashboard data: {error}
+        {empty ? (
+          <WorkspacePanel title="Start keeping your books" description="A few first steps for your workspace.">
+            <div className="divide-y divide-slate-200">
+              <WorkspaceRow icon={ReceiptText} title="Create your first invoice" detail="Save a draft and review it before posting." href="/sales/invoices/new" action="Create" />
+              <WorkspaceRow icon={Landmark} title="Set up bank reconciliation" detail="Choose a bank account and a statement date." href="/banking" action="Set up" />
+            </div>
+          </WorkspacePanel>
+        ) : (
+          <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
+            <WorkspacePanel title="Needs attention" description="Go straight to the work that needs a decision.">
+              <div className="divide-y divide-slate-200">
+                <WorkspaceRow icon={Inbox} title={reviewCount === undefined ? 'Receipt review' : formatCount(reviewCount, 'receipt') + ' to review'}
+                  detail={receipts.error ? 'The inbox count is unavailable.' : 'Check extracted details before posting.'} href="/inbox" action="Review" />
+                <WorkspaceRow icon={ShoppingCart} title={overdueBills ? formatCount(overdueBills.length, 'overdue bill') : 'Overdue bills'}
+                  detail={bills.error ? 'The bills count is unavailable.' : 'Review vendor due dates.'} href="/purchases/bills" action="View" />
+                <WorkspaceRow icon={Landmark} title={close.data ? formatCount(close.data.unmatchedBankTransactions, 'unmatched bank line') : 'Bank matching'}
+                  detail="Review imported statement transactions." href="/banking" action="Match" />
+              </div>
+            </WorkspacePanel>
+            <WorkspacePanel title="Period close" description="Current workspace checklist"
+              action={<Link href="/ledger" className="workspace-text-action"><ArrowUpRight className="size-4" aria-hidden="true" />Checklist</Link>}>
+              {close.data ? <>
+                <CloseProgress checklist={close.data} />
+                <div className="divide-y divide-slate-200">
+                  <WorkspaceRow icon={BookOpenCheck} title={formatCount(close.data.draftJournalEntries, 'draft journal entry')} detail="Review entries before posting." href="/ledger?tab=journal" action="Open" />
+                  <WorkspaceRow icon={Wallet} title="Trial balance" detail={<WorkspaceStatus>{close.data.trialBalanceBalanced ? 'Complete' : 'Needs review'}</WorkspaceStatus>} href="/reports?tab=trial-balance" action="View" />
+                </div>
+              </> : <div className="p-4 text-sm text-slate-600">{close.error
+                ? <WorkspaceNotice title="The close checklist could not load" onRetry={close.retry} />
+                : <p role="status">Loading close checklist…</p>}</div>}
+            </WorkspacePanel>
           </div>
         )}
 
-        <div className="grid grid-cols-1 sm:grid-cols-2 lg:grid-cols-4 gap-6">
-          <KpiCard
-            label="Cash position"
-            value={data ? formatCurrency(data.cashBalance) : '$0.00'}
-            icon={DollarSign}
-            loading={loading}
-            highlight="blue"
-            href="/banking"
-          />
-          <KpiCard
-            label="AR outstanding"
-            value={data ? formatCurrency(data.outstandingInvoicesTotal) : '$0.00'}
-            icon={ReceiptText}
-            loading={loading}
-            highlight="green"
-            href="/sales"
-          />
-          <KpiCard
-            label="AP due"
-            value={formatCurrency(apTotal)}
-            icon={ShoppingCart}
-            loading={loading}
-            highlight="red"
-            href="/purchases"
-          />
-          <KpiCard
-            label="Items needing review"
-            value={String(pendingReceipts)}
-            icon={BellDot}
-            loading={loading}
-            highlight="default"
-            href="/inbox"
-          />
-        </div>
+        <WorkspacePanel title="Recent invoices" description="Draft, collection, and payment status in one place."
+          action={<Link href="/sales/invoices" className="workspace-text-action"><ArrowUpRight className="size-4" aria-hidden="true" />All invoices</Link>}>
+          {invoices.data?.length ? <InvoiceActivity invoices={invoices.data.slice(0, 4)} /> :
+            <div className="p-4 text-sm text-slate-600">{invoices.error
+              ? <WorkspaceNotice title="Recent invoices could not load" onRetry={invoices.retry} />
+              : invoices.loading ? <p role="status">Loading invoices…</p> : <p>No invoices yet. Create an invoice to get started.</p>}</div>}
+        </WorkspacePanel>
       </div>
     </div>
   );
 }
 
 export default function Home() {
-  const [mode, setMode] = useState<'loading' | 'public' | 'app'>(() => {
-    if (typeof window === 'undefined') return 'loading';
-    return isAuthenticated() ? 'app' : 'public';
-  });
-
-  useEffect(() => {
-    setMode(isAuthenticated() ? 'app' : 'public');
-  }, []);
-
-  if (mode === 'public') return <MarketingLanding />;
-  if (mode === 'loading') {
-    return (
-      <div className="flex min-h-screen items-center justify-center text-zinc-500">Loading...</div>
-    );
-  }
-  return <Dashboard />;
+  const signedIn = useIsAuthenticated();
+  return signedIn ? <Dashboard /> : <MarketingLanding />;
 }

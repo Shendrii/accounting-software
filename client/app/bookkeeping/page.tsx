@@ -1,7 +1,7 @@
 'use client';
 
 import React, { useState, useEffect } from 'react';
-import { useSearchParams } from 'next/navigation';
+import { useRouter, useSearchParams } from 'next/navigation';
 import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type CloseChecklist, type JournalEntry } from '@/lib/api';
 import { decimalText, formatUsd, journalTotals, localDay } from '@/lib/money';
 import AccountingDialog from '@/app/components/AccountingDialog';
@@ -13,11 +13,15 @@ import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
 import EditJournalEntryForm from '@/app/components/EditJournalEntryForm';
 import { Plus, BookOpen, FileText, Edit2, Search, X, ChevronRight, ChevronDown, DollarSign, Calendar, Hash } from 'lucide-react';
 import Link from 'next/link';
+import { closeItems, CloseProgress, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
 export function BookkeepingPage() {
   const searchParams = useSearchParams();
-  const [activeTab, setActiveTab] = useState<'accounts' | 'journal'>(searchParams.get('tab') === 'journal' ? 'journal' : 'accounts');
+  const router = useRouter();
+  const requestedTab = searchParams.get('tab');
+  const activeTab = requestedTab === 'accounts' || requestedTab === 'journal' ? requestedTab : 'close';
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
   const [loading, setLoading] = useState(true);
@@ -30,6 +34,12 @@ export function BookkeepingPage() {
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalError, setJournalError] = useState('');
   const [closeChecklist, setCloseChecklist] = useState<CloseChecklist | null>(null);
+  const [closeError, setCloseError] = useState(false);
+
+  function loadClose() {
+    setCloseError(false);
+    getCloseChecklist().then(setCloseChecklist).catch(() => setCloseError(true));
+  }
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   
   // Account filters
@@ -46,7 +56,7 @@ export function BookkeepingPage() {
 
   useEffect(() => {
     loadData();
-    getCloseChecklist().then(setCloseChecklist).catch(() => {});
+    loadClose();
   }, []);
 
   const loadData = async () => {
@@ -88,7 +98,7 @@ export function BookkeepingPage() {
       }
       setJournalAction(null);
       await loadData();
-      getCloseChecklist().then(setCloseChecklist).catch(() => {});
+      loadClose();
     } catch (err) {
       setJournalError(err instanceof Error ? err.message : 'Unable to save the journal entry.');
     } finally {
@@ -174,67 +184,50 @@ export function BookkeepingPage() {
   };
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-8">
-        {/* Header */}
-        <div className="mb-8">
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50 mb-2">
-            Ledger and close
-          </h1>
-          <p className="text-zinc-600 dark:text-zinc-400">
-            Manage your chart of accounts, journal entries, and period-close readiness.
-          </p>
-        </div>
-        {closeChecklist && (
-          <div className="mb-8 rounded-xl border border-zinc-200 bg-white p-5 dark:border-zinc-800 dark:bg-zinc-900">
-            <div className="mb-3 flex items-center justify-between"><h2 className="font-semibold">Close checklist</h2><span className={closeChecklist.trialBalanceBalanced ? 'text-xs text-emerald-600' : 'text-xs text-red-600'}>{closeChecklist.trialBalanceBalanced ? 'Trial balance is balanced' : 'Trial balance needs attention'}</span></div>
-            <div className="grid grid-cols-2 gap-3 text-sm sm:grid-cols-5">
-              <Link href="/ledger?tab=journal" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.draftJournalEntries}</strong><span className="block text-xs text-zinc-500">unposted entries</span></Link>
-              <Link href="/banking" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.unmatchedBankTransactions}</strong><span className="block text-xs text-zinc-500">unmatched bank items</span></Link>
-              <Link href="/sales" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.overdueInvoices}</strong><span className="block text-xs text-zinc-500">overdue AR</span></Link>
-              <Link href="/purchases" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.overdueBills}</strong><span className="block text-xs text-zinc-500">overdue AP</span></Link>
-              <Link href="/inbox" className="rounded-lg bg-zinc-50 p-3 dark:bg-zinc-800"><strong>{closeChecklist.pendingReceipts}</strong><span className="block text-xs text-zinc-500">receipt reviews</span></Link>
-            </div>
-          </div>
-        )}
-
-        {/* Tabs */}
-        <div className="mb-6 border-b border-zinc-200 dark:border-zinc-800">
-          <nav className="flex space-x-8">
-            <button
-              onClick={() => setActiveTab('accounts')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'accounts'
-                  ? 'border-zinc-900 dark:border-zinc-50 text-zinc-900 dark:text-zinc-50'
-                  : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <BookOpen className="h-4 w-4" />
-                Chart of Accounts
-              </div>
-            </button>
-            <button
-              onClick={() => setActiveTab('journal')}
-              className={`py-4 px-1 border-b-2 font-medium text-sm transition-colors ${
-                activeTab === 'journal'
-                  ? 'border-zinc-900 dark:border-zinc-50 text-zinc-900 dark:text-zinc-50'
-                  : 'border-transparent text-zinc-500 dark:text-zinc-400 hover:text-zinc-700 dark:hover:text-zinc-300 hover:border-zinc-300 dark:hover:border-zinc-700'
-              }`}
-            >
-              <div className="flex items-center gap-2">
-                <FileText className="h-4 w-4" />
-                Journal Entries
-              </div>
-            </button>
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5 space-y-4">
+          <WorkspaceHeading section="Books and reporting" title="Ledger and close" description="Work through open items and review the posted ledger."
+            actions={<button type="button" className="workspace-primary" onClick={() => {
+              setShowCreateJournalForm(true);
+              router.push('/ledger?tab=journal', { scroll: false });
+            }}><Plus className="size-4" aria-hidden="true" />New journal entry</button>} />
+          <nav aria-label="Ledger views" className="workspace-tabs">
+            <Link href="/ledger" className="workspace-tab" aria-current={activeTab === 'close' ? 'page' : undefined}>Close checklist</Link>
+            <Link href="/ledger?tab=accounts" className="workspace-tab" aria-current={activeTab === 'accounts' ? 'page' : undefined}>Chart of accounts</Link>
+            <Link href="/ledger?tab=journal" className="workspace-tab" aria-current={activeTab === 'journal' ? 'page' : undefined}>Journal entries</Link>
           </nav>
         </div>
 
-        {/* Content */}
-        {activeTab === 'accounts' ? (
+        {activeTab === 'close' ? (
+          <WorkspacePanel title="Close checklist" description="Review open items in the current workspace.">
+            {closeChecklist ? <>
+              <CloseProgress checklist={closeChecklist} />
+              <ul className="divide-y divide-slate-200">
+                {closeItems.map(([key, label, href]) => (
+                  <li key={key} className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
+                    <span className="min-w-24 flex-1 text-sm font-semibold">{label}</span>
+                    <span className="text-sm text-slate-600 tabular-nums">{closeChecklist[key]} open</span>
+                    <WorkspaceStatus>{closeChecklist[key] === 0 ? 'Complete' : 'Open item'}</WorkspaceStatus>
+                    <Link href={href} className="workspace-text-action" aria-label={'View ' + label.toLowerCase()}>View</Link>
+                  </li>
+                ))}
+                <li className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
+                  <span className="min-w-24 flex-1 text-sm font-semibold">Trial balance</span>
+                  <WorkspaceStatus>{closeChecklist.trialBalanceBalanced ? 'Complete' : 'Needs review'}</WorkspaceStatus>
+                  <Link href="/reports?tab=trial-balance" className="workspace-text-action">View report</Link>
+                </li>
+              </ul>
+              {closeChecklist.lastReconciliationAt && <p className="border-t border-slate-200 p-4 text-sm text-slate-600">Last reconciliation: {closeChecklist.lastReconciliationAt.slice(0, 10)}</p>}
+            </> : <div className="flex flex-wrap items-center gap-3 p-4 text-sm text-slate-600">
+              <p role="status">{closeError ? 'The close checklist could not load.' : 'Loading close checklist…'}</p>
+              {closeError && <button type="button" className="workspace-button" onClick={loadClose}>Retry</button>}
+            </div>}
+          </WorkspacePanel>
+        ) : activeTab === 'accounts' ? (
           <div className="space-y-6">
             {/* Accounts Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                   Chart of Accounts
@@ -246,7 +239,7 @@ export function BookkeepingPage() {
               </div>
               <button
                 onClick={() => setShowCreateForm(!showCreateForm)}
-                className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
               >
                 <Plus className="h-4 w-4" />
                 {showCreateForm ? 'Cancel' : 'New Account'}
@@ -281,7 +274,7 @@ export function BookkeepingPage() {
             )}
 
             {/* Filters */}
-            <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+            <div className="workspace-panel p-4">
               <div className="flex flex-col md:flex-row gap-4">
                 <div className="flex-1">
                   <div className="relative">
@@ -342,7 +335,7 @@ export function BookkeepingPage() {
                 <p className="text-red-800 dark:text-red-200">{error}</p>
               </div>
             ) : filteredAccounts.length === 0 ? (
-              <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-12 text-center">
+              <div className="workspace-panel p-12 text-center">
                 <BookOpen className="h-12 w-12 text-zinc-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-50 mb-2">
                   {accounts.length === 0 ? 'No accounts yet' : 'No accounts match your filters'}
@@ -355,7 +348,7 @@ export function BookkeepingPage() {
                 {accounts.length === 0 && (
                   <button
                     onClick={() => setShowCreateForm(true)}
-                    className="inline-flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors text-sm font-medium"
+                    className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
                   >
                     <Plus className="h-4 w-4" />
                     Create Account
@@ -363,7 +356,7 @@ export function BookkeepingPage() {
                 )}
               </div>
             ) : (
-              <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className="workspace-panel overflow-hidden">
                 {/* Chart of Accounts Table */}
                 <div className="overflow-x-auto">
                   <table className="w-full">
@@ -538,7 +531,7 @@ export function BookkeepingPage() {
         ) : (
           <div className="space-y-6">
             {/* Journal Entries Header */}
-            <div className="flex justify-between items-center">
+            <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
                 <h2 className="text-xl font-semibold text-zinc-900 dark:text-zinc-50">
                   Journal Entries
@@ -550,7 +543,7 @@ export function BookkeepingPage() {
               </div>
               <button
                 onClick={() => setShowCreateJournalForm(!showCreateJournalForm)}
-                className="flex items-center gap-2 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors text-sm font-medium"
+                className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
               >
                 <Plus className="h-4 w-4" />
                 {showCreateJournalForm ? 'Cancel' : 'New Entry'}
@@ -585,7 +578,7 @@ export function BookkeepingPage() {
             )}
 
             {/* Filters */}
-            <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
+            <div className="workspace-panel p-4">
               <div className="flex flex-col gap-4">
                 <div className="flex flex-col md:flex-row gap-4">
                   <div className="flex-1">
@@ -661,7 +654,7 @@ export function BookkeepingPage() {
                 <p className="text-red-800 dark:text-red-200">{error}</p>
               </div>
             ) : filteredJournalEntries.length === 0 ? (
-              <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-12 text-center">
+              <div className="workspace-panel p-12 text-center">
                 <FileText className="h-12 w-12 text-zinc-400 mx-auto mb-4" />
                 <h3 className="text-lg font-medium text-zinc-900 dark:text-zinc-50 mb-2">
                   {journalEntries.length === 0 ? 'No journal entries yet' : 'No journal entries match your filters'}
@@ -673,7 +666,7 @@ export function BookkeepingPage() {
                 </p>
               </div>
             ) : (
-              <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+              <div className="workspace-panel overflow-hidden">
                 <div className="overflow-x-auto">
                   <table className="w-full">
                     <thead className="bg-zinc-50 dark:bg-zinc-900 border-b border-zinc-200 dark:border-zinc-800">

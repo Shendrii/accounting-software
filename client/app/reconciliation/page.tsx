@@ -1,16 +1,16 @@
 'use client';
 
 import { useEffect, useRef, useState } from 'react';
-import { RefreshCw, Upload, CheckCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
+import { ArrowLeftRight, BookOpenCheck, Landmark, Upload, CheckCircle, Loader2, Plus, Trash2, FileSpreadsheet } from 'lucide-react';
 import {
   getAccounts, getReconciliationData, importBankTransactions, importCSVTransactions, matchTransaction,
   completeReconciliation, getBankMatchSuggestions,
-  type Account, type BankMatchSuggestion, type BankTransaction, type ReconciliationData,
+  type Account, type BankMatchSuggestion, type ReconciliationData,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
+import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
+import { decimalText, decimalUnits, localDay } from '@/lib/money';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
-
-type JournalLineWithEntry = ReconciliationData['journalLines'][number];
 
 function formatCurrency(v: string | number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
@@ -30,7 +30,7 @@ export function ReconciliationPage() {
   const [step, setStep] = useState<1 | 2>(1);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [selectedAccountId, setSelectedAccountId] = useState('');
-  const [statementDate, setStatementDate] = useState(new Date().toISOString().split('T')[0]);
+  const [statementDate, setStatementDate] = useState(localDay);
   const [statementBalance, setStatementBalance] = useState('');
   const [data, setData] = useState<ReconciliationData | null>(null);
   const [suggestions, setSuggestions] = useState<BankMatchSuggestion[]>([]);
@@ -38,6 +38,7 @@ export function ReconciliationPage() {
   const [error, setError] = useState<string | null>(null);
   const [selectedBank, setSelectedBank] = useState<string | null>(null);
   const [selectedLine, setSelectedLine] = useState<string | null>(null);
+  const [matching, setMatching] = useState(false);
   const [completing, setCompleting] = useState(false);
   const [importOpen, setImportOpen] = useState(false);
   const [importRows, setImportRows] = useState<ImportRow[]>([{ date: '', description: '', amount: '' }]);
@@ -50,12 +51,16 @@ export function ReconciliationPage() {
   useEffect(() => {
     getAccounts().then((accs) =>
       setAccounts(accs.filter((a) => a.isActive && a.type === 'ASSET'))
-    );
+    ).catch(() => setError('Bank accounts could not load.'));
   }, []);
 
   async function proceed() {
     if (!selectedAccountId || !statementDate || !statementBalance) {
-      setError('Please fill in all fields');
+      setError('Enter the bank account, statement date, and ending balance.');
+      return;
+    }
+    if (!/^-?(?:\d+|\d*\.\d{1,2})$/.test(statementBalance)) {
+      setError('Enter a statement ending balance with up to two decimal places.');
       return;
     }
     setLoading(true);
@@ -75,18 +80,32 @@ export function ReconciliationPage() {
     }
   }
 
+  async function refreshTransactions() {
+    const [transactions, matches] = await Promise.all([
+      getReconciliationData(selectedAccountId), getBankMatchSuggestions(selectedAccountId),
+    ]);
+    setData(transactions);
+    setSuggestions(matches.suggestions);
+  }
+
   async function handleMatch() {
-    if (!selectedBank || !selectedLine) return;
+    if (!selectedBank || !selectedLine || matching) return;
+    setMatching(true);
+    setError(null);
     try {
       await matchTransaction(selectedBank, selectedLine);
-      const rec = await getReconciliationData(selectedAccountId);
-      setData(rec);
-      const suggestionData = await getBankMatchSuggestions(selectedAccountId);
-      setSuggestions(suggestionData.suggestions);
       setSelectedBank(null);
       setSelectedLine(null);
+      toast.success('Bank transaction matched');
+      await refreshTransactions().catch(() => {
+        setStep(1);
+        setData(null);
+        setError('The match was recorded. Open reconciliation again to reload transactions.');
+      });
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to match transaction');
+    } finally {
+      setMatching(false);
     }
   }
 
@@ -119,8 +138,7 @@ export function ReconciliationPage() {
       })));
       setImportOpen(false);
       setImportRows([{ date: '', description: '', amount: '' }]);
-      const rec = await getReconciliationData(selectedAccountId);
-      setData(rec);
+      await refreshTransactions();
       toast.success(`${valid.length} transaction${valid.length !== 1 ? 's' : ''} imported`);
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Failed to import transactions');
@@ -137,8 +155,7 @@ export function ReconciliationPage() {
       const result = await importCSVTransactions(selectedAccountId, csvFile);
       setCsvModalOpen(false);
       setCsvFile(null);
-      const rec = await getReconciliationData(selectedAccountId);
-      setData(rec);
+      await refreshTransactions();
       toast.success(
         `Imported ${result.imported} transaction${result.imported !== 1 ? 's' : ''}${result.suggestions > 0 ? `, auto-matched ${result.suggestions}` : ''}`
       );
@@ -150,42 +167,42 @@ export function ReconciliationPage() {
   }
 
   const selectedAccount = accounts.find((a) => a.id === selectedAccountId);
-  const bookBalance = selectedAccount ? parseFloat(selectedAccount.balance.toString()) : 0;
-  const stmtBal = parseFloat(statementBalance) || 0;
+  const bookBalance = decimalUnits(selectedAccount?.balance ?? '0');
+  const stmtBal = decimalUnits(statementBalance);
   const difference = stmtBal - bookBalance;
-  const canComplete = Math.abs(difference) < 0.01 && data !== null;
-
-  useEffect(() => {
-    if (selectedBank && selectedLine) {
-      handleMatch();
-    }
-  }, [selectedBank, selectedLine]);
+  const canComplete = difference === BigInt(0) && data !== null;
+  const bank = data?.bankTransactions.find(transaction => transaction.id === selectedBank);
+  const journal = data?.journalLines.find(line => line.id === selectedLine);
+  const candidates = suggestions.find(suggestion => suggestion.bankTransactionId === selectedBank)?.candidates ?? [];
 
   return (
-    <div className="lg:pl-64 min-h-screen">
-      <div className="max-w-7xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-8">
-          <RefreshCw className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Bank Reconciliation</h1>
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5">
+          <WorkspaceHeading section="Daily work" title={step === 1 ? 'Reconciliation setup' : 'Banking'}
+            description={step === 1 ? 'Choose the bank account and statement you want to reconcile.' : 'Compare bank statement lines with posted journal entries.'}
+            actions={step === 2 ? <>
+              <button type="button" className="workspace-primary" onClick={() => setCsvModalOpen(true)}><FileSpreadsheet className="size-4" aria-hidden="true" />Import CSV</button>
+              <button type="button" className="workspace-button" disabled={matching || completing} onClick={() => {
+                setStep(1); setData(null); setSelectedBank(null); setSelectedLine(null); setError(null);
+              }}>Reconciliation setup</button>
+            </> : undefined} />
         </div>
 
-        {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-700 dark:text-red-400 text-sm">
-            {error}
-          </div>
-        )}
+        {error && <div className="mb-5"><WorkspaceNotice title="Reconciliation needs attention">{error}</WorkspaceNotice></div>}
 
         {/* Step 1 */}
         {step === 1 && (
-          <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 max-w-lg">
-            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-5">Set Up Reconciliation</h2>
+          <div className="workspace-panel max-w-2xl p-4 sm:p-5">
+            <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-5">Statement details</h2>
             <div className="space-y-4">
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Bank Account *</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-account">Bank account</label>
                 <select
+                  id="reconciliation-account"
                   value={selectedAccountId}
                   onChange={(e) => setSelectedAccountId(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 >
                   <option value="">Select account…</option>
                   {accounts.map((a) => (
@@ -194,29 +211,31 @@ export function ReconciliationPage() {
                 </select>
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Statement Ending Date *</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-date">Statement ending date</label>
                 <input
                   type="date"
+                  id="reconciliation-date"
                   value={statementDate}
                   onChange={(e) => setStatementDate(e.target.value)}
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Statement Ending Balance *</label>
+                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="reconciliation-balance">Statement ending balance</label>
                 <input
                   type="number"
                   step="0.01"
+                  id="reconciliation-balance"
                   value={statementBalance}
                   onChange={(e) => setStatementBalance(e.target.value)}
                   placeholder="0.00"
-                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+                  className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
                 />
               </div>
               <button
                 onClick={proceed}
                 disabled={loading}
-                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 text-sm font-medium disabled:opacity-50"
+                className="w-full flex items-center justify-center gap-2 px-4 py-2.5 rounded-lg bg-blue-700 text-white text-sm font-medium disabled:opacity-50"
               >
                 {loading ? <Loader2 className="h-4 w-4 animate-spin" /> : null}
                 Start Reconciliation
@@ -228,138 +247,74 @@ export function ReconciliationPage() {
         {/* Step 2 */}
         {step === 2 && data && (
           <>
-            {/* Summary Bar */}
-            <div className="grid grid-cols-3 gap-4 mb-6">
-              {[
-                { label: 'Book Balance', value: formatCurrency(bookBalance), color: 'text-zinc-900 dark:text-zinc-50' },
-                { label: 'Statement Balance', value: formatCurrency(stmtBal), color: 'text-blue-600 dark:text-blue-400' },
-                { label: 'Difference', value: formatCurrency(difference), color: Math.abs(difference) < 0.01 ? 'text-emerald-600' : 'text-red-600' },
-              ].map(({ label, value, color }) => (
-                <div key={label} className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-4">
-                  <p className="text-xs text-zinc-500 mb-1">{label}</p>
-                  <p className={`text-xl font-bold ${color}`}>{value}</p>
-                </div>
-              ))}
+            <div className="mb-5 grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <WorkspaceMetric label="Book balance" value={formatCurrency(decimalText(bookBalance))} detail={selectedAccount?.name ?? 'Bank account'} icon={BookOpenCheck} />
+              <WorkspaceMetric label="Statement ending" value={formatCurrency(decimalText(stmtBal))} detail={statementDate} icon={Landmark} />
+              <WorkspaceMetric label="Difference" value={formatCurrency(decimalText(difference))} detail={canComplete ? 'Balances agree' : 'Review the difference'} icon={ArrowLeftRight} />
             </div>
 
-            <div className="flex flex-wrap items-center gap-3 mb-5">
-              <p className="text-sm text-zinc-600 dark:text-zinc-400">
-                Click a bank transaction, then a journal line to match them.
-              </p>
-              <button
-                onClick={() => setImportOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
-              >
-                <Upload className="h-4 w-4" />
-                Import Transactions
-              </button>
-              <button
-                onClick={() => setCsvModalOpen(true)}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-blue-200 dark:border-blue-800 text-blue-700 dark:text-blue-400 text-sm font-medium hover:bg-blue-50 dark:hover:bg-blue-900/20"
-              >
-                <FileSpreadsheet className="h-4 w-4" />
-                Import CSV
-              </button>
-              <button
-                onClick={handleComplete}
-                disabled={!canComplete || completing}
-                className="flex items-center gap-2 px-3 py-1.5 rounded-lg bg-emerald-600 text-white text-sm font-medium disabled:opacity-50 hover:bg-emerald-700"
-              >
-                {completing ? <Loader2 className="h-4 w-4 animate-spin" /> : <CheckCircle className="h-4 w-4" />}
-                Complete Reconciliation
-              </button>
-            </div>
+            <div className="mb-5 grid items-start gap-4 xl:grid-cols-[1.15fr_1fr]">
+              <WorkspacePanel title="Bank transactions" description={data.bankTransactions.length + ' unmatched'}>
+                {data.bankTransactions.length ? (
+                  <div className="workspace-table-wrap">
+                    <table className="workspace-table">
+                      <thead><tr><th scope="col">Transaction</th><th scope="col">Date</th><th scope="col" className="workspace-number">Amount</th></tr></thead>
+                      <tbody>{data.bankTransactions.map(transaction => (
+                        <tr key={transaction.id} className={transaction.id === selectedBank ? 'bg-blue-50' : undefined}>
+                          <td><button type="button" aria-pressed={transaction.id === selectedBank} disabled={matching}
+                            className="workspace-text-action px-0 text-left"
+                            onClick={() => { setSelectedBank(transaction.id === selectedBank ? null : transaction.id); setSelectedLine(null); }}>
+                            {transaction.description}
+                          </button></td>
+                          <td className="whitespace-nowrap">{formatDate(transaction.date)}</td>
+                          <td className="workspace-number">{formatCurrency(transaction.amount)}</td>
+                        </tr>
+                      ))}</tbody>
+                    </table>
+                  </div>
+                ) : <p className="p-4 text-sm text-slate-600">No unmatched bank transactions.</p>}
+              </WorkspacePanel>
 
-            <div className="grid grid-cols-1 lg:grid-cols-2 gap-6">
-              {/* Bank Transactions */}
-              <div>
-                <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-3">
-                  Bank Transactions ({data.bankTransactions.length} unmatched)
-                </h2>
-                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-                  {data.bankTransactions.length === 0 ? (
-                    <p className="text-sm text-zinc-400 p-4">No unmatched bank transactions.</p>
-                  ) : (
-                    data.bankTransactions.map((bt: BankTransaction) => (
-                      <div key={bt.id} className={`border-b border-zinc-100 dark:border-zinc-800 last:border-0 ${
-                        selectedBank === bt.id
-                          ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200'
-                          : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-                      }`}>
-                        <button
-                          onClick={() => setSelectedBank(selectedBank === bt.id ? null : bt.id)}
-                          className={`flex w-full items-center justify-between px-4 py-3 text-left cursor-pointer transition-colors ${
-                          selectedBank === bt.id
-                            ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200'
-                            : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-                        }`}
-                      >
-                        <div>
-                          <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{bt.description}</p>
-                          <p className="text-xs text-zinc-400">{formatDate(bt.date)}</p>
-                        </div>
-                        <span className={`text-sm font-bold ${parseFloat(bt.amount.toString()) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                          {formatCurrency(bt.amount)}
-                        </span>
+              <WorkspacePanel title="Match review" description={bank ? bank.description + ' · ' + formatDate(bank.date) : 'Select a bank transaction to review matching entries.'}>
+                {bank && (
+                  <div className="divide-y divide-slate-200">
+                    <WorkspaceRow icon={Landmark} title="Statement line" detail={formatCurrency(bank.amount)} />
+                    {candidates.length > 0 && <div className="space-y-2 p-4 sm:px-5">
+                      <h3 className="text-sm font-semibold">Suggested journal lines</h3>
+                      {candidates.map(candidate => (
+                        <button key={candidate.journalLineId} type="button" disabled={matching} aria-pressed={selectedLine === candidate.journalLineId}
+                          onClick={() => setSelectedLine(candidate.journalLineId)}
+                          className={'block w-full rounded-lg border px-3 py-2 text-left text-sm ' + (selectedLine === candidate.journalLineId ? 'border-blue-500 bg-blue-50' : 'border-slate-200 hover:bg-blue-50')}>
+                          <strong>{candidate.source.label} · {candidate.description}</strong>
+                          <span className="block text-xs text-slate-600">{formatCurrency(candidate.amount)} · {candidate.exactAmount ? 'Exact amount' : 'Near match'} · {Math.round(candidate.dateDistance)} days apart</span>
                         </button>
-                        {(suggestions.find((suggestion) => suggestion.bankTransactionId === bt.id)?.candidates.length ?? 0) > 0 && (
-                          <div className="space-y-1 border-t border-blue-100 px-4 py-2 dark:border-blue-900/40">
-                            <p className="text-xs font-medium text-blue-700 dark:text-blue-300">Likely matches</p>
-                            {suggestions.find((suggestion) => suggestion.bankTransactionId === bt.id)?.candidates.map((candidate) => (
-                              <button
-                                key={candidate.journalLineId}
-                                onClick={() => { setSelectedBank(bt.id); setSelectedLine(candidate.journalLineId); }}
-                                className="flex w-full items-center justify-between rounded px-2 py-1 text-left text-xs hover:bg-blue-100 dark:hover:bg-blue-900/40"
-                              >
-                                <span>{candidate.source.label} · {candidate.description}</span>
-                                <span className="font-medium">{candidate.exactAmount ? 'Exact amount' : 'Near match'} · {Math.round(candidate.dateDistance)}d</span>
-                              </button>
-                            ))}
-                          </div>
-                        )}
-                      </div>
-                    ))
-                  )}
-                </div>
-              </div>
+                      ))}
+                    </div>}
+                    <div className="space-y-2 p-4 sm:px-5">
+                      <label htmlFor="reconciliation-journal" className="text-sm font-semibold">Journal line</label>
+                      <select id="reconciliation-journal" className="workspace-field" disabled={matching || !data.journalLines.length}
+                        value={selectedLine ?? ''} onChange={event => setSelectedLine(event.target.value || null)}>
+                        <option value="">Select an unmatched journal line</option>
+                        {data.journalLines.map(line => <option key={line.id} value={line.id}>
+                          {line.journalEntry.description} · {formatDate(line.journalEntry.date)} · {formatCurrency(decimalText(decimalUnits(line.debit) - decimalUnits(line.credit)))}
+                        </option>)}
+                      </select>
+                      {journal && <p className="text-xs text-slate-600">{journal.journalEntry.referenceNo || 'Posted journal line'} · {formatDate(journal.journalEntry.date)}</p>}
+                      <button type="button" className="workspace-primary" onClick={handleMatch} disabled={!journal || matching}>
+                        <CheckCircle className="size-4" aria-hidden="true" />{matching ? 'Matching…' : 'Confirm match'}
+                      </button>
+                    </div>
+                  </div>
+                )}
+              </WorkspacePanel>
+            </div>
 
-              {/* Journal Lines */}
-              <div>
-                <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-3">
-                  Journal Lines ({data.journalLines.length} unmatched)
-                </h2>
-                <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
-                  {data.journalLines.length === 0 ? (
-                    <p className="text-sm text-zinc-400 p-4">No unmatched journal lines.</p>
-                  ) : (
-                    data.journalLines.map((jl: JournalLineWithEntry) => {
-                      const netAmt = parseFloat(jl.debit.toString()) - parseFloat(jl.credit.toString());
-                      return (
-                        <div
-                          key={jl.id}
-                          onClick={() => setSelectedLine(selectedLine === jl.id ? null : jl.id)}
-                          className={`flex items-center justify-between px-4 py-3 border-b border-zinc-100 dark:border-zinc-800 last:border-0 cursor-pointer transition-colors ${
-                            selectedLine === jl.id
-                              ? 'bg-blue-50 dark:bg-blue-900/20 border-blue-200'
-                              : 'hover:bg-zinc-50 dark:hover:bg-zinc-800/50'
-                          }`}
-                        >
-                          <div>
-                            <p className="text-sm font-medium text-zinc-900 dark:text-zinc-50">{jl.journalEntry.description}</p>
-                            <p className="text-xs text-zinc-400">
-                              {formatDate(jl.journalEntry.date)}
-                              {jl.journalEntry.referenceNo && ` · ${jl.journalEntry.referenceNo}`}
-                            </p>
-                          </div>
-                          <span className={`text-sm font-bold ${netAmt >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                            {formatCurrency(Math.abs(netAmt))}
-                          </span>
-                        </div>
-                      );
-                    })
-                  )}
-                </div>
-              </div>
+            <div className="flex flex-wrap justify-between gap-2">
+              <button type="button" className="workspace-button" onClick={() => setImportOpen(true)}><Upload className="size-4" aria-hidden="true" />Enter transactions</button>
+              <button type="button" className="workspace-primary" onClick={handleComplete} disabled={!canComplete || completing || matching}>
+                {completing ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <CheckCircle className="size-4" aria-hidden="true" />}
+                Complete reconciliation
+              </button>
             </div>
 
             {/* Import Modal */}
@@ -416,7 +371,7 @@ export function ReconciliationPage() {
                     <button onClick={() => setImportOpen(false)} className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium">
                       Cancel
                     </button>
-                    <button onClick={handleImport} disabled={importing} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 text-sm font-medium disabled:opacity-50">
+                    <button onClick={handleImport} disabled={importing} className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-700 text-white text-sm font-medium disabled:opacity-50">
                       {importing && <Loader2 className="h-4 w-4 animate-spin" />}
                       Import
                     </button>

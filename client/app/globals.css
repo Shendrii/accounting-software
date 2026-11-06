@@ -30,3 +30,58 @@ body {
   from { width: 100%; }
   to   { width: 0%; }
 }
+
+@layer components {
+  .workspace-page {
+    @apply min-h-[calc(100dvh-4rem)] bg-[#f3f6fc] text-slate-950 lg:pl-64;
+    --color-zinc-50: var(--color-slate-50);
+    --color-zinc-100: var(--color-slate-100);
+    --color-zinc-200: var(--color-slate-200);
+    --color-zinc-300: var(--color-slate-300);
+    --color-zinc-400: var(--color-slate-400);
+    --color-zinc-500: var(--color-slate-500);
+    --color-zinc-600: var(--color-slate-600);
+    --color-zinc-700: var(--color-slate-700);
+    --color-zinc-800: var(--color-slate-800);
+    --color-zinc-900: var(--color-slate-900);
+  }
+
+  .workspace-content { @apply mx-auto w-full min-w-0 max-w-[90rem] px-4 py-5 sm:px-6 lg:px-7 lg:py-7; }
+  .workspace-heading { @apply flex flex-wrap items-end justify-between gap-4 rounded-2xl border border-slate-200 bg-linear-to-br from-white to-blue-50 p-4 sm:p-5; }
+  .workspace-heading h1 { @apply mt-1.5 text-2xl leading-tight font-semibold tracking-tight text-slate-950 sm:text-4xl; }
+  .workspace-eyebrow { @apply text-xs font-semibold tracking-[0.14em] text-blue-800 uppercase; }
+  .workspace-panel { @apply rounded-xl border border-slate-200 bg-white; }
+  .workspace-icon { @apply grid size-8 shrink-0 place-items-center rounded-lg bg-blue-50 text-blue-700; }
+  .workspace-button, .workspace-primary { @apply inline-flex min-h-10 cursor-pointer items-center justify-center gap-2 rounded-lg border px-3 py-2 text-center text-sm font-semibold transition-colors disabled:cursor-not-allowed disabled:opacity-60; }
+  .workspace-button { @apply border-slate-300 bg-white text-slate-800 hover:border-blue-300 hover:bg-blue-50; }
+  .workspace-primary { @apply border-blue-700 bg-blue-700 text-white hover:border-blue-800 hover:bg-blue-800; }
+  .workspace-text-action { @apply inline-flex min-h-10 shrink-0 items-center gap-1 rounded-md px-1.5 text-sm font-semibold text-blue-800 hover:bg-blue-50; }
+  .workspace-tabs { @apply flex flex-wrap items-center gap-x-1 border-b border-slate-300; }
+  .workspace-tab { @apply inline-flex min-h-11 cursor-pointer items-center gap-2 border-b-2 border-transparent px-3 text-sm font-semibold text-slate-600 hover:text-blue-800; }
+  .workspace-tab[aria-current="page"], .workspace-tab[aria-pressed="true"] { @apply border-blue-700 text-blue-800; }
+  .workspace-field { @apply min-h-10 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-950 sm:text-sm; }
+  .workspace-table-wrap { @apply max-w-full overflow-x-auto; }
+  .workspace-table { @apply w-full border-collapse text-left text-sm; }
+  .workspace-table th { @apply bg-slate-50 font-semibold text-slate-600; }
+  .workspace-table th, .workspace-table td { @apply border-b border-slate-200 px-4 py-2.5; }
+  .workspace-table tr:last-child td { @apply border-b-0; }
+  .workspace-table .workspace-number { @apply text-right whitespace-nowrap tabular-nums; }
+  .workspace-progress { @apply mt-2 block h-2 w-full appearance-none overflow-hidden rounded-full border-0 bg-blue-100; }
+  .workspace-progress::-webkit-progress-bar { @apply bg-blue-100; }
+  .workspace-progress::-webkit-progress-value { @apply rounded-full bg-blue-700; }
+  .workspace-progress::-moz-progress-bar { @apply rounded-full bg-blue-700; }
+
+
+  .workspace-topbar { @apply flex min-h-16 items-center justify-between gap-3 border-b border-slate-200 bg-white px-4 sm:px-6 lg:ml-64 lg:px-7; }
+  .workspace-sidebar { @apply fixed inset-y-0 left-0 z-50 flex h-dvh w-64 flex-col bg-[#101b34] text-white; }
+  .workspace-nav-link { @apply flex min-h-10 items-center gap-3 rounded-lg border border-transparent px-3 text-sm font-medium text-blue-100/90 transition-colors hover:bg-blue-400/15 hover:text-white; }
+  .workspace-nav-link[aria-current="page"], .workspace-nav-link[data-active="true"] { @apply border-blue-400/30 bg-blue-700/40 font-semibold text-white; }
+  .workspace-brand { @apply flex items-center gap-2.5 text-xl font-semibold tracking-tight text-white; }
+  .workspace-brand-mark { @apply grid size-9 shrink-0 place-items-center rounded-xl bg-blue-600 text-white; }
+
+  .workspace-page :is(a,button,input,select,textarea):focus-visible,
+  .workspace-topbar :is(a,button):focus-visible { @apply outline-2 outline-offset-2 outline-blue-700; }
+  .workspace-sidebar :is(a,button,select):focus-visible { @apply outline-2 outline-offset-2 outline-blue-200; }
+  .workspace-page :is(table) { @apply tabular-nums; }
+  .workspace-page table thead { @apply bg-slate-50; }
+}

@@ -1,8 +1,11 @@
 'use client';
 
-import { useState, useEffect, useCallback } from 'react';
+import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
-import { BarChart3, Loader2, Download, RefreshCw } from 'lucide-react';
+import { decimalText, decimalUnits } from '@/lib/money';
+import { useRouter, useSearchParams } from 'next/navigation';
+import { WorkspaceHeading, WorkspaceMetric, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { ChartColumn, Loader2, Download, ReceiptText, RefreshCw, TrendingUp } from 'lucide-react';
 import {
   getProfitLoss, getBalanceSheet, getTrialBalance,
   type ProfitLossReport, type BalanceSheetReport, type TrialBalanceReport,
@@ -66,7 +69,7 @@ function DateRangeFilter({
               onClick={() => { onStartChange(p.start); onEndChange(p.end); }}
               className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                 active
-                  ? 'bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900'
+                  ? 'bg-blue-700 text-white'
                   : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
               }`}
             >
@@ -77,32 +80,53 @@ function DateRangeFilter({
       </div>
 
       {/* Custom date pickers */}
-      <div className="flex items-end gap-2 ml-auto">
+      <div className="grid w-full min-w-0 grid-cols-2 items-end gap-2 sm:ml-auto sm:w-auto">
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">From</label>
+          <label className="mb-1 block text-xs text-slate-600" htmlFor="report-start-date">From</label>
           <input
             type="date"
+            id="report-start-date"
             value={startDate}
             onChange={(e) => onStartChange(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            className="workspace-field min-w-0"
           />
         </div>
         <div>
-          <label className="block text-xs text-zinc-500 mb-1">To</label>
+          <label className="mb-1 block text-xs text-slate-600" htmlFor="report-end-date">To</label>
           <input
             type="date"
+            id="report-end-date"
             value={endDate}
             onChange={(e) => onEndChange(e.target.value)}
-            className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+            className="workspace-field min-w-0"
           />
         </div>
-        {loading && <Loader2 className="h-4 w-4 animate-spin text-zinc-400 mb-2.5" />}
+        {loading && <Loader2 className="col-span-2 size-4 text-slate-500 motion-safe:animate-spin" aria-label="Loading report" />}
       </div>
     </div>
   );
 }
 
 // ─── Profit & Loss ───────────────────────────────────────────────────────────
+
+function StatementLines({ label, lines, total }: {
+  label: string;
+  lines: { accountId: string; accountName: string; balance: string }[];
+  total: string;
+}) {
+  return (
+    <WorkspacePanel title={label}>
+      {lines.length ? <dl className="divide-y divide-slate-100">
+        {lines.map(line => <div key={line.accountId} className="flex justify-between gap-3 px-4 py-2.5 text-sm">
+          <dt>{line.accountName}</dt><dd className="font-medium whitespace-nowrap tabular-nums">{formatCurrency(line.balance)}</dd>
+        </div>)}
+      </dl> : <p className="px-4 py-3 text-sm text-slate-600">No activity in this period.</p>}
+      <div className="flex justify-between gap-3 rounded-b-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+        <span>Total {label.toLowerCase()}</span><span className="tabular-nums">{formatCurrency(total)}</span>
+      </div>
+    </WorkspacePanel>
+  );
+}
 
 function ProfitLossTab() {
   const [startDate, setStartDate] = useState(daysAgo(30));
@@ -173,51 +197,15 @@ function ProfitLossTab() {
               Export CSV
             </button>
           </div>
-          <div className={`bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
-            {/* Revenue */}
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-3">Revenue</h3>
-              {report.revenue.length === 0 ? (
-                <p className="text-sm text-zinc-400">No revenue in this period.</p>
-              ) : (
-                report.revenue.map((r) => (
-                  <div key={r.accountId} className="flex justify-between py-1.5 text-sm">
-                    <span className="text-zinc-700 dark:text-zinc-300">{r.accountName}</span>
-                    <span className="font-medium">{formatCurrency(r.balance)}</span>
-                  </div>
-                ))
-              )}
-              <div className="flex justify-between py-2 mt-1 border-t border-zinc-100 dark:border-zinc-800 font-semibold text-sm">
-                <span>Total Revenue</span>
-                <span className="text-emerald-600 dark:text-emerald-400">{formatCurrency(report.totalRevenue)}</span>
-              </div>
+          <div className="space-y-4" aria-busy={loading}>
+            <div className="grid grid-cols-2 gap-3 sm:grid-cols-3">
+              <WorkspaceMetric label="Revenue" value={formatCurrency(report.totalRevenue)} detail="Posted revenue" icon={TrendingUp} />
+              <WorkspaceMetric label="Expenses" value={formatCurrency(report.totalExpenses)} detail="Posted expenses" icon={ReceiptText} />
+              <WorkspaceMetric label="Net income" value={formatCurrency(report.netIncome)} detail="Revenue less expenses" icon={ChartColumn} />
             </div>
-
-            {/* Expenses */}
-            <div className="p-4 border-b border-zinc-100 dark:border-zinc-800">
-              <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-3">Expenses</h3>
-              {report.expenses.length === 0 ? (
-                <p className="text-sm text-zinc-400">No expenses in this period.</p>
-              ) : (
-                report.expenses.map((e) => (
-                  <div key={e.accountId} className="flex justify-between py-1.5 text-sm">
-                    <span className="text-zinc-700 dark:text-zinc-300">{e.accountName}</span>
-                    <span className="font-medium">{formatCurrency(e.balance)}</span>
-                  </div>
-                ))
-              )}
-              <div className="flex justify-between py-2 mt-1 border-t border-zinc-100 dark:border-zinc-800 font-semibold text-sm">
-                <span>Total Expenses</span>
-                <span className="text-red-600 dark:text-red-400">{formatCurrency(report.totalExpenses)}</span>
-              </div>
-            </div>
-
-            {/* Net Income */}
-            <div className="p-4 flex justify-between items-center">
-              <span className="font-bold text-zinc-900 dark:text-zinc-50">Net Income</span>
-              <span className={`text-xl font-bold ${parseFloat(report.netIncome) >= 0 ? 'text-emerald-600' : 'text-red-600'}`}>
-                {formatCurrency(report.netIncome)}
-              </span>
+            <div className="grid items-start gap-4 md:grid-cols-2">
+              <StatementLines label="Revenue" lines={report.revenue} total={report.totalRevenue} />
+              <StatementLines label="Expenses" lines={report.expenses} total={report.totalExpenses} />
             </div>
           </div>
         </>
@@ -248,32 +236,6 @@ function BalanceSheetTab() {
 
   useEffect(() => { load(); }, [load]);
 
-  function Section({ title, items, total, color }: {
-    title: string;
-    items: { accountId: string; accountName: string; balance: string }[];
-    total: string;
-    color: string;
-  }) {
-    return (
-      <div className="p-4 border-b border-zinc-100 dark:border-zinc-800 last:border-0">
-        <h3 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-3">{title}</h3>
-        {items.length === 0 ? (
-          <p className="text-sm text-zinc-400">No accounts.</p>
-        ) : (
-          items.map((item) => (
-            <div key={item.accountId} className="flex justify-between py-1.5 text-sm">
-              <span className="text-zinc-700 dark:text-zinc-300">{item.accountName}</span>
-              <span className="font-medium">{formatCurrency(item.balance)}</span>
-            </div>
-          ))
-        )}
-        <div className={`flex justify-between py-2 mt-1 border-t border-zinc-100 dark:border-zinc-800 font-semibold text-sm ${color}`}>
-          <span>Total {title}</span>
-          <span>{formatCurrency(total)}</span>
-        </div>
-      </div>
-    );
-  }
 
   return (
     <div>
@@ -286,7 +248,7 @@ function BalanceSheetTab() {
               type="date"
               value={asOf}
               onChange={(e) => setAsOf(e.target.value)}
-              className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-zinc-400"
+              className="px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
             />
           </div>
           {loading && <Loader2 className="h-4 w-4 animate-spin text-zinc-400 mb-2.5" />}
@@ -302,7 +264,7 @@ function BalanceSheetTab() {
               onClick={() => setAsOf(p.value)}
               className={`px-3 py-1.5 rounded-full text-xs font-medium transition-colors ${
                 asOf === p.value
-                  ? 'bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900'
+                  ? 'bg-blue-700 text-white'
                   : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-600 dark:text-zinc-400 hover:bg-zinc-200 dark:hover:bg-zinc-700'
               }`}
             >
@@ -329,15 +291,17 @@ function BalanceSheetTab() {
       )}
 
       {report && (
-        <div className={`bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
-          <Section title="Assets" items={report.assets} total={report.totalAssets} color="text-blue-600 dark:text-blue-400" />
-          <Section title="Liabilities" items={report.liabilities} total={report.totalLiabilities} color="text-red-600 dark:text-red-400" />
-          <Section title="Equity" items={report.equity} total={report.totalEquity} color="text-emerald-600 dark:text-emerald-400" />
-          <div className="p-4 flex justify-between items-center bg-zinc-50 dark:bg-zinc-800/50">
-            <span className="font-bold text-zinc-900 dark:text-zinc-50">Liabilities + Equity</span>
-            <span className="text-xl font-bold text-zinc-900 dark:text-zinc-50">
-              {formatCurrency(parseFloat(report.totalLiabilities) + parseFloat(report.totalEquity))}
-            </span>
+        <div className="space-y-4" aria-busy={loading}>
+          <div className="grid items-start gap-4 lg:grid-cols-2">
+            <StatementLines label="Assets" lines={report.assets} total={report.totalAssets} />
+            <div className="space-y-4">
+              <StatementLines label="Liabilities" lines={report.liabilities} total={report.totalLiabilities} />
+              <StatementLines label="Equity" lines={report.equity} total={report.totalEquity} />
+              <div className="flex justify-between gap-3 rounded-xl bg-blue-50 px-4 py-3 text-sm font-semibold text-blue-950">
+                <span>Liabilities + equity</span>
+                <span className="tabular-nums">{formatCurrency(decimalText(decimalUnits(report.totalLiabilities) + decimalUnits(report.totalEquity)))}</span>
+              </div>
+            </div>
           </div>
           <p className={`border-t border-zinc-200 px-4 py-3 text-sm ${Number(report.difference) === 0 ? 'text-zinc-600' : 'font-medium text-red-800'}`}>
             Accounting equation difference · {formatCurrency(report.difference)}
@@ -416,7 +380,7 @@ function TrialBalanceTab() {
               Export CSV
             </button>
           </div>
-          <div className={`bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
+          <div className={`workspace-panel workspace-table-wrap transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 dark:border-zinc-800">
@@ -466,8 +430,11 @@ function TrialBalanceTab() {
 
 // ─── Main Page ────────────────────────────────────────────────────────────────
 
-export default function ReportsPage() {
-  const [activeTab, setActiveTab] = useState<Tab>('pl');
+function ReportsContent() {
+  const router = useRouter();
+  const searchParams = useSearchParams();
+  const requested = searchParams.get('tab');
+  const activeTab: Tab = requested === 'trial-balance' ? 'tb' : requested === 'balance-sheet' ? 'bs' : 'pl';
 
   const tabs: { id: Tab; label: string }[] = [
     { id: 'pl', label: 'Profit & Loss' },
@@ -476,31 +443,19 @@ export default function ReportsPage() {
   ];
 
   return (
-    <div className="lg:pl-64 min-h-screen">
-      <div className="max-w-6xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-8">
-          <BarChart3 className="h-7 w-7 text-zinc-600 dark:text-zinc-400" />
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Reports</h1>
-        </div>
-        <div className="mb-6 rounded-lg border border-zinc-200 bg-zinc-50 px-4 py-3 text-sm text-zinc-600 dark:border-zinc-800 dark:bg-zinc-900 dark:text-zinc-300">
-          Reports are read-only. Review variances in <Link href="/purchases" className="font-medium text-blue-600 hover:underline">Purchases</Link>, collection issues in <Link href="/sales" className="font-medium text-blue-600 hover:underline">Sales</Link>, and posting issues in <Link href="/ledger" className="font-medium text-blue-600 hover:underline">Ledger and close</Link>.
-        </div>
-
-        {/* Tabs */}
-        <div className="flex gap-1 p-1 bg-zinc-100 dark:bg-zinc-800 rounded-lg w-fit mb-8">
-          {tabs.map((tab) => (
-            <button
-              key={tab.id}
-              onClick={() => setActiveTab(tab.id)}
-              className={`px-4 py-2 rounded-md text-sm font-medium transition-all ${
-                activeTab === tab.id
-                  ? 'bg-white dark:bg-zinc-900 text-zinc-900 dark:text-zinc-50 shadow-sm'
-                  : 'text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50'
-              }`}
-            >
+    <div className="workspace-page">
+      <div className="workspace-content">
+        <div className="mb-5 space-y-4">
+          <WorkspaceHeading section="Books and reporting" title="Reports" description="Inspect statements and their posted balances." />
+          <nav aria-label="Financial statements" className="workspace-tabs">
+            {tabs.map(tab => <button key={tab.id} type="button" aria-pressed={activeTab === tab.id} className="workspace-tab"
+              onClick={() => router.push(tab.id === 'pl' ? '/reports' : '/reports?tab=' + (tab.id === 'bs' ? 'balance-sheet' : 'trial-balance'), { scroll: false })}>
               {tab.label}
-            </button>
-          ))}
+            </button>)}
+          </nav>
+          <p className="text-sm text-slate-600">
+            Review variances in <Link href="/purchases" className="font-semibold text-blue-800 hover:underline">Purchases</Link>, collections in <Link href="/sales" className="font-semibold text-blue-800 hover:underline">Sales</Link>, and posting in <Link href="/ledger" className="font-semibold text-blue-800 hover:underline">Ledger and close</Link>.
+          </p>
         </div>
 
         {activeTab === 'pl' && <ProfitLossTab />}
@@ -509,4 +464,10 @@ export default function ReportsPage() {
       </div>
     </div>
   );
+}
+
+export default function ReportsPage() {
+  return <Suspense fallback={<div className="workspace-page"><p className="workspace-content text-sm text-slate-600" role="status">Loading reports…</p></div>}>
+    <ReportsContent />
+  </Suspense>;
 }

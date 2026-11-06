@@ -34,7 +34,7 @@ export default function RootLayout({
       >
         <AuthGate>
           <SideNav />
-          <main className="min-h-screen">{children}</main>
+          <main>{children}</main>
           <ToastProvider />
           <AIChatPanel />
         </AuthGate>

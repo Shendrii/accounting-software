@@ -1,42 +1,61 @@
 'use client';
 
 import Link from 'next/link';
-import { useEffect, useState } from 'react';
-import { Building2, FileText } from 'lucide-react';
+import { CalendarClock, CalendarDays, Plus, ShoppingCart } from 'lucide-react';
 import { getBills, type Bill } from '@/lib/api';
-
-function currency(value: number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(value);
-}
+import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
+import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { WorkflowTabs, WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
 export default function PurchasesPage() {
-  const [summary, setSummary] = useState({ dueSoonCount: 0, dueTotal: 0 });
-
-  useEffect(() => {
-    getBills({ status: 'RECEIVED' }).then((bills: Bill[]) => {
-      const cutoff = Date.now() + 7 * 86400000;
-      const dueSoon = bills.filter((bill) => new Date(bill.dueDate).getTime() <= cutoff);
-      setSummary({ dueSoonCount: dueSoon.length, dueTotal: dueSoon.reduce((sum, bill) => sum + Number(bill.total), 0) });
-    }).catch(() => {});
-  }, []);
+  const { data: bills, loading, error, retry } = useWorkspaceData(getBills);
+  const open = bills?.filter(bill => bill.status === 'RECEIVED');
+  const today = localDay();
+  const overdue = open?.filter(bill => bill.dueDate.slice(0, 10) < today);
+  const cutoff = new Date(today + 'T00:00:00Z');
+  cutoff.setUTCDate(cutoff.getUTCDate() + 7);
+  const cutoffDay = cutoff.toISOString().slice(0, 10);
+  const dueSoon = open?.filter(bill => {
+    const due = bill.dueDate.slice(0, 10);
+    return due >= today && due <= cutoffDay;
+  });
+  const sum = (rows: Bill[] | undefined) => rows
+    ? formatUsd(decimalText(rows.reduce((total, bill) => total + decimalUnits(bill.total), BigInt(0))))
+    : '—';
+  const detail = (count: number | undefined, unit: string) => count === undefined ? loading ? 'Loading…' : 'Unavailable' : `${count} ${unit}`;
 
   return (
-    <div className="min-h-screen lg:pl-64">
-      <div className="mx-auto max-w-7xl px-4 py-12 sm:px-6 lg:px-8">
-        <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">Purchases (AP)</h1>
-        <p className="mt-2 text-zinc-600 dark:text-zinc-400">Vendors, bills, and recurring commitments in one workflow.</p>
-        <div className="mt-6 rounded-xl border border-blue-200 bg-blue-50 p-5 dark:border-blue-900/50 dark:bg-blue-950/30">
-          <p className="text-sm font-medium text-blue-900 dark:text-blue-200">{summary.dueSoonCount} bill{summary.dueSoonCount === 1 ? '' : 's'} due in the next 7 days</p>
-          <p className="mt-1 text-2xl font-semibold text-blue-950 dark:text-blue-100">{currency(summary.dueTotal)} due soon</p>
+    <div className="workspace-page">
+      <div className="workspace-content space-y-5">
+        <WorkspaceHeading section="Daily work" title="Purchases" description="Review vendor bills, due dates, and payments."
+          actions={<Link href="/purchases/bills/new" className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New bill</Link>} />
+        <WorkflowTabs area="purchases" active="summary" />
+        {error && <WorkspaceNotice title="Purchases activity could not load" onRetry={retry} />}
+        <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
+          <WorkspaceMetric label="Unpaid bills" value={sum(open)} detail={detail(open?.length, 'received bills')} icon={ShoppingCart} href="/purchases/bills" />
+          <WorkspaceMetric label="Overdue" value={sum(overdue)} detail={detail(overdue?.length, 'past due')} icon={CalendarClock} href="/purchases/bills" />
+          <WorkspaceMetric label="Due in 7 days" value={sum(dueSoon)} detail={detail(dueSoon?.length, 'upcoming bills')} icon={CalendarDays} href="/purchases/bills" />
         </div>
-        <div className="mt-6 grid gap-4 sm:grid-cols-2">
-          <Link href="/purchases/vendors" className="rounded-xl border border-zinc-200 bg-white p-6 transition hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <Building2 className="h-6 w-6 text-blue-600" /><h2 className="mt-3 font-semibold">Vendors</h2><p className="mt-1 text-sm text-zinc-500">Manage supplier information.</p>
-          </Link>
-          <Link href="/purchases/bills" className="rounded-xl border border-zinc-200 bg-white p-6 transition hover:shadow-sm dark:border-zinc-800 dark:bg-zinc-900">
-            <FileText className="h-6 w-6 text-blue-600" /><h2 className="mt-3 font-semibold">Bills and recurring bills</h2><p className="mt-1 text-sm text-zinc-500">Receive, pay, and schedule payables.</p>
-          </Link>
-        </div>
+        <WorkspacePanel title="Recent bills" description="See what is due and what has already been paid."
+          action={<Link href="/purchases/bills" className="workspace-text-action">All bills</Link>}>
+          {bills?.length ? (
+            <div className="workspace-table-wrap">
+              <table className="workspace-table">
+                <thead><tr><th scope="col">Bill</th><th scope="col">Vendor</th><th scope="col">Due date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Amount</th></tr></thead>
+                <tbody>{bills.slice(0, 6).map(bill => (
+                  <tr key={bill.id}>
+                    <td><Link href={`/purchases/bills/${bill.id}`} className="font-semibold whitespace-nowrap text-blue-800 hover:underline">{bill.billNo}</Link></td>
+                    <td>{bill.vendor?.name ?? '—'}</td>
+                    <td className="whitespace-nowrap">{bill.dueDate.slice(0, 10)}</td>
+                    <td><WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus></td>
+                    <td className="workspace-number">{formatUsd(bill.total)}</td>
+                  </tr>
+                ))}</tbody>
+              </table>
+            </div>
+          ) : <p className="p-4 text-sm text-slate-600" role="status">{loading ? 'Loading bills…' : error ? 'Bill activity is unavailable.' : 'No bills yet. Create a bill to get started.'}</p>}
+        </WorkspacePanel>
       </div>
     </div>
   );
