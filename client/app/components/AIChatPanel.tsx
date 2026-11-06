@@ -4,7 +4,7 @@ import { useState, useRef, useEffect } from 'react';
 import { usePathname } from 'next/navigation';
 import { Bot, Send, X, Loader2, Sparkles } from 'lucide-react';
 import { sendAiMessage } from '@/lib/api';
-import { isAuthenticated } from '@/lib/auth';
+import { useIsAuthenticated } from '@/lib/auth';
 import { hideLiveAiChat, isPreviewPath } from '@/lib/public-paths';
 import { portfolioAiThread } from '@/lib/portfolio-demo-data';
 
@@ -29,6 +29,7 @@ function contextLabel(pathname: string): string {
 
 export function AIChatPanel() {
   const pathname = usePathname();
+  const authenticated = useIsAuthenticated();
   const demo = pathname ? portfolioAiThread(pathname) : null;
   const [open, setOpen] = useState(Boolean(demo));
   const [messages, setMessages] = useState<Message[]>(demo?.messages ?? []);
@@ -84,7 +85,7 @@ export function AIChatPanel() {
     }
   }
 
-  if (hideLiveAiChat(pathname) || (!isAuthenticated() && !isPreviewPath(pathname))) return null;
+  if (hideLiveAiChat(pathname, authenticated)) return null;
 
   return (
     <>

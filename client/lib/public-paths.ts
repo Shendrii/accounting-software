@@ -17,7 +17,6 @@ export function hideAppChrome(pathname: string, authenticated: boolean): boolean
 }
 
 /** Hide Ask AI on marketing/auth pages. Preview product shots keep the live chatbot. */
-export function hideLiveAiChat(pathname: string): boolean {
-  if (pathname === '/') return true;
-  return AUTH_PUBLIC_PATHS.has(pathname);
+export function hideLiveAiChat(pathname: string, authenticated: boolean): boolean {
+  return AUTH_PUBLIC_PATHS.has(pathname) || (!authenticated && !isPreviewPath(pathname));
 }
