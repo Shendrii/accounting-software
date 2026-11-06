@@ -19,7 +19,7 @@ function formatCurrency(v: string | number) {
 }
 
 function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric' });
+  return new Date(d).toLocaleDateString('en-US', { month: 'short', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
 function InvoicesContent() {
@@ -56,7 +56,10 @@ function InvoicesContent() {
     } else {
       params.delete('status');
     }
-    router.replace(`/invoices?${params.toString()}`, { scroll: false });
+    const query = params.toString();
+    if (query !== searchParams.toString()) {
+      router.replace(`/sales/invoices${query ? '?' + query : ''}`, { scroll: false });
+    }
   // eslint-disable-next-line react-hooks/exhaustive-deps
   }, [statusFilter]);
 
@@ -111,12 +114,12 @@ function InvoicesContent() {
           >
             <option value="">All Statuses</option>
             {(['DRAFT', 'SENT', 'PAID', 'VOID'] as InvoiceStatus[]).map((s) => (
-              <option key={s} value={s}>{s}</option>
+              <option key={s} value={s}>{s === 'SENT' ? 'Open' : s}</option>
             ))}
           </select>
         </div>
 
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-hidden">
+        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 overflow-x-auto">
           {loading ? (
             <div className="flex items-center justify-center py-16 gap-2 text-zinc-500">
               <Loader2 className="h-5 w-5 animate-spin" />
@@ -133,7 +136,7 @@ function InvoicesContent() {
             <table className="w-full text-sm">
               <thead>
                 <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                  {['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Status', ''].map((h) => (
+                  {['Invoice #', 'Customer', 'Date', 'Due Date', 'Total', 'Balance due', 'Status', ''].map((h) => (
                     <th key={h} className="text-left px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider">
                       {h}
                     </th>
@@ -151,9 +154,12 @@ function InvoicesContent() {
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{formatDate(inv.date)}</td>
                     <td className="px-4 py-3 text-zinc-600 dark:text-zinc-400">{formatDate(inv.dueDate)}</td>
                     <td className="px-4 py-3 font-medium text-zinc-900 dark:text-zinc-50">{formatCurrency(inv.total)}</td>
+                    <td className="px-4 py-3 font-medium text-zinc-900 tabular-nums">{inv.status === 'DRAFT' ? '—' : formatCurrency(inv.balanceDue)}</td>
                     <td className="px-4 py-3">
                       <span className={`inline-flex items-center px-2.5 py-0.5 rounded-full text-xs font-medium ${STATUS_COLORS[inv.status]}`}>
-                        {inv.status}
+                        {inv.status === 'SENT'
+                          ? !inv.postingEntryId ? 'Awaiting posting' : Number(inv.amountPaid) > 0 ? 'Partially paid' : 'Open'
+                          : inv.status[0] + inv.status.slice(1).toLowerCase()}
                       </span>
                     </td>
                     <td className="px-4 py-3">

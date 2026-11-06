@@ -1,324 +1,168 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
+import {
+  LedgerError, journalLines, ledgerAccounts, ledgerDate, ledgerTransaction, nextDay,
+  reversePosting, sendLedgerError, updateBalanceCache,
+} from '../lib/ledger.js';
 
 const router = express.Router();
+const withLines = { journalLines: { include: { account: true } } };
+const withSources = {
+  ...withLines,
+  receipt: { include: { vendor: { select: { name: true } } } },
+  invoices: { include: { customer: { select: { name: true } } } },
+  bills: { include: { vendor: { select: { name: true } } } },
+  invoicePosting: { select: { id: true, invoiceNo: true } },
+  invoicePayment: { select: { invoice: { select: { id: true, invoiceNo: true } } } },
+  reversal: { select: { id: true } },
+};
 
-// Get all journal entries
+function scopedEntry(req) {
+  return { id: req.params.id, workspaceId: req.workspace.id };
+}
+
+async function requireEntry(tx, where, include = withLines) {
+  const entry = await tx.journalEntry.findFirst({ where, include });
+  if (!entry) throw new LedgerError('Journal entry not found.', 404);
+  return entry;
+}
+
 router.get('/', async (req, res) => {
   try {
     const { status, startDate, endDate } = req.query;
-
     const where = { workspaceId: req.workspace.id };
-    if (status) {
-      where.status = status;
-    }
+    if (status) where.status = status;
     if (startDate || endDate) {
       where.date = {};
-      if (startDate) where.date.gte = new Date(startDate);
-      if (endDate) where.date.lte = new Date(endDate);
+      if (startDate) where.date.gte = ledgerDate(startDate);
+      if (endDate) where.date.lt = nextDay(endDate);
     }
-
-    const journalEntries = await prisma.journalEntry.findMany({
-      where,
-      include: {
-        journalLines: {
-          include: {
-            account: true,
-          },
-        },
-        receipt: { include: { vendor: { select: { name: true } } } },
-        invoices: { include: { customer: { select: { name: true } } } },
-        bills: { include: { vendor: { select: { name: true } } } },
-      },
-      orderBy: {
-        date: 'desc',
-      },
-    });
-
-    res.json(journalEntries);
+    res.json(await prisma.journalEntry.findMany({ where, include: withSources, orderBy: { date: 'desc' } }));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to load journal entries.');
   }
 });
 
-// Get journal entry by ID
 router.get('/:id', async (req, res) => {
   try {
-    const journalEntry = await prisma.journalEntry.findFirst({
-      where: { id: req.params.id, workspaceId: req.workspace.id },
-      include: {
-        journalLines: {
-          include: {
-            account: true,
-          },
-        },
-        receipt: { include: { vendor: { select: { name: true } } } },
-        invoices: { include: { customer: { select: { name: true } } } },
-        bills: { include: { vendor: { select: { name: true } } } },
-      },
-    });
-
-    if (!journalEntry) {
-      return res.status(404).json({ error: 'Journal entry not found' });
-    }
-
-    res.json(journalEntry);
+    res.json(await requireEntry(prisma, scopedEntry(req), withSources));
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to load the journal entry.');
   }
 });
 
-// Create new journal entry
 router.post('/', async (req, res) => {
   try {
-    const { date, description, referenceNo, journalLines } = req.body;
-
-    if (!date || !description || !journalLines || !Array.isArray(journalLines)) {
-      return res.status(400).json({ 
-        error: 'Date, description, and journalLines array are required' 
-      });
-    }
-
-    // Validate double-entry bookkeeping: total debits must equal total credits
-    const totalDebits = journalLines.reduce((sum, line) => {
-      return sum + parseFloat(line.debit || 0);
-    }, 0);
-
-    const totalCredits = journalLines.reduce((sum, line) => {
-      return sum + parseFloat(line.credit || 0);
-    }, 0);
-
-    if (totalDebits !== totalCredits) {
-      return res.status(400).json({ 
-        error: 'Total debits must equal total credits',
-        debits: totalDebits,
-        credits: totalCredits,
-      });
-    }
-
-    // Validate that each line has either debit or credit (not both, not neither)
-    for (const line of journalLines) {
-      const hasDebit = parseFloat(line.debit || 0) > 0;
-      const hasCredit = parseFloat(line.credit || 0) > 0;
-
-      if (!hasDebit && !hasCredit) {
-        return res.status(400).json({ 
-          error: 'Each journal line must have either a debit or credit amount' 
-        });
-      }
-
-      if (hasDebit && hasCredit) {
-        return res.status(400).json({ 
-          error: 'Each journal line cannot have both debit and credit amounts' 
-        });
-      }
-
-      if (!line.accountId) {
-        return res.status(400).json({ 
-          error: 'Each journal line must have an accountId' 
-        });
-      }
-    }
-
-    // Create journal entry with lines in a transaction
-    const journalEntry = await prisma.$transaction(async (tx) => {
-      const entry = await tx.journalEntry.create({
+    const { date, description, referenceNo } = req.body;
+    if (typeof description !== 'string' || !description.trim()) throw new LedgerError('Enter a description.');
+    const workspaceId = req.workspace.id;
+    const lines = journalLines(req.body.journalLines);
+    const postingDate = ledgerDate(date);
+    const entry = await ledgerTransaction(async tx => {
+      await ledgerAccounts(tx, workspaceId, lines.map(line => line.accountId));
+      return tx.journalEntry.create({
         data: {
-          date: new Date(date),
-          description,
-          referenceNo,
-          status: 'DRAFT',
-          journalLines: {
-            create: journalLines.map(line => ({
-              accountId: line.accountId,
-              debit: parseFloat(line.debit || 0),
-              credit: parseFloat(line.credit || 0),
-              description: line.description,
-            })),
-          },
+          workspaceId, date: postingDate, description: description.trim(), referenceNo,
+          status: 'DRAFT', journalLines: { create: lines },
         },
-        include: {
-          journalLines: {
-            include: {
-              account: true,
-            },
-          },
-        },
+        include: withLines,
       });
-
-      return entry;
     });
-
-    res.status(201).json(journalEntry);
+    res.status(201).json(entry);
   } catch (error) {
-    if (error.code === 'P2003') {
-      return res.status(400).json({ error: 'Invalid account ID' });
-    }
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to create the journal entry.');
   }
 });
 
-// Update journal entry
 router.put('/:id', async (req, res) => {
   try {
-    const { date, description, referenceNo, status, journalLines } = req.body;
-
-    const existingEntry = await prisma.journalEntry.findFirst({
-      where: { id: req.params.id, workspaceId: req.workspace.id },
-      include: { journalLines: true },
-    });
-
-    if (!existingEntry) {
-      return res.status(404).json({ error: 'Journal entry not found' });
+    const where = scopedEntry(req);
+    const { date, description, referenceNo, status, journalLines: input } = req.body;
+    if (status !== undefined && !['DRAFT', 'ARCHIVED', 'POSTED'].includes(status)) throw new LedgerError('Invalid journal status.');
+    if (description !== undefined && (typeof description !== 'string' || !description.trim())) {
+      throw new LedgerError('Enter a description.');
     }
-
-    // If entry is posted, only allow status changes
-    if (existingEntry.status === 'POSTED' && journalLines) {
-      return res.status(400).json({ 
-        error: 'Cannot modify journal lines of a posted entry' 
-      });
-    }
-
-    // If updating journal lines, validate double-entry
-    if (journalLines && Array.isArray(journalLines)) {
-      const totalDebits = journalLines.reduce((sum, line) => {
-        return sum + parseFloat(line.debit || 0);
-      }, 0);
-
-      const totalCredits = journalLines.reduce((sum, line) => {
-        return sum + parseFloat(line.credit || 0);
-      }, 0);
-
-      if (totalDebits !== totalCredits) {
-        return res.status(400).json({ 
-          error: 'Total debits must equal total credits' 
-        });
-      }
-    }
-
-    const journalEntry = await prisma.$transaction(async (tx) => {
-      // Delete existing lines if new ones are provided
-      if (journalLines && Array.isArray(journalLines)) {
-        await tx.journalLine.deleteMany({
-          where: { journalEntryId: req.params.id },
-        });
-      }
-
-      // Update entry
-      const entry = await tx.journalEntry.update({
-        where: { id: req.params.id },
+    const postingDate = date === undefined ? undefined : ledgerDate(date);
+    const replacement = input === undefined ? undefined : journalLines(input);
+    const entry = await ledgerTransaction(async tx => {
+      const existing = await requireEntry(tx, where);
+      if (existing.status === 'POSTED') throw new LedgerError('Posted entries are read-only. Record a reversal to correct them.', 409);
+      if (status === 'POSTED' && existing.status !== 'DRAFT') throw new LedgerError('Restore this entry to draft before posting.');
+      const lines = status === 'POSTED' ? (replacement ?? journalLines(existing.journalLines)) : replacement;
+      const accounts = lines && await ledgerAccounts(tx, where.workspaceId, lines.map(line => line.accountId));
+      const updated = await tx.journalEntry.update({
+        where,
         data: {
-          ...(date && { date: new Date(date) }),
-          ...(description && { description }),
-          ...(referenceNo !== undefined && { referenceNo }),
-          ...(status && { status }),
-          ...(journalLines && Array.isArray(journalLines) && {
-            journalLines: {
-              create: journalLines.map(line => ({
-                accountId: line.accountId,
-                debit: parseFloat(line.debit || 0),
-                credit: parseFloat(line.credit || 0),
-                description: line.description,
-              })),
-            },
-          }),
+          date: postingDate,
+          description: description?.trim(),
+          referenceNo,
+          status,
+          ...(replacement && { journalLines: { deleteMany: {}, create: replacement } }),
         },
-        include: {
-          journalLines: {
-            include: {
-              account: true,
-            },
-          },
-        },
+        include: withLines,
       });
-
-      return entry;
+      if (status === 'POSTED') await updateBalanceCache(tx, where.workspaceId, lines, accounts);
+      return updated;
     });
-
-    res.json(journalEntry);
+    res.json(entry);
   } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Journal entry not found' });
-    }
-    if (error.code === 'P2003') {
-      return res.status(400).json({ error: 'Invalid account ID' });
-    }
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to update the journal entry.');
   }
 });
 
-// Post journal entry (change status from DRAFT to POSTED)
 router.post('/:id/post', async (req, res) => {
   try {
-    const existing = await prisma.journalEntry.findFirst({
-      where: { id: req.params.id, workspaceId: req.workspace.id },
+    const where = scopedEntry(req);
+    const entry = await ledgerTransaction(async tx => {
+      const existing = await requireEntry(tx, where);
+      if (existing.status === 'POSTED') return existing;
+      if (existing.status !== 'DRAFT') throw new LedgerError('Only drafts can be posted.', 409);
+      const lines = journalLines(existing.journalLines);
+      const accounts = await ledgerAccounts(tx, where.workspaceId, lines.map(line => line.accountId));
+      const posted = await tx.journalEntry.update({ where, data: { status: 'POSTED' }, include: withLines });
+      await updateBalanceCache(tx, where.workspaceId, lines, accounts);
+      return posted;
     });
-    if (!existing) return res.status(404).json({ error: 'Journal entry not found' });
-
-    const journalEntry = await prisma.journalEntry.update({
-      where: { id: existing.id },
-      data: { status: 'POSTED' },
-      include: {
-        journalLines: {
-          include: {
-            account: true,
-          },
-        },
-      },
-    });
-
-    // Update account balances
-    await prisma.$transaction(
-      journalEntry.journalLines.map(line =>
-        prisma.account.update({
-          where: { id: line.accountId },
-          data: {
-            balance: {
-              increment: parseFloat(line.debit) - parseFloat(line.credit),
-            },
-          },
-        })
-      )
-    );
-
-    res.json(journalEntry);
+    res.json(entry);
   } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Journal entry not found' });
-    }
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to post the journal entry.');
   }
 });
 
-// Delete journal entry
+router.post('/:id/reverse', async (req, res) => {
+  try {
+    const where = scopedEntry(req);
+    const date = ledgerDate(req.body.date, 'Reversal date');
+    const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    if (!reason) throw new LedgerError('Enter a reason for the reversal.');
+    const reversal = await ledgerTransaction(async tx => {
+      const entry = await requireEntry(tx, where, withSources);
+      if (entry.status !== 'POSTED' || entry.reversalOfId) throw new LedgerError('Choose an original posted entry.', 409);
+      if (entry.invoicePosting || entry.invoicePayment || entry.invoices.length || entry.bills.length || entry.receipt) {
+        throw new LedgerError('Correct this entry from its source transaction.', 409);
+      }
+      if (entry.reversal) return requireEntry(tx, { id: entry.reversal.id, workspaceId: where.workspaceId });
+      if (date < ledgerDate(entry.date.toISOString())) throw new LedgerError('The reversal date cannot precede the posting date.');
+      return reversePosting(tx, where.workspaceId, entry, date, reason);
+    });
+    res.json(reversal);
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to reverse the journal entry.');
+  }
+});
+
 router.delete('/:id', async (req, res) => {
   try {
-    const entry = await prisma.journalEntry.findFirst({
-      where: { id: req.params.id, workspaceId: req.workspace.id },
+    const where = scopedEntry(req);
+    await ledgerTransaction(async tx => {
+      const entry = await requireEntry(tx, where);
+      if (entry.status === 'POSTED') throw new LedgerError('Posted entries are read-only.', 409);
+      await tx.journalEntry.delete({ where });
     });
-
-    if (!entry) {
-      return res.status(404).json({ error: 'Journal entry not found' });
-    }
-
-    if (entry.status === 'POSTED') {
-      return res.status(400).json({ 
-        error: 'Cannot delete a posted journal entry' 
-      });
-    }
-
-    await prisma.journalEntry.delete({
-      where: { id: entry.id },
-    });
-
     res.status(204).send();
   } catch (error) {
-    if (error.code === 'P2025') {
-      return res.status(404).json({ error: 'Journal entry not found' });
-    }
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to delete the journal entry.');
   }
 });
 
 export default router;
-

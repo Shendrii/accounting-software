@@ -175,6 +175,10 @@ export interface JournalEntry {
   receipt?: { id: string; vendor?: { name: string } | null } | null;
   invoices?: Array<{ id: string; invoiceNo: string; customer?: { name: string } | null }>;
   bills?: Array<{ id: string; billNo: string; vendor?: { name: string } | null }>;
+  invoicePosting?: { id: string; invoiceNo: string } | null;
+  invoicePayment?: { invoice: { id: string; invoiceNo: string } } | null;
+  reversalOfId?: string | null;
+  reversal?: { id: string } | null;
 }
 
 export interface CreateJournalLineInput {
@@ -280,6 +284,15 @@ export async function updateJournalEntry(
 export async function postJournalEntry(id: string): Promise<JournalEntry> {
   const response = await fetch(`${API_URL}/api/journal-entries/${id}/post`, {
     method: 'POST',
+  });
+  return handleResponse<JournalEntry>(response);
+}
+
+export async function reverseJournalEntry(id: string, data: { date: string; reason: string }): Promise<JournalEntry> {
+  const response = await fetch(`${API_URL}/api/journal-entries/${id}/reverse`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
   });
   return handleResponse<JournalEntry>(response);
 }
@@ -550,6 +563,12 @@ export interface InvoiceLine {
   account?: { id: string; name: string; code: string } | null;
 }
 
+export interface InvoicePayment {
+  id: string;
+  amount: string;
+  journalEntry: JournalEntry;
+}
+
 export interface Invoice {
   id: string;
   invoiceNo: string;
@@ -563,6 +582,12 @@ export interface Invoice {
   total: string;
   notes?: string | null;
   journalEntryId?: string | null;
+  postingEntryId?: string | null;
+  postingEntry?: JournalEntry | null;
+  emailSentAt?: string | null;
+  payments?: InvoicePayment[];
+  amountPaid: string;
+  balanceDue: string;
   lines?: InvoiceLine[];
   createdAt: string;
   updatedAt: string;
@@ -582,7 +607,7 @@ export interface CreateInvoiceInput {
   dueDate: string;
   lines: InvoiceLineInput[];
   notes?: string;
-  tax?: number;
+  tax?: number | string;
 }
 
 export async function getInvoices(params?: {
@@ -628,17 +653,35 @@ export async function sendInvoice(id: string): Promise<Invoice> {
   return handleResponse<Invoice>(response);
 }
 
-export async function recordInvoicePayment(id: string, paymentAccountId: string): Promise<{ invoice: Invoice; journalEntry: JournalEntry }> {
+export async function postInvoice(id: string, data: {
+  receivableAccountId: string;
+  revenueAccountId?: string;
+  taxAccountId?: string;
+  confirmUnposted?: boolean;
+}): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/post`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify(data),
+  });
+  return handleResponse<Invoice>(response);
+}
+
+export async function recordInvoicePayment(id: string, data: { paymentAccountId: string; amount: string; date: string; requestId: string }): Promise<{ invoice: Invoice; journalEntry: JournalEntry }> {
   const response = await fetch(`${API_URL}/api/invoices/${id}/record-payment`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ paymentAccountId }),
+    body: JSON.stringify(data),
   });
   return handleResponse<{ invoice: Invoice; journalEntry: JournalEntry }>(response);
 }
 
-export async function voidInvoice(id: string): Promise<Invoice> {
-  const response = await fetch(`${API_URL}/api/invoices/${id}/void`, { method: 'POST' });
+export async function voidInvoice(id: string, date?: string): Promise<Invoice> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/void`, {
+    method: 'POST',
+    headers: { 'Content-Type': 'application/json' },
+    body: JSON.stringify({ date }),
+  });
   return handleResponse<Invoice>(response);
 }
 
@@ -647,13 +690,19 @@ export async function deleteInvoice(id: string): Promise<void> {
   return handleResponse<void>(response);
 }
 
-export async function sendInvoiceEmail(id: string, email: string): Promise<{ messageId: string }> {
+export async function downloadInvoicePdf(id: string): Promise<Blob> {
+  const response = await fetch(`${API_URL}/api/invoices/${id}/pdf`);
+  if (!response.ok) return handleResponse<Blob>(response);
+  return response.blob();
+}
+
+export async function sendInvoiceEmail(id: string, email: string): Promise<{ messageId: string; emailSentAt: string }> {
   const response = await fetch(`${API_URL}/api/invoices/${id}/send-pdf`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ email }),
   });
-  return handleResponse<{ messageId: string }>(response);
+  return handleResponse<{ messageId: string; emailSentAt: string }>(response);
 }
 
 // ==================== BILLS API ====================
@@ -866,6 +915,7 @@ export interface BalanceSheetReport {
   totalAssets: string;
   totalLiabilities: string;
   totalEquity: string;
+  difference: string;
 }
 
 export interface TrialBalanceReport {

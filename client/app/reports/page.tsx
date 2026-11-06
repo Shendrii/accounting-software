@@ -339,6 +339,9 @@ function BalanceSheetTab() {
               {formatCurrency(parseFloat(report.totalLiabilities) + parseFloat(report.totalEquity))}
             </span>
           </div>
+          <p className={`border-t border-zinc-200 px-4 py-3 text-sm ${Number(report.difference) === 0 ? 'text-zinc-600' : 'font-medium text-red-800'}`}>
+            Accounting equation difference · {formatCurrency(report.difference)}
+          </p>
         </div>
       )}
     </div>

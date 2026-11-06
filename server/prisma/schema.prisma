@@ -48,6 +48,13 @@ model JournalEntry {
   receipt            Receipt?
   invoices           Invoice[]
   bills              Bill[]
+  invoicePosting     Invoice?      @relation("InvoicePosting")
+  invoicePayment     InvoicePayment?
+  reversalOfId       String?       @unique
+  reversalOf         JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
+  reversal           JournalEntry? @relation("JournalReversal")
+
+  @@index([workspaceId, status, date])
 }
 
 model Receipt {
@@ -78,6 +85,8 @@ model JournalLine {
   createdAt      DateTime     @default(now())
   journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
   account        Account      @relation(fields: [accountId], references: [id])
+
+  @@index([journalEntryId])
 }
 
 model Customer {
@@ -127,11 +136,27 @@ model Invoice {
   notes          String?
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
+  postingEntryId String?       @unique
+  postingEntry   JournalEntry? @relation("InvoicePosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
+  emailSentAt    DateTime?
+  payments       InvoicePayment[]
   lines          InvoiceLine[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
 
   @@unique([workspaceId, invoiceNo])
+}
+
+model InvoicePayment {
+  id             String       @id @default(cuid())
+  invoiceId      String
+  invoice        Invoice      @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  journalEntryId String       @unique
+  journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
+  requestId      String
+  amount         Decimal      @db.Decimal(15, 2)
+
+  @@unique([invoiceId, requestId])
 }
 
 model InvoiceLine {

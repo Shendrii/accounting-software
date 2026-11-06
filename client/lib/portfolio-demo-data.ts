@@ -157,6 +157,8 @@ export const PORTFOLIO_INVOICE: Invoice = {
   subtotal: '12800.00',
   tax: '1024.00',
   total: '13824.00',
+  amountPaid: '0.00',
+  balanceDue: '13824.00',
   notes: 'Brand system refresh — phase 2. Net 30. Wire to Northline Studio operating account.',
   journalEntryId: null,
   lines: [

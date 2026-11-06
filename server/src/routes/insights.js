@@ -1,5 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
+import { cashLedgerAccounts, decimalSum } from '../lib/ledger.js';
+import { invoiceAmounts } from '../lib/invoiceLedger.js';
 
 const router = express.Router();
 
@@ -20,15 +22,15 @@ router.get('/', async (req, res) => {
     // ── 1. Overdue invoices ────────────────────────────────────────────────
     const overdueInvoices = await prisma.invoice.findMany({
       where: { status: 'SENT', dueDate: { lt: now } },
-      select: { id: true, invoiceNo: true, total: true, dueDate: true, customer: { select: { name: true } } },
+      select: { total: true, status: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amount: true } } },
     });
     if (overdueInvoices.length > 0) {
-      const total = overdueInvoices.reduce((s, i) => s + parseFloat(i.total.toString()), 0);
+      const total = decimalSum(overdueInvoices.map(invoice => invoiceAmounts(invoice).balanceDue));
       const oldest = overdueInvoices.reduce((a, b) => (a.dueDate < b.dueDate ? a : b));
       const daysOld = Math.floor((now - new Date(oldest.dueDate)) / 86400000);
       alerts.push({
         type: 'overdue_invoices',
-        severity: total > 5000 ? 'critical' : 'warning',
+        severity: total.gt(5000) ? 'critical' : 'warning',
         message: `${overdueInvoices.length} overdue invoice${overdueInvoices.length > 1 ? 's' : ''} totalling ${fmt(total)}`,
         detail: `Oldest is ${daysOld} day${daysOld !== 1 ? 's' : ''} overdue — ${oldest.customer?.name ?? 'Unknown'}`,
         link: '/invoices?status=SENT',
@@ -52,12 +54,9 @@ router.get('/', async (req, res) => {
     }
 
     // ── 3. Cash balance low / negative ────────────────────────────────────
-    const cashAccounts = await prisma.account.findMany({
-      where: { type: 'ASSET', isActive: true, name: { contains: 'cash', mode: 'insensitive' } },
-      select: { name: true, balance: true },
-    });
-    const totalCash = cashAccounts.reduce((s, a) => s + parseFloat(a.balance.toString()), 0);
-    if (totalCash < 0) {
+    const cashAccounts = await cashLedgerAccounts(prisma, req.workspace.id);
+    const totalCash = decimalSum(cashAccounts.map(account => account.balance));
+    if (totalCash.lt(0)) {
       alerts.push({
         type: 'negative_cash',
         severity: 'critical',

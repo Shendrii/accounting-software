@@ -1,370 +1,304 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Download, Mail, Loader2, X } from 'lucide-react';
+import { ArrowLeft, Download, Loader2, Mail } from 'lucide-react';
 import {
-  API_BASE_URL,
-  getInvoice, sendInvoice, recordInvoicePayment, voidInvoice, getAccounts,
-  sendInvoiceEmail,
-  type Invoice, type Account,
+  downloadInvoicePdf, getAccounts, getInvoice, postInvoice, recordInvoicePayment,
+  sendInvoiceEmail, voidInvoice, type Account, type Invoice, type JournalEntry,
 } from '@/lib/api';
+import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
 import { toast } from '@/lib/toast';
+import AccountingDialog from '@/app/components/AccountingDialog';
+import { PostingTable, postedLines, type PostingLine } from '@/app/components/PostingTable';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
-const STATUS_COLORS: Record<string, string> = {
-  DRAFT: 'bg-zinc-100 text-zinc-600 dark:bg-zinc-800 dark:text-zinc-400',
-  SENT: 'bg-blue-50 text-blue-700 dark:bg-blue-900/30 dark:text-blue-400',
-  PAID: 'bg-emerald-50 text-emerald-700 dark:bg-emerald-900/30 dark:text-emerald-400',
-  VOID: 'bg-red-50 text-red-600 dark:bg-red-900/30 dark:text-red-400',
-};
+const panel = 'min-w-0 rounded-xl border border-slate-200 bg-white p-4 sm:p-5';
+const button = 'inline-flex min-h-11 items-center justify-center gap-2 rounded-lg border border-slate-200 bg-white px-3.5 text-sm font-medium text-slate-800 hover:bg-slate-50 disabled:opacity-50';
+const primary = 'inline-flex min-h-11 items-center justify-center rounded-lg bg-blue-700 px-4 text-sm font-medium text-white hover:bg-blue-800 disabled:opacity-50';
+const field = 'mt-1 block min-h-11 w-full rounded-lg border border-slate-300 bg-white px-3 py-2 text-base text-slate-900';
+const textLink = 'inline-flex min-h-10 items-center text-sm font-medium text-blue-700 underline decoration-blue-300 underline-offset-4';
 
-function formatCurrency(v: string | number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
-}
+type Action = 'post' | 'payment' | 'email' | 'void';
+type Modal = { kind: Action } | { kind: 'journal'; entry: JournalEntry };
 
-function formatDate(d: string) {
-  return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric' });
+const formatDate = (value: string) => new Intl.DateTimeFormat('en-US', { dateStyle: 'medium', timeZone: 'UTC' }).format(new Date(value));
+
+function AccountSelect({ name, label, accounts }: { name: string; label: string; accounts: Account[] }) {
+  return (
+    <label className="block text-sm font-medium">{label}
+      <select name={name} required defaultValue="" className={field}>
+        <option value="">Select an account</option>
+        {accounts.map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+      </select>
+    </label>
+  );
 }
 
 export function InvoiceDetailPage() {
   const { id } = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
-  const [loading, setLoading] = useState(true);
   const [accounts, setAccounts] = useState<Account[]>([]);
-  const [paymentModalOpen, setPaymentModalOpen] = useState(false);
-  const [paymentAccountId, setPaymentAccountId] = useState('');
-  const [actionLoading, setActionLoading] = useState(false);
-  const [sendEmailLoading, setSendEmailLoading] = useState(false);
-  const [emailModalOpen, setEmailModalOpen] = useState(false);
-  const [emailTo, setEmailTo] = useState('');
-  const [error, setError] = useState<string | null>(null);
+  const [loading, setLoading] = useState(true);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [modalError, setModalError] = useState('');
+  const [modal, setModal] = useState<Modal | null>(null);
+  const [paymentAmount, setPaymentAmount] = useState('');
+  const paymentRequest = useRef<{ payload: string; id: string } | null>(null);
 
-  async function load() {
-    setLoading(true);
-    try {
-      const [inv, accs] = await Promise.all([getInvoice(id), getAccounts()]);
-      setInvoice(inv);
-      setAccounts(accs.filter((a) => a.isActive && a.type === 'ASSET'));
-    } finally {
-      setLoading(false);
-    }
+  useEffect(() => {
+    let current = true;
+    Promise.all([getInvoice(id), getAccounts()]).then(([data, options]) => {
+      if (!current) return;
+      setInvoice(data);
+      setAccounts(options.filter(account => account.isActive));
+    }).catch((err: Error) => {
+      if (current) setError(err.message);
+    }).finally(() => {
+      if (current) setLoading(false);
+    });
+    return () => { current = false; };
+  }, [id]);
+
+  function open(next: Modal) {
+    setError('');
+    setModalError('');
+    if (next.kind === 'payment') setPaymentAmount(invoice?.balanceDue ?? '');
+    setModal(next);
   }
 
-  useEffect(() => { load(); }, [id]);
-
-  async function handleSend() {
+  async function download() {
     if (!invoice) return;
-    setActionLoading(true);
-    setError(null);
     try {
-      const updated = await sendInvoice(invoice.id);
-      setInvoice(updated);
-      toast.success('Invoice marked as sent');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to send invoice');
-    } finally {
-      setActionLoading(false);
+      const url = URL.createObjectURL(await downloadInvoicePdf(invoice.id));
+      const link = document.createElement('a');
+      link.href = url;
+      link.download = 'Invoice-' + invoice.invoiceNo + '.pdf';
+      link.click();
+      setTimeout(() => URL.revokeObjectURL(url), 1000);
+    } catch (err) {
+      setError(err instanceof Error ? err.message : 'Unable to download the invoice.');
     }
   }
 
-  async function handlePayment() {
-    if (!invoice || !paymentAccountId) return;
-    setActionLoading(true);
-    setError(null);
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!invoice || !modal || modal.kind === 'journal' || busy) return;
+    setBusy(true);
+    setModalError('');
+    const data = new FormData(event.currentTarget);
+    const value = (key: string) => String(data.get(key) ?? '');
     try {
-      const result = await recordInvoicePayment(invoice.id, paymentAccountId);
-      setInvoice(result.invoice);
-      setPaymentModalOpen(false);
-      toast.success('Payment recorded');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to record payment');
+      if (modal.kind === 'post') {
+        setInvoice(await postInvoice(invoice.id, {
+          receivableAccountId: value('receivable'),
+          revenueAccountId: value('revenue') || undefined,
+          taxAccountId: value('tax') || undefined,
+          confirmUnposted: data.has('reviewed'),
+        }));
+        toast.success('Invoice posted');
+      } else if (modal.kind === 'payment') {
+        const amount = decimalText(decimalUnits(paymentAmount));
+        const payload = { paymentAccountId: value('deposit'), amount, date: value('date') };
+        const fingerprint = JSON.stringify([invoice.id, payload]);
+        if (paymentRequest.current?.payload !== fingerprint) {
+          paymentRequest.current = { payload: fingerprint, id: crypto.randomUUID() };
+        }
+        const saved = await recordInvoicePayment(invoice.id, { ...payload, requestId: paymentRequest.current.id });
+        setInvoice(saved.invoice);
+        paymentRequest.current = null;
+        toast.success('Payment recorded');
+      } else if (modal.kind === 'email') {
+        const sent = await sendInvoiceEmail(invoice.id, value('email').trim());
+        setInvoice({ ...invoice, emailSentAt: sent.emailSentAt });
+        toast.success('Invoice emailed');
+      } else {
+        setInvoice(await voidInvoice(invoice.id, value('date') || undefined));
+        toast.success('Invoice voided');
+      }
+      setModal(null);
+    } catch (err) {
+      setModalError(err instanceof Error ? err.message : 'Unable to save this change.');
     } finally {
-      setActionLoading(false);
+      setBusy(false);
     }
-  }
-
-  function handleDownloadPdf() {
-    if (!invoice) return;
-    window.open(`${API_BASE_URL}/api/invoices/${invoice.id}/pdf`, '_blank');
-  }
-
-  async function handleSendEmail() {
-    if (!invoice) return;
-    setSendEmailLoading(true);
-    setError(null);
-    try {
-      await sendInvoiceEmail(invoice.id, emailTo || invoice.customer?.email || '');
-      setEmailModalOpen(false);
-      toast.success('Invoice emailed successfully');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to send email');
-    } finally {
-      setSendEmailLoading(false);
-    }
-  }
-
-  async function handleVoid() {
-    if (!invoice) return;
-    if (!confirm('Are you sure you want to void this invoice?')) return;
-    setActionLoading(true);
-    setError(null);
-    try {
-      const updated = await voidInvoice(invoice.id);
-      setInvoice(updated);
-      toast.success('Invoice voided');
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to void invoice');
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
-  if (loading) {
-    return (
-      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
-        <Loader2 className="h-8 w-8 animate-spin text-zinc-400" />
-      </div>
-    );
   }
 
   if (!invoice) {
     return (
-      <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950 flex items-center justify-center">
-        <p className="text-zinc-500">Invoice not found.</p>
+      <div className="flex min-h-screen items-center justify-center bg-slate-50 p-5 lg:pl-64">
+        {loading ? <Loader2 className="size-8 animate-spin text-slate-500" aria-label="Loading invoice" /> : (
+          <div className="text-center"><p role="alert">{error || 'Invoice not found.'}</p><Link className={textLink} href="/sales/invoices">Back to invoices</Link></div>
+        )}
       </div>
     );
   }
 
-  const subtotal = parseFloat(invoice.subtotal);
-  const taxAmt = parseFloat(invoice.tax);
-  const total = parseFloat(invoice.total);
+  const posted = invoice.postingEntry;
+  const isVoid = invoice.status === 'VOID';
+  const canPost = !posted && (invoice.status === 'DRAFT' || invoice.status === 'SENT');
+  const canPay = Boolean(posted) && invoice.status === 'SENT';
+  const canVoid = (invoice.status === 'DRAFT' || invoice.status === 'SENT') && !decimalUnits(invoice.amountPaid);
+  const hasTax = decimalUnits(invoice.tax) > BigInt(0);
+  const missingRevenue = invoice.lines?.some(line => !line.accountId && decimalUnits(line.amount) > BigInt(0));
+  const receivableId = posted?.journalLines.find(line => decimalUnits(line.debit) > BigInt(0))?.accountId;
+  const assetAccounts = accounts.filter(account => account.type === 'ASSET');
+  const status = isVoid ? 'Void' : invoice.status === 'PAID' ? 'Paid' : invoice.status === 'DRAFT' ? 'Draft'
+    : !posted ? 'Awaiting posting' : decimalUnits(invoice.amountPaid) ? 'Partially paid' : 'Open';
+  const statusClass = status === 'Paid' ? 'bg-emerald-50 text-emerald-800' : status === 'Partially paid' || status === 'Awaiting posting'
+    ? 'bg-amber-50 text-amber-900' : isVoid ? 'bg-red-50 text-red-800' : 'bg-blue-50 text-blue-800';
+  const preview: PostingLine[] = [
+    { label: 'Accounts receivable', debit: invoice.total },
+    ...(invoice.lines ?? []).filter(line => decimalUnits(line.amount) > BigInt(0)).map(line => ({ label: line.account?.name ?? 'Revenue account', credit: line.amount })),
+    ...(hasTax ? [{ label: 'Sales tax liability', credit: invoice.tax }] : []),
+  ];
+  const metrics = [
+    ['Invoice total', invoice.total],
+    ['Paid to date', invoice.amountPaid],
+    [invoice.status === 'DRAFT' ? 'Balance when posted' : 'Balance due', invoice.balanceDue],
+  ];
+  const modalTitle = modal && ({ post: 'Post invoice', payment: 'Record payment', email: 'Send invoice email', void: 'Void invoice', journal: 'Journal entry' }[modal.kind]);
+  const minPaymentDay = (posted?.date ?? invoice.date).slice(0, 10);
+  const paymentCents = decimalUnits(paymentAmount);
+  let submitLabel = modalTitle;
+  if (modal?.kind === 'payment' && paymentCents > BigInt(0) && paymentCents <= decimalUnits(invoice.balanceDue)) {
+    submitLabel = 'Record ' + formatUsd(decimalText(paymentCents)) + ' payment';
+  }
+
+  let fields: ReactNode;
+  if (modal?.kind === 'post') {
+    fields = <>
+      <p className="text-sm text-slate-600">Post {invoice.invoiceNo} on {formatDate(invoice.date)} for {formatUsd(invoice.total)}.</p>
+      <AccountSelect name="receivable" label="Accounts receivable" accounts={assetAccounts} />
+      {missingRevenue && <AccountSelect name="revenue" label="Revenue account for uncategorized lines" accounts={accounts.filter(account => account.type === 'REVENUE')} />}
+      {hasTax && <AccountSelect name="tax" label="Sales tax liability account" accounts={accounts.filter(account => account.type === 'LIABILITY')} />}
+      {invoice.status === 'SENT' && <label className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
+        <input className="mt-1" type="checkbox" name="reviewed" required />
+        I checked the ledger and confirmed that this sale has no existing posting.
+      </label>}
+      {(!assetAccounts.length || (missingRevenue && !accounts.some(account => account.type === 'REVENUE')) ||
+        (hasTax && !accounts.some(account => account.type === 'LIABILITY'))) && <p className="text-sm text-slate-600">
+          Add the required accounts in the <Link className={textLink} href="/ledger">chart of accounts</Link>.
+        </p>}
+    </>;
+  } else if (modal?.kind === 'payment') {
+    fields = <>
+      <p className="text-sm text-slate-600">{invoice.invoiceNo} · {formatUsd(invoice.balanceDue)} due</p>
+      <label className="block text-sm font-medium">Payment amount (USD)
+        <input className={field} type="number" autoFocus min="0.01" max={invoice.balanceDue} step="0.01" required value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} />
+      </label>
+      <label className="block text-sm font-medium">Payment date
+        <input className={field} name="date" type="date" required min={minPaymentDay} defaultValue={localDay() < minPaymentDay ? minPaymentDay : localDay()} />
+      </label>
+      <AccountSelect name="deposit" label="Deposit to" accounts={assetAccounts.filter(account => account.id !== receivableId)} />
+    </>;
+  } else if (modal?.kind === 'email') {
+    fields = <label className="block text-sm font-medium">Recipient email
+      <input className={field} name="email" type="email" autoFocus required defaultValue={invoice.customer?.email ?? ''} />
+    </label>;
+  } else if (modal?.kind === 'void') {
+    fields = posted ? <>
+      <p className="text-sm text-slate-600">Void {invoice.invoiceNo} and create a reversing entry linked to its original journal.</p>
+      <label className="block text-sm font-medium">Reversal date
+        <input className={field} name="date" type="date" required min={minPaymentDay} defaultValue={localDay() < minPaymentDay ? minPaymentDay : localDay()} />
+      </label>
+    </> : <p className="text-sm text-slate-600">Void {invoice.invoiceNo}?</p>;
+  }
 
   return (
-    <div className="lg:pl-64 min-h-screen bg-zinc-50 dark:bg-zinc-950">
-      <div className="max-w-4xl mx-auto px-4 sm:px-6 lg:px-8 py-10">
-        <div className="flex items-center gap-3 mb-8">
-          <Link href="/sales/invoices" className="p-2 rounded-lg hover:bg-zinc-100 dark:hover:bg-zinc-800">
-            <ArrowLeft className="h-5 w-5 text-zinc-600" />
-          </Link>
-          <h1 className="text-3xl font-bold text-zinc-900 dark:text-zinc-50">{invoice.invoiceNo}</h1>
-          <span className={`inline-flex items-center px-3 py-1 rounded-full text-sm font-medium ${STATUS_COLORS[invoice.status]}`}>
-            {invoice.status}
-          </span>
-        </div>
-
-        {error && (
-          <div className="mb-6 p-4 rounded-lg bg-red-50 dark:bg-red-900/20 border border-red-200 text-red-700 dark:text-red-400 text-sm">
-            {error}
+    <div className="min-h-screen bg-slate-50 lg:pl-64">
+      <main className="mx-auto grid max-w-6xl gap-4 px-4 pb-10 pt-16 sm:px-6 lg:pt-10">
+        <Link className="inline-flex w-fit items-center gap-2 text-sm font-medium text-slate-600 hover:text-slate-900" href="/sales/invoices">
+          <ArrowLeft className="size-4" aria-hidden="true" /> Invoices
+        </Link>
+        <header className="flex flex-wrap items-start justify-between gap-4">
+          <div>
+            <p className="text-xs font-semibold uppercase tracking-wider text-blue-700">Sales / Invoices</p>
+            <h1 className="mt-1 text-3xl font-semibold tracking-tight text-slate-900">{invoice.invoiceNo}</h1>
+            <p className="mt-1 text-sm text-slate-600">{invoice.customer?.name ?? 'Customer'} · Invoice date {formatDate(invoice.date)} · Due {formatDate(invoice.dueDate)}</p>
           </div>
-        )}
-
-        {/* PDF / Email Buttons (always visible) */}
-        <div className="flex flex-wrap gap-3 mb-4">
-          <button
-            onClick={handleDownloadPdf}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
-          >
-            <Download className="h-4 w-4" />
-            Download PDF
-          </button>
-          <button
-            onClick={() => { setEmailTo(invoice.customer?.email ?? ''); setEmailModalOpen(true); }}
-            className="flex items-center gap-2 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-zinc-700 dark:text-zinc-300 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
-          >
-            <Mail className="h-4 w-4" />
-            Send by Email
-          </button>
-        </div>
-
-        {/* Action Buttons */}
-        {invoice.status !== 'VOID' && invoice.status !== 'PAID' && (
-          <div className="flex flex-wrap gap-3 mb-8">
-            {invoice.status === 'DRAFT' && (
-              <button
-                onClick={handleSend}
-                disabled={actionLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-              >
-                {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                Mark as Sent
-              </button>
+          <div className="flex flex-wrap gap-2">
+            <button type="button" onClick={download} className={button}><Download className="size-4" aria-hidden="true" /> PDF</button>
+            {!isVoid && (posted || invoice.status !== 'DRAFT') && (
+              <button type="button" onClick={() => open({ kind: 'email' })} className={button}><Mail className="size-4" aria-hidden="true" /> Send email</button>
             )}
-            {invoice.status === 'SENT' && (
-              <button
-                onClick={() => setPaymentModalOpen(true)}
-                disabled={actionLoading}
-                className="flex items-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-              >
-                Record Payment
-              </button>
-            )}
-            <button
-              onClick={handleVoid}
-              disabled={actionLoading}
-              className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
-            >
-              Void Invoice
-            </button>
+            {canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
+            {canPay && <button type="button" className={primary} onClick={() => open({ kind: 'payment' })}>Record payment</button>}
           </div>
-        )}
-
-        {/* Invoice Details */}
-        <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6 mb-6">
-          <div className="grid grid-cols-2 sm:grid-cols-3 gap-6 mb-6">
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Customer</p>
-              <p className="font-medium text-zinc-900 dark:text-zinc-50">{invoice.customer?.name ?? '-'}</p>
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Invoice Date</p>
-              <p className="text-zinc-700 dark:text-zinc-300">{formatDate(invoice.date)}</p>
-            </div>
-            <div>
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Due Date</p>
-              <p className="text-zinc-700 dark:text-zinc-300">{formatDate(invoice.dueDate)}</p>
-            </div>
-          </div>
-
-          {/* Lines */}
-          <table className="w-full text-sm">
-            <thead>
-              <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                <th className="text-left py-2 text-xs font-medium text-zinc-500 uppercase">Description</th>
-                <th className="text-right py-2 text-xs font-medium text-zinc-500 uppercase">Qty</th>
-                <th className="text-right py-2 text-xs font-medium text-zinc-500 uppercase">Unit Price</th>
-                <th className="text-right py-2 text-xs font-medium text-zinc-500 uppercase">Amount</th>
-              </tr>
-            </thead>
-            <tbody>
-              {(invoice.lines ?? []).map((line) => (
-                <tr key={line.id} className="border-b border-zinc-100 dark:border-zinc-800">
-                  <td className="py-2.5 pr-4">{line.description}</td>
-                  <td className="py-2.5 text-right text-zinc-600">{parseFloat(line.quantity).toFixed(2)}</td>
-                  <td className="py-2.5 text-right text-zinc-600">{formatCurrency(line.unitPrice)}</td>
-                  <td className="py-2.5 text-right font-medium">{formatCurrency(line.amount)}</td>
-                </tr>
-              ))}
-            </tbody>
-          </table>
-
-          <div className="mt-4 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-2 max-w-xs ml-auto">
-            <div className="flex justify-between text-sm">
-              <span className="text-zinc-600">Subtotal</span>
-              <span>{formatCurrency(subtotal)}</span>
-            </div>
-            {taxAmt > 0 && (
-              <div className="flex justify-between text-sm">
-                <span className="text-zinc-600">Tax</span>
-                <span>{formatCurrency(taxAmt)}</span>
-              </div>
-            )}
-            <div className="flex justify-between text-base font-bold border-t border-zinc-200 dark:border-zinc-700 pt-2">
-              <span>Total</span>
-              <span>{formatCurrency(total)}</span>
-            </div>
-          </div>
-
-          {invoice.notes && (
-            <div className="mt-6 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-              <p className="text-xs text-zinc-500 uppercase tracking-wider mb-1">Notes</p>
-              <p className="text-sm text-zinc-700 dark:text-zinc-300">{invoice.notes}</p>
-            </div>
-          )}
+        </header>
+        {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
+        {!posted && invoice.status === 'SENT' && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Review this older invoice against the ledger before posting or recording a payment.</p>}
+        <div className="grid grid-cols-3 gap-2 sm:gap-3" aria-live="polite">
+          {metrics.map(([label, value]) => <div key={label} className="min-w-0 rounded-xl border border-slate-200 bg-white p-2.5 sm:p-4">
+            <p className="text-xs text-slate-600 sm:text-sm">{label}</p>
+            <p className="mt-2 break-words text-base font-semibold tracking-tight text-slate-900 tabular-nums sm:text-2xl">{formatUsd(value)}</p>
+          </div>)}
         </div>
-
-        {/* Email Modal */}
-        {emailModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setEmailModalOpen(false)} />
-            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-sm mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Send Invoice by Email</h3>
-                <button onClick={() => setEmailModalOpen(false)} aria-label="Close">
-                  <X className="h-5 w-5 text-zinc-400" />
-                </button>
-              </div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-                Invoice <strong>{invoice.invoiceNo}</strong> will be attached as a PDF.
-              </p>
-              <p className="text-xs text-zinc-500 mb-4 leading-relaxed">
-                Sending uses SMTP (e.g. Gmail). Respect your provider&apos;s daily limits; very high volume may need a transactional email provider.
-              </p>
-              <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Recipient Email</label>
-              <input
-                type="email"
-                value={emailTo}
-                onChange={(e) => setEmailTo(e.target.value)}
-                placeholder={invoice.customer?.email ?? 'customer@example.com'}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              />
-              {error && <p className="text-sm text-red-600 mb-3">{error}</p>}
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setEmailModalOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleSendEmail}
-                  disabled={sendEmailLoading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-blue-600 text-white text-sm font-medium hover:bg-blue-700 disabled:opacity-50"
-                >
-                  {sendEmailLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  <Mail className="h-4 w-4" />
-                  Send
-                </button>
-              </div>
+        <div className="grid items-start gap-3 md:grid-cols-[1.25fr_1fr]">
+          <section className={panel}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-semibold text-slate-900">Invoice details</h2>
+              <span className={'rounded-full px-2.5 py-1 text-xs font-medium ' + statusClass}>{status}</span>
             </div>
-          </div>
-        )}
-
-        {/* Payment Modal */}
-        {paymentModalOpen && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center">
-            <div className="absolute inset-0 bg-black/40 backdrop-blur-sm" onClick={() => setPaymentModalOpen(false)} />
-            <div className="relative bg-white dark:bg-zinc-950 rounded-xl border border-zinc-200 dark:border-zinc-800 shadow-xl p-6 w-full max-w-sm mx-4">
-              <div className="flex items-center justify-between mb-4">
-                <h3 className="font-semibold text-zinc-900 dark:text-zinc-50">Record Payment</h3>
-                <button onClick={() => setPaymentModalOpen(false)} aria-label="Close">
-                  <X className="h-5 w-5 text-zinc-400" />
-                </button>
-              </div>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-                Select the account that received the payment of <strong>{formatCurrency(invoice.total)}</strong>.
-              </p>
-              <select
-                value={paymentAccountId}
-                onChange={(e) => setPaymentAccountId(e.target.value)}
-                className="w-full px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm mb-4 focus:outline-none focus:ring-2 focus:ring-zinc-400"
-              >
-                <option value="">Select payment account…</option>
-                {accounts.map((a) => (
-                  <option key={a.id} value={a.id}>{a.code} — {a.name}</option>
-                ))}
-              </select>
-              <div className="flex gap-3">
-                <button
-                  onClick={() => setPaymentModalOpen(false)}
-                  className="flex-1 px-4 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handlePayment}
-                  disabled={!paymentAccountId || actionLoading}
-                  className="flex-1 flex items-center justify-center gap-2 px-4 py-2 rounded-lg bg-emerald-600 text-white text-sm font-medium hover:bg-emerald-700 disabled:opacity-50"
-                >
-                  {actionLoading && <Loader2 className="h-4 w-4 animate-spin" />}
-                  Confirm
-                </button>
-              </div>
+            <table className="mt-2 w-full text-sm">
+              <thead className="border-b border-slate-200 text-slate-600"><tr><th scope="col" className="py-2 text-left font-medium">Line item</th><th scope="col" className="py-2 text-right font-medium">Amount</th></tr></thead>
+              <tbody className="divide-y divide-slate-100">{invoice.lines?.map(line => (
+                <tr key={line.id}><td className="py-2.5 pr-2">{line.description}<p className="text-xs text-slate-600">{line.account?.name}</p></td>
+                  <td className="whitespace-nowrap py-2.5 text-right tabular-nums">{formatUsd(line.amount)}</td></tr>
+              ))}</tbody>
+              <tfoot className="border-t border-slate-200">
+                {hasTax && <tr><th scope="row" className="pt-2 text-left font-medium">Tax</th><td className="pt-2 text-right tabular-nums">{formatUsd(invoice.tax)}</td></tr>}
+                <tr><th scope="row" className="pt-2 text-left">Total</th><td className="pt-2 text-right font-semibold tabular-nums">{formatUsd(invoice.total)}</td></tr>
+              </tfoot>
+            </table>
+            {invoice.notes && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{invoice.notes}</p>}
+            <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
+              <p>Delivery · {invoice.emailSentAt ? 'Sent ' + formatDate(invoice.emailSentAt) : invoice.status === 'SENT' && !posted ? 'Marked as sent' : 'Awaiting delivery'}</p>
+              {canVoid && <button type="button" className="min-h-10 text-sm font-medium text-red-800 underline underline-offset-4" onClick={() => open({ kind: 'void' })}>Void invoice</button>}
             </div>
-          </div>
-        )}
-      </div>
+          </section>
+          <section className={panel}>
+            <div className="flex flex-wrap items-center justify-between gap-2">
+              <h2 className="font-semibold text-slate-900">{posted ? 'Posted journal' : canPost ? 'Posting preview' : 'Ledger'}</h2>
+              {posted && <button type="button" className={textLink} onClick={() => open({ kind: 'journal', entry: posted })}>View journal</button>}
+            </div>
+            {posted ? <PostingTable lines={postedLines(posted)} /> : canPost ? <PostingTable lines={preview} /> : (
+              <p className="mt-2 text-sm text-slate-600">{isVoid ? 'Invoice voided before posting.' : 'Historical invoice.'}</p>
+            )}
+          </section>
+        </div>
+        <section className={panel}>
+          <h2 className="font-semibold text-slate-900">Payment history</h2>
+          {invoice.payments?.length ? (
+            <ul className="mt-2 divide-y divide-slate-100">
+              {invoice.payments.map(payment => {
+                const deposit = payment.journalEntry.journalLines.find(line => decimalUnits(line.debit) > BigInt(0));
+                return <li key={payment.id} className="flex items-center justify-between gap-3 py-2">
+                  <div><button type="button" className={textLink} onClick={() => open({ kind: 'journal', entry: payment.journalEntry })}>
+                    {formatDate(payment.journalEntry.date)}</button><p className="text-xs text-slate-600">{deposit?.account?.name}</p></div>
+                  <strong className="text-sm tabular-nums">{formatUsd(payment.amount)}</strong>
+                </li>;
+              })}
+            </ul>
+          ) : <p className="mt-2 text-sm text-slate-600">{invoice.status === 'PAID' ? 'Paid before itemized payment history was available.' : 'No payments recorded.'}</p>}
+        </section>
+
+        {modal && <AccountingDialog title={modalTitle ?? ''} busy={busy} onDismiss={() => setModal(null)}>
+          {modal.kind === 'journal' ? <>
+            <p className="mb-2 text-sm text-slate-600">{modal.entry.description} · {formatDate(modal.entry.date)}</p>
+            <PostingTable lines={postedLines(modal.entry)} />
+          </> : <form onSubmit={submit} className="grid gap-3">
+            {fields}
+            {modalError && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{modalError}</p>}
+            <div className="mt-1 flex flex-wrap justify-end gap-2">
+              <button type="button" className={button} disabled={busy} onClick={() => setModal(null)}>Cancel</button>
+              <button type="submit" className={primary} disabled={busy}>{busy ? 'Saving…' : submitLabel}</button>
+            </div>
+          </form>}
+        </AccountingDialog>}
+      </main>
     </div>
   );
 }

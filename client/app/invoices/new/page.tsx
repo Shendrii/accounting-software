@@ -5,6 +5,7 @@ import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Trash2, ArrowLeft, Loader2 } from 'lucide-react';
 import { getCustomers, getAccounts, createInvoice, type Customer, type Account, type InvoiceLineInput } from '@/lib/api';
+import { decimalText, decimalUnits } from '@/lib/money';
 import { toast } from '@/lib/toast';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 
@@ -54,16 +55,16 @@ export function NewInvoicePage() {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
       if (field === 'quantity' || field === 'unitPrice') {
-        const qty = parseFloat(field === 'quantity' ? value : next[index].quantity) || 0;
-        const price = parseFloat(field === 'unitPrice' ? value : next[index].unitPrice) || 0;
-        next[index].amount = (qty * price).toFixed(2);
+        const quantity = decimalUnits(next[index].quantity, 4);
+        const price = decimalUnits(next[index].unitPrice);
+        next[index].amount = decimalText((quantity * price + BigInt(5000)) / BigInt(10000));
       }
       return next;
     });
   }
 
-  const subtotal = lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
-  const taxAmount = parseFloat(tax) || 0;
+  const subtotal = lines.reduce((sum, line) => sum + decimalUnits(line.amount), BigInt(0));
+  const taxAmount = decimalUnits(tax);
   const total = subtotal + taxAmount;
 
   async function handleSubmit(e: React.FormEvent) {
@@ -77,13 +78,13 @@ export function NewInvoicePage() {
         customerId,
         date,
         dueDate,
-        tax: taxAmount,
+        tax: tax || '0',
         notes,
         lines: lines.map((l): InvoiceLineInput => ({
           description: l.description,
-          quantity: parseFloat(l.quantity) || 0,
-          unitPrice: parseFloat(l.unitPrice) || 0,
-          amount: parseFloat(l.amount) || 0,
+          quantity: l.quantity,
+          unitPrice: l.unitPrice || '0',
+          amount: l.amount,
           accountId: l.accountId || undefined,
         })),
       });
@@ -231,7 +232,7 @@ export function NewInvoicePage() {
                         </select>
                       </td>
                       <td className="py-2 pl-2 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                        ${parseFloat(line.amount || '0').toFixed(2)}
+                        ${line.amount}
                       </td>
                       <td className="py-2 pl-1">
                         {lines.length > 1 && (
@@ -263,7 +264,7 @@ export function NewInvoicePage() {
             <div className="mt-4 border-t border-zinc-100 dark:border-zinc-800 pt-4 space-y-2 max-w-xs ml-auto">
               <div className="flex justify-between text-sm">
                 <span className="text-zinc-600 dark:text-zinc-400">Subtotal</span>
-                <span className="font-medium">${subtotal.toFixed(2)}</span>
+                <span className="font-medium">${decimalText(subtotal)}</span>
               </div>
               <div className="flex items-center justify-between text-sm">
                 <span className="text-zinc-600 dark:text-zinc-400">Tax</span>
@@ -278,7 +279,7 @@ export function NewInvoicePage() {
               </div>
               <div className="flex justify-between text-base font-semibold border-t border-zinc-200 dark:border-zinc-700 pt-2">
                 <span>Total</span>
-                <span>${total.toFixed(2)}</span>
+                <span>${decimalText(total)}</span>
               </div>
             </div>
           </div>

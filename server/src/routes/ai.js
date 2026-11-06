@@ -1,6 +1,8 @@
 import express from 'express';
 import OpenAI from 'openai';
 import prisma from '../db/prisma.js';
+import { cashLedgerAccounts, decimalSum } from '../lib/ledger.js';
+import { invoiceAmounts } from '../lib/invoiceLedger.js';
 
 const router = express.Router();
 
@@ -39,14 +41,10 @@ router.post('/chat', async (req, res) => {
       lastMonthExpAgg,
       pendingReceipts,
     ] = await Promise.all([
-      prisma.account.findMany({
-        where: { type: 'ASSET', isActive: true, name: { contains: 'cash', mode: 'insensitive' } },
-        select: { name: true, balance: true },
-      }),
-      prisma.invoice.aggregate({
+      cashLedgerAccounts(prisma, req.workspace.id),
+      prisma.invoice.findMany({
         where: { status: 'SENT', dueDate: { lt: now } },
-        _count: true,
-        _sum: { total: true },
+        select: { status: true, total: true, payments: { select: { amount: true } } },
       }),
       prisma.bill.aggregate({
         where: { status: 'RECEIVED', dueDate: { lt: now } },
@@ -132,7 +130,7 @@ router.post('/chat', async (req, res) => {
     const vendorMap = Object.fromEntries(vendorObjs.map((v) => [v.id, v.name]));
     const customerMap = Object.fromEntries(customerObjs.map((c) => [c.id, c.name]));
 
-    const totalCash = cashAccounts.reduce((s, a) => s + parseFloat(a.balance.toString()), 0);
+    const totalCash = decimalSum(cashAccounts.map(account => account.balance));
     const thisMonthRev = parseFloat((thisMonthRevAgg._sum.credit ?? 0).toString());
     const thisMonthExp = parseFloat((thisMonthExpAgg._sum.debit ?? 0).toString());
     const lastMonthRev = parseFloat((lastMonthRevAgg._sum.credit ?? 0).toString());
@@ -161,8 +159,8 @@ LAST MONTH:
 - Net Income: ${fmt(lastMonthRev - lastMonthExp)}
 
 RECEIVABLES (overdue invoices):
-- Count: ${overdueInvoices._count}
-- Total: ${fmt(overdueInvoices._sum.total ?? 0)}
+- Count: ${overdueInvoices.length}
+- Total: ${fmt(decimalSum(overdueInvoices.map(invoice => invoiceAmounts(invoice).balanceDue)))}
 
 PAYABLES (overdue bills):
 - Count: ${overdueBills._count}

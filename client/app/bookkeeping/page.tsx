@@ -2,7 +2,11 @@
 
 import React, { useState, useEffect } from 'react';
 import { useSearchParams } from 'next/navigation';
-import { getAccounts, getCloseChecklist, getJournalEntries, type Account, type CloseChecklist, type JournalEntry } from '@/lib/api';
+import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type CloseChecklist, type JournalEntry } from '@/lib/api';
+import { decimalText, formatUsd, journalTotals, localDay } from '@/lib/money';
+import AccountingDialog from '@/app/components/AccountingDialog';
+import { PostingTable, postedLines } from '@/app/components/PostingTable';
+import { toast } from '@/lib/toast';
 import CreateAccountForm from '@/app/components/CreateAccountForm';
 import EditAccountForm from '@/app/components/EditAccountForm';
 import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
@@ -22,6 +26,9 @@ export function BookkeepingPage() {
   const [showCreateJournalForm, setShowCreateJournalForm] = useState(searchParams.get('new') === '1');
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
   const [editingJournalEntry, setEditingJournalEntry] = useState<JournalEntry | null>(null);
+  const [journalAction, setJournalAction] = useState<{ entry: JournalEntry; kind: 'view' | 'post' | 'reverse' } | null>(null);
+  const [journalBusy, setJournalBusy] = useState(false);
+  const [journalError, setJournalError] = useState('');
   const [closeChecklist, setCloseChecklist] = useState<CloseChecklist | null>(null);
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   
@@ -58,6 +65,36 @@ export function BookkeepingPage() {
       setLoading(false);
     }
   };
+
+  function openJournal(entry: JournalEntry, kind: 'view' | 'post' | 'reverse') {
+    setJournalError('');
+    setJournalAction({ entry, kind });
+  }
+
+  async function saveJournal(event: React.FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (!journalAction || journalBusy) return;
+    const { entry, kind } = journalAction;
+    const fields = new FormData(event.currentTarget);
+    setJournalBusy(true);
+    setJournalError('');
+    try {
+      if (kind === 'post') {
+        await postJournalEntry(entry.id);
+        toast.success('Journal entry posted');
+      } else {
+        await reverseJournalEntry(entry.id, { date: String(fields.get('date')), reason: String(fields.get('reason')) });
+        toast.success('Reversal posted');
+      }
+      setJournalAction(null);
+      await loadData();
+      getCloseChecklist().then(setCloseChecklist).catch(() => {});
+    } catch (err) {
+      setJournalError(err instanceof Error ? err.message : 'Unable to save the journal entry.');
+    } finally {
+      setJournalBusy(false);
+    }
+  }
 
   // Group accounts by type
   const accountsByType = accounts.reduce((acc, account) => {
@@ -666,10 +703,12 @@ export function BookkeepingPage() {
                     </thead>
                     <tbody className="divide-y divide-zinc-200 dark:divide-zinc-800">
                       {filteredJournalEntries.map((entry) => {
-                        const totalDebit = entry.journalLines.reduce((sum, line) => sum + parseFloat(line.debit), 0);
+                        const { totalDebits } = journalTotals(entry.journalLines);
                         const accountNames = entry.journalLines.map(line => line.account?.name || 'Unknown').join(', ');
                         const sourceLabels = [
                           entry.receipt && `Receipt${entry.receipt.vendor?.name ? ` · ${entry.receipt.vendor.name}` : ''}`,
+                          entry.invoicePosting && `Invoice ${entry.invoicePosting.invoiceNo}`,
+                          entry.invoicePayment && `Payment for ${entry.invoicePayment.invoice.invoiceNo}`,
                           ...(entry.invoices ?? []).map((invoice) => `Invoice ${invoice.invoiceNo}${invoice.customer?.name ? ` · ${invoice.customer.name}` : ''}`),
                           ...(entry.bills ?? []).map((bill) => `Bill ${bill.billNo}${bill.vendor?.name ? ` · ${bill.vendor.name}` : ''}`),
                         ].filter(Boolean);
@@ -696,10 +735,7 @@ export function BookkeepingPage() {
                             <td className="px-6 py-4 whitespace-nowrap text-right text-sm font-medium text-zinc-900 dark:text-zinc-50">
                               <div className="flex items-center justify-end gap-1">
                                 <DollarSign className="h-3 w-3 text-zinc-400" />
-                                {totalDebit.toLocaleString('en-US', {
-                                  minimumFractionDigits: 2,
-                                  maximumFractionDigits: 2,
-                                })}
+                                {decimalText(totalDebits)}
                               </div>
                             </td>
                             <td className="px-6 py-4 whitespace-nowrap">
@@ -718,13 +754,19 @@ export function BookkeepingPage() {
                             <td className="px-6 py-4 whitespace-nowrap text-right">
                               <div className="flex justify-end gap-3">
                                 {sourceLabels.length > 0 && <button onClick={() => setExpandedSources((current) => { const next = new Set(current); if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id); return next; })} className="text-xs font-medium text-blue-600 hover:underline">View source</button>}
-                                <button
-                                  onClick={() => setEditingJournalEntry(entry)}
-                                  className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
-                                  title="Edit entry"
-                                >
-                                  <Edit2 className="h-4 w-4" />
-                                </button>
+                                {entry.status === 'POSTED' ? (
+                                  <>
+                                    <button type="button" onClick={() => openJournal(entry, 'view')} className="min-h-10 text-sm font-medium text-blue-700 underline">View entry</button>
+                                    {!sourceLabels.length && !entry.reversalOfId && !entry.reversal && (
+                                      <button type="button" onClick={() => openJournal(entry, 'reverse')} className="min-h-10 text-sm font-medium text-zinc-700 underline">Reverse entry</button>
+                                    )}
+                                  </>
+                                ) : (
+                                  <>
+                                    <button type="button" aria-label="Edit entry" onClick={() => setEditingJournalEntry(entry)} className="min-h-10 p-2 text-zinc-600 hover:text-zinc-900"><Edit2 className="h-4 w-4" aria-hidden="true" /></button>
+                                    {entry.status === 'DRAFT' && <button type="button" onClick={() => openJournal(entry, 'post')} className="min-h-10 rounded-lg bg-blue-700 px-3 text-sm font-medium text-white hover:bg-blue-800">Post entry</button>}
+                                  </>
+                                )}
                               </div>
                             </td>
                           </tr>
@@ -742,6 +784,29 @@ export function BookkeepingPage() {
           </div>
         )}
       </div>
+      {journalAction && <AccountingDialog
+        title={journalAction.kind === 'view' ? 'Journal entry' : journalAction.kind === 'post' ? 'Post entry' : 'Reverse entry'}
+        busy={journalBusy}
+        onDismiss={() => setJournalAction(null)}
+      >
+        <p className="mb-2 text-sm text-zinc-600">{journalAction.entry.description}</p>
+        <PostingTable lines={postedLines(journalAction.entry).map(line => journalAction.kind === 'reverse' ? { ...line, debit: line.credit, credit: line.debit } : line)} />
+        {journalAction.entry.reversal && <p className="mt-2 text-sm text-zinc-600">A linked reversal has been posted.</p>}
+        {journalAction.kind !== 'view' && <form onSubmit={saveJournal} className="mt-4 grid gap-3">
+          {journalAction.kind === 'reverse' && <>
+            <label className="grid gap-1 text-sm font-medium">Reversal date<input type="date" name="date" min={journalAction.entry.date.slice(0, 10)}
+              defaultValue={localDay() < journalAction.entry.date.slice(0, 10) ? journalAction.entry.date.slice(0, 10) : localDay()}
+              required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
+            <label className="grid gap-1 text-sm font-medium">Reason<input name="reason" required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
+          </>}
+          <p className="text-sm text-zinc-600">Total debits and credits · {formatUsd(decimalText(journalTotals(journalAction.entry.journalLines).totalDebits))} each</p>
+          {journalError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{journalError}</p>}
+          <div className="flex justify-end gap-2">
+            <button type="button" disabled={journalBusy} onClick={() => setJournalAction(null)} className="min-h-11 rounded-lg border border-zinc-200 px-4 text-sm">Cancel</button>
+            <button type="submit" disabled={journalBusy} className="min-h-11 rounded-lg bg-blue-700 px-4 text-sm font-medium text-white disabled:opacity-50">{journalBusy ? 'Saving…' : journalAction.kind === 'post' ? 'Post entry' : 'Post reversal'}</button>
+          </div>
+        </form>}
+      </AccountingDialog>}
     </div>
   );
 }

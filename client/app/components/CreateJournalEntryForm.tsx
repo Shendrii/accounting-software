@@ -2,6 +2,7 @@
 
 import { useState, useEffect } from 'react';
 import { createJournalEntry, getAccounts, type Account, type CreateJournalEntryInput } from '@/lib/api';
+import { decimalText, journalTotals } from '@/lib/money';
 import { Plus, X, Trash2 } from 'lucide-react';
 
 interface CreateJournalEntryFormProps {
@@ -39,7 +40,7 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
     try {
       const accountsData = await getAccounts();
       setAccounts(accountsData.filter(a => a.isActive));
-    } catch (err) {
+    } catch {
       setError('Failed to load accounts');
     } finally {
       setLoadingAccounts(false);
@@ -68,12 +69,6 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
     setJournalLines(updated);
   };
 
-  const calculateTotals = () => {
-    const totalDebits = journalLines.reduce((sum, line) => sum + parseFloat(line.debit || '0'), 0);
-    const totalCredits = journalLines.reduce((sum, line) => sum + parseFloat(line.credit || '0'), 0);
-    return { totalDebits, totalCredits, difference: Math.abs(totalDebits - totalCredits) };
-  };
-
   const handleSubmit = async (e: React.FormEvent) => {
     e.preventDefault();
     setLoading(true);
@@ -96,9 +91,9 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
       return;
     }
 
-    const { totalDebits, totalCredits } = calculateTotals();
+    const { totalDebits, totalCredits } = journalTotals(journalLines);
     if (totalDebits !== totalCredits) {
-      setError(`Debits (${totalDebits.toFixed(2)}) must equal credits (${totalCredits.toFixed(2)})`);
+      setError(`Debits (${decimalText(totalDebits)}) must equal credits (${decimalText(totalCredits)})`);
       setLoading(false);
       return;
     }
@@ -110,8 +105,8 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
         referenceNo: formData.referenceNo || undefined,
         journalLines: validLines.map(line => ({
           accountId: line.accountId,
-          debit: parseFloat(line.debit || '0'),
-          credit: parseFloat(line.credit || '0'),
+          debit: line.debit || '0',
+          credit: line.credit || '0',
           description: line.description || undefined,
         })),
       };
@@ -137,8 +132,8 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
     }
   };
 
-  const { totalDebits, totalCredits, difference } = calculateTotals();
-  const isBalanced = totalDebits === totalCredits && totalDebits > 0;
+  const { totalDebits, totalCredits, difference } = journalTotals(journalLines);
+  const isBalanced = totalDebits === totalCredits && totalDebits > BigInt(0);
 
   return (
     <div className="bg-white dark:bg-zinc-900 rounded-lg border border-zinc-200 dark:border-zinc-800 p-6">
@@ -293,20 +288,20 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
               <div className="flex justify-between text-sm">
                 <span className="text-zinc-600 dark:text-zinc-400">Total Debits:</span>
                 <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                  ${totalDebits.toFixed(2)}
+                  ${decimalText(totalDebits)}
                 </span>
               </div>
               <div className="flex justify-between text-sm mt-1">
                 <span className="text-zinc-600 dark:text-zinc-400">Total Credits:</span>
                 <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                  ${totalCredits.toFixed(2)}
+                  ${decimalText(totalCredits)}
                 </span>
               </div>
               {!isBalanced && (
                 <div className="flex justify-between text-sm mt-1">
                   <span className="text-red-600 dark:text-red-400">Difference:</span>
                   <span className="font-medium text-red-600 dark:text-red-400">
-                    ${difference.toFixed(2)}
+                    ${decimalText(difference)}
                   </span>
                 </div>
               )}
@@ -334,7 +329,7 @@ export default function CreateJournalEntryForm({ onSuccess, onCancel }: CreateJo
               disabled={loading || !isBalanced}
               className="flex-1 px-4 py-2 bg-zinc-900 dark:bg-zinc-50 text-white dark:text-zinc-900 rounded-lg hover:bg-zinc-800 dark:hover:bg-zinc-100 transition-colors disabled:opacity-50 disabled:cursor-not-allowed font-medium"
             >
-              {loading ? 'Creating...' : 'Create Entry'}
+              {loading ? 'Creating...' : 'Save draft'}
             </button>
           </div>
         </form>

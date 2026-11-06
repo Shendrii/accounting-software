@@ -1,5 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
+import { Decimal, accountBalance, cashLedgerAccounts, decimalSum, ledgerBalances } from '../lib/ledger.js';
+import { invoiceAmounts } from '../lib/invoiceLedger.js';
 
 const router = express.Router();
 
@@ -29,8 +31,7 @@ router.get('/close-checklist', async (req, res) => {
         select: { statementDate: true },
       }),
     ]);
-    const debitTotal = Number(trialBalance._sum.debit ?? 0);
-    const creditTotal = Number(trialBalance._sum.credit ?? 0);
+    const debitTotal = new Decimal(trialBalance._sum.debit ?? 0);
 
     res.json({
       draftJournalEntries,
@@ -38,7 +39,7 @@ router.get('/close-checklist', async (req, res) => {
       overdueInvoices,
       overdueBills,
       unmatchedBankTransactions,
-      trialBalanceBalanced: Math.abs(debitTotal - creditTotal) < 0.005,
+      trialBalanceBalanced: debitTotal.eq(trialBalance._sum.credit ?? 0),
       lastReconciliationAt: lastReconciliation?.statementDate ?? null,
     });
   } catch (error) {
@@ -49,58 +50,26 @@ router.get('/close-checklist', async (req, res) => {
 
 router.get('/', async (req, res) => {
   try {
-    const [assetAccounts, revenueAccounts, expenseAccounts, outstandingInvoices] =
-      await Promise.all([
-        prisma.account.findMany({
-          where: {
-            type: 'ASSET',
-            isActive: true,
-            OR: [
-              { name: { contains: 'cash', mode: 'insensitive' } },
-              { name: { contains: 'bank', mode: 'insensitive' } },
-            ],
-          },
-          select: { balance: true },
-        }),
-        prisma.account.findMany({
-          where: { type: 'REVENUE', isActive: true },
-          select: { balance: true },
-        }),
-        prisma.account.findMany({
-          where: { type: 'EXPENSE', isActive: true },
-          select: { balance: true },
-        }),
-        prisma.invoice
-          .aggregate({
-            where: { status: 'SENT' },
-            _count: { id: true },
-            _sum: { total: true },
-          })
-          .catch(() => ({ _count: { id: 0 }, _sum: { total: null } })),
-      ]);
-
-    const cashBalance = assetAccounts.reduce(
-      (sum, a) => sum + parseFloat(a.balance.toString()),
-      0
-    );
-    const totalIncome = revenueAccounts.reduce(
-      (sum, a) => sum + parseFloat(a.balance.toString()),
-      0
-    );
-    const totalExpenses = expenseAccounts.reduce(
-      (sum, a) => sum + parseFloat(a.balance.toString()),
-      0
-    );
-
+    const workspaceId = req.workspace.id;
+    const [accounts, balances, invoices] = await Promise.all([
+      prisma.account.findMany({ where: { workspaceId }, select: { id: true, name: true, type: true } }),
+      ledgerBalances(prisma, workspaceId),
+      prisma.invoice.findMany({
+        where: { workspaceId, status: 'SENT' },
+        include: { payments: { select: { amount: true } } },
+      }),
+    ]);
+    const sum = predicate => decimalSum(accounts.filter(predicate).map(account => accountBalance(account, balances)));
+    const cashAccounts = await cashLedgerAccounts(prisma, workspaceId, balances);
+    const income = sum(account => account.type === 'REVENUE');
+    const expenses = sum(account => account.type === 'EXPENSE');
     res.json({
-      cashBalance: cashBalance.toFixed(2),
-      totalIncome: totalIncome.toFixed(2),
-      totalExpenses: totalExpenses.toFixed(2),
-      netIncome: (totalIncome - totalExpenses).toFixed(2),
-      outstandingInvoicesCount: outstandingInvoices._count.id ?? 0,
-      outstandingInvoicesTotal: outstandingInvoices._sum.total
-        ? parseFloat(outstandingInvoices._sum.total.toString()).toFixed(2)
-        : '0.00',
+      cashBalance: decimalSum(cashAccounts.map(account => account.balance)).toFixed(2),
+      totalIncome: income.toFixed(2),
+      totalExpenses: expenses.toFixed(2),
+      netIncome: income.minus(expenses).toFixed(2),
+      outstandingInvoicesCount: invoices.length,
+      outstandingInvoicesTotal: decimalSum(invoices.map(invoice => invoiceAmounts(invoice).balanceDue)).toFixed(2),
     });
   } catch (error) {
     console.error('Dashboard error:', error);
