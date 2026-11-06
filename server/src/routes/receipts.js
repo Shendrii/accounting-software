@@ -1,29 +1,12 @@
 import express from 'express';
 import multer from 'multer';
-import path from 'path';
-import fs from 'fs';
-import { fileURLToPath } from 'url';
+import { fileURLToPath } from 'node:url';
 import prisma from '../db/prisma.js';
 import { parseReceiptWithGPT } from '../lib/parseReceipt.js';
 import { isAllowedReceiptImage, receiptImageToJpeg } from '../lib/receiptImage.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
-const uploadsDir = path.join(__dirname, '../../uploads');
-
-if (!fs.existsSync(uploadsDir)) {
-  fs.mkdirSync(uploadsDir, { recursive: true });
-}
-
-const storage = multer.diskStorage({
-  destination: (req, file, cb) => cb(null, uploadsDir),
-  filename: (req, file, cb) => {
-    const unique = `${Date.now()}-${Math.random().toString(36).slice(2, 9)}`;
-    const ext = path.extname(file.originalname) || '.jpg';
-    cb(null, `receipt-${unique}${ext}`);
-  },
-});
 const upload = multer({
-  storage,
+  storage: multer.memoryStorage(),
   limits: { fileSize: 10 * 1024 * 1024 },
   fileFilter: (req, file, cb) => {
     if (isAllowedReceiptImage(file.mimetype, file.originalname)) {
@@ -37,8 +20,7 @@ const upload = multer({
 const router = express.Router();
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:5001';
 
-async function extractTextFromImage(filePath) {
-  const jpeg = await receiptImageToJpeg(filePath);
+async function extractTextFromImage(jpeg) {
   let lastError = new Error('OCR failed');
   for (let attempt = 0; attempt < 3; attempt += 1) {
     const formData = new FormData();
@@ -59,26 +41,31 @@ async function extractTextFromImage(filePath) {
   throw lastError;
 }
 
-// POST /api/receipts/upload - upload image, OCR + GPT, create receipt
-router.post('/upload', (req, res, next) => {
+function uploadImage(req, res, next) {
   upload.single('image')(req, res, (err) => {
     if (err) {
       const message = err.message || 'Upload failed';
       return res.status(400).json({ error: message });
     }
+    if (!req.file) return res.status(400).json({ error: 'No image file uploaded' });
     next();
   });
-}, async (req, res) => {
+}
+
+async function legacyImage(imageUrl) {
+  if (!/^\/uploads\/receipt-[\w-]+\.(jpe?g|png|webp|gif|bmp|tiff?)$/i.test(imageUrl)) return null;
+  return receiptImageToJpeg(fileURLToPath(new URL(`../..${imageUrl}`, import.meta.url))).catch(() => null);
+}
+
+// POST /api/receipts/upload - upload image, OCR + GPT, create receipt
+router.post('/upload', uploadImage, async (req, res) => {
   try {
-    if (!req.file) {
-      return res.status(400).json({ error: 'No image file uploaded' });
-    }
-    const filePath = req.file.path;
-    const imageUrl = `/uploads/${req.file.filename}`;
+    const jpeg = await receiptImageToJpeg(req.file.buffer).catch(() => null);
+    if (!jpeg) return res.status(400).json({ error: 'Could not read this image. Try a JPEG, PNG, or WebP file.' });
 
     let ocrText = '';
     try {
-      ocrText = await extractTextFromImage(filePath);
+      ocrText = await extractTextFromImage(jpeg);
     } catch (err) {
       return res.status(502).json({ error: `OCR failed: ${err.message}` });
     }
@@ -114,9 +101,11 @@ router.post('/upload', (req, res, next) => {
 
     const receipt = await prisma.receipt.create({
       data: {
-        imageUrl,
+        imageUrl: '',
+        workspaceId: req.workspace.id,
         extractedData,
         status: 'PENDING',
+        image: { create: { jpeg } },
       },
     });
     res.status(201).json(receipt);
@@ -143,6 +132,52 @@ router.get('/', async (req, res) => {
     res.json(receipts);
   } catch (error) {
     res.status(500).json({ error: error.message });
+  }
+});
+
+router.get('/pending-count', async (req, res) => {
+  try {
+    const count = await prisma.receipt.count({ where: { workspaceId: req.workspace.id, status: 'PENDING' } });
+    res.json({ count });
+  } catch (error) {
+    console.error('[receipt count]', error);
+    res.status(500).json({ error: 'Could not count pending receipts' });
+  }
+});
+
+router.get('/:id/image', async (req, res) => {
+  res.set({ 'Cache-Control': 'private, no-store', 'X-Content-Type-Options': 'nosniff' });
+  try {
+    const receipt = await prisma.receipt.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
+      select: { imageUrl: true, image: { select: { jpeg: true } } },
+    });
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+    const jpeg = receipt.image?.jpeg ?? await legacyImage(receipt.imageUrl);
+    if (!jpeg) return res.status(404).json({ error: 'Receipt image is no longer available' });
+    res.type('jpeg').send(Buffer.from(jpeg));
+  } catch (error) {
+    console.error('[receipt image]', error);
+    res.status(500).json({ error: 'Could not load receipt image' });
+  }
+});
+
+router.post('/:id/image', uploadImage, async (req, res) => {
+  try {
+    const receipt = await prisma.receipt.findFirst({
+      where: { id: req.params.id, workspaceId: req.workspace.id },
+      select: { id: true, imageUrl: true, image: { select: { receiptId: true } } },
+    });
+    if (!receipt) return res.status(404).json({ error: 'Receipt not found' });
+    if (receipt.image || await legacyImage(receipt.imageUrl)) return res.status(409).json({ error: 'This receipt already has an image' });
+    const jpeg = await receiptImageToJpeg(req.file.buffer).catch(() => null);
+    if (!jpeg) return res.status(400).json({ error: 'Could not read this image. Try a JPEG, PNG, or WebP file.' });
+    await prisma.receiptImage.create({ data: { receiptId: receipt.id, jpeg } });
+    res.status(204).end();
+  } catch (error) {
+    if (error.code === 'P2002') return res.status(409).json({ error: 'This receipt already has an image' });
+    console.error('[attach receipt image]', error);
+    res.status(500).json({ error: 'Could not attach receipt image' });
   }
 });
 

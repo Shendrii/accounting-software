@@ -22,7 +22,7 @@ export function isAllowedReceiptImage(mimetype = '', originalname = '') {
  * when the file is labeled as JPEG.
  */
 export async function receiptImageToJpeg(input) {
-  return sharp(input)
+  return sharp(input, { limitInputPixels: 40_000_000 })
     .rotate()
     .flatten({ background: { r: 255, g: 255, b: 255 } })
     .jpeg({ quality: 90, mozjpeg: true })

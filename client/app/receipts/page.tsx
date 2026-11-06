@@ -8,7 +8,6 @@ import {
   updateReceipt,
   approveReceipt,
   rejectReceipt,
-  getReceiptImageUrl,
   getVendors,
   getBills,
   type Receipt,
@@ -23,6 +22,7 @@ import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/compone
 import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { formatUsd } from '@/lib/money';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import ReceiptImage from '@/app/components/ReceiptImage';
 
 export function ReceiptsPage({
   title = 'Receipts',
@@ -417,20 +417,7 @@ function ReceiptCard({
   return (
     <div className="workspace-panel overflow-hidden">
       <div className="flex flex-col md:flex-row">
-        <div className="md:w-[32%] shrink-0 bg-zinc-100 dark:bg-zinc-800 flex items-center justify-center min-h-[160px]">
-          <a
-            href={getReceiptImageUrl(receipt.imageUrl)}
-            target="_blank"
-            rel="noopener noreferrer"
-            className="block w-full h-full"
-          >
-            <img
-              src={getReceiptImageUrl(receipt.imageUrl)}
-              alt="Receipt"
-              className="w-full h-full object-contain max-h-80"
-            />
-          </a>
-        </div>
+        <ReceiptImage key={receipt.id} receiptId={receipt.id} />
         <div className="min-w-0 flex-1 p-4 sm:p-5">
           <div className="flex items-center gap-2 mb-3">
             <span className={`px-2 py-0.5 rounded text-xs font-medium ${statusColors[receipt.status]}`}>

@@ -1,100 +1,170 @@
 'use client';
 
-import { useState, type FormEvent } from 'react';
-import { Building2, Mail, Plus, ScanText, UserRound, UserRoundPlus } from 'lucide-react';
-import { getCurrentUser, setWorkspaceId, useActiveWorkspaceId } from '@/lib/auth';
-import { createWorkspace, fetchWorkspaces, inviteWorkspaceMember } from '@/lib/api';
+import { useCallback, useState, type FormEvent } from 'react';
+import { ArrowRight, Copy, Mail, Plus, ScanText, UserRound, UserRoundPlus } from 'lucide-react';
+import { fetchWorkspaceInvitations, fetchWorkspaceMembers, inviteWorkspaceMember, type AuthWorkspace } from '@/lib/api';
+import { getCurrentUser } from '@/lib/auth';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import AccountingDialog from '@/app/components/AccountingDialog';
+import { useWorkspaces } from '@/app/components/WorkspaceProvider';
+import { WorkspaceActiveBadge, WorkspaceAvatar, WorkspaceRole } from '@/app/components/WorkspaceSwitcher';
 import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
 export default function SettingsPage() {
-  const workspaces = useWorkspaceData(fetchWorkspaces);
-  const [dialog, setDialog] = useState<'workspace' | 'invite' | null>(null);
-  const [notice, setNotice] = useState('');
-  const [error, setError] = useState('');
-  const [busy, setBusy] = useState(false);
+  const { workspaces, active, loading, error, retry, selectWorkspace, openCreate } = useWorkspaces();
   const user = getCurrentUser();
-  const workspaceId = useActiveWorkspaceId();
-  const current = workspaces.data?.find(workspace => workspace.id === workspaceId);
-
-  function open(kind: 'workspace' | 'invite') {
-    setError('');
-    setDialog(kind);
-  }
-
-  async function submit(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (busy || !dialog) return;
-    const value = String(new FormData(event.currentTarget).get('value')).trim();
-    if (!value) {
-      setError(dialog === 'workspace' ? 'Enter a workspace name.' : 'Enter an email address.');
-      return;
-    }
-    setError('');
-    setBusy(true);
-    try {
-      if (dialog === 'workspace') {
-        const workspace = await createWorkspace(value);
-        setWorkspaceId(workspace.id);
-        workspaces.retry();
-        setNotice('Created and selected ' + workspace.name + '.');
-      } else if (workspaceId) {
-        const invite = await inviteWorkspaceMember({ workspaceId, email: value, role: 'MEMBER' });
-        setNotice(invite.emailSent ? 'Invite sent.' : 'Invite created: ' + invite.inviteUrl);
-      }
-      setDialog(null);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'This action could not finish.');
-    } finally {
-      setBusy(false);
-    }
-  }
 
   return (
     <div className="workspace-page">
       <div className="workspace-content space-y-5">
         <WorkspaceHeading section="Admin" title="Settings" description="Manage your account, workspaces, and integrations." />
-        {notice && <p role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm break-words text-emerald-950">{notice}</p>}
-        <div className="grid items-start gap-4 xl:grid-cols-[1fr_1.25fr]">
+        <section id="workspaces" aria-labelledby="workspace-settings-heading" className="scroll-mt-4 space-y-3">
+          <div>
+            <h2 id="workspace-settings-heading" className="text-xl font-semibold tracking-tight">Workspaces and team</h2>
+            <p className="mt-1 text-sm text-slate-600">{active ? 'Manage access for ' + active.name + '.' : 'Choose a workspace to see its team.'}</p>
+          </div>
+          <div className="grid items-start gap-4 xl:grid-cols-2">
+            <WorkspacePanel title="Your workspaces"
+              action={<button type="button" className="workspace-primary" onClick={openCreate}><Plus className="size-4" aria-hidden="true" />New workspace</button>}>
+              {error && <div className="p-4"><WorkspaceNotice title="Workspaces could not load" onRetry={retry} /></div>}
+              {loading && <p role="status" className="p-4 text-sm text-slate-600">Loading workspaces…</p>}
+              {!loading && !error && !workspaces.length && <p className="p-4 text-sm text-slate-600">Create a workspace to get started.</p>}
+              <ul className="divide-y divide-slate-200">
+                {workspaces.map(workspace => <li key={workspace.id} className="flex items-center gap-3 p-4">
+                  <WorkspaceAvatar name={workspace.name} type={workspace.type} />
+                  <div className="min-w-0 flex-1">
+                    <p className="text-sm font-semibold break-words">{workspace.name}</p>
+                    <p className="mt-0.5 text-xs text-slate-600">{workspace.type === 'PERSONAL' ? 'Personal' : 'Team'} · <WorkspaceRole role={workspace.role} /></p>
+                  </div>
+                  {workspace.id === active?.id ? <WorkspaceActiveBadge /> :
+                    <button type="button" className="workspace-button shrink-0" onClick={() => selectWorkspace(workspace)}
+                      aria-label={'Switch to ' + workspace.name}><ArrowRight className="size-4" aria-hidden="true" />Switch</button>}
+                </li>)}
+              </ul>
+            </WorkspacePanel>
+            {active && <WorkspaceTeam key={active.id} workspace={active} />}
+          </div>
+        </section>
+        <div className="grid items-start gap-4 xl:grid-cols-2">
           <WorkspacePanel title="Account" description="The profile you use to sign in.">
             <WorkspaceRow icon={UserRound} title={user?.name ?? 'Signed in user'} detail={user?.email ?? 'Account email unavailable'} />
           </WorkspacePanel>
-          <WorkspacePanel title="Workspaces and team" description="Create a workspace or invite someone to the active workspace.">
-            {workspaces.error && <div className="p-4"><WorkspaceNotice title="Workspaces could not load" onRetry={workspaces.retry} /></div>}
-            {workspaces.loading && <p role="status" className="p-4 text-sm text-slate-600">Loading workspaces…</p>}
+          <WorkspacePanel title="Integrations" description="Services used by this workspace.">
             <div className="divide-y divide-slate-200">
-              {workspaces.data?.map(workspace => <WorkspaceRow key={workspace.id} icon={Building2} title={workspace.name}
-                detail={workspace.role.toLowerCase() + (workspace.id === workspaceId ? ' · Active workspace' : '')} />)}
-            </div>
-            <div className="flex flex-wrap gap-2 border-t border-slate-200 p-4">
-              <button type="button" disabled={!workspaceId} className="workspace-primary" onClick={() => open('invite')}><UserRoundPlus className="size-4" aria-hidden="true" />Invite member</button>
-              <button type="button" className="workspace-button" onClick={() => open('workspace')}><Plus className="size-4" aria-hidden="true" />New workspace</button>
+              <WorkspaceRow icon={UserRound} title="Google sign-in" detail="Sign in to Accountrix with a Google account." />
+              <WorkspaceRow icon={Mail} title="Email delivery" detail="Send invoices and workspace invitations." />
+              <WorkspaceRow icon={ScanText} title="Receipt scanning" detail="Extract details from receipt images for review in Inbox." />
             </div>
           </WorkspacePanel>
         </div>
-        <WorkspacePanel title="Integrations" description="Services used by this workspace.">
-          <div className="divide-y divide-slate-200">
-            <WorkspaceRow icon={UserRound} title="Google sign-in" detail="Sign in to Accountrix with a Google account." />
-            <WorkspaceRow icon={Mail} title="Email delivery" detail="Send invoices and workspace invitations." />
-            <WorkspaceRow icon={ScanText} title="Receipt scanning" detail="Extract details from receipt images for review in Inbox." />
-          </div>
-        </WorkspacePanel>
-        {dialog && <AccountingDialog title={dialog === 'invite' ? 'Invite a member' : 'New workspace'} busy={busy} onDismiss={() => setDialog(null)}>
-          <form onSubmit={submit} className="space-y-4">
-            {dialog === 'invite' && current && <p className="text-sm text-slate-600">Invite a member to {current.name}.</p>}
-            <label className="grid gap-1.5 text-sm font-semibold">
-              {dialog === 'invite' ? 'Email address' : 'Workspace name'}
-              <input name="value" type={dialog === 'invite' ? 'email' : 'text'} className="workspace-field" required />
-            </label>
-            {error && <WorkspaceNotice title="This action could not finish">{error}</WorkspaceNotice>}
-            <div className="flex flex-wrap justify-end gap-2">
-              <button type="button" disabled={busy} className="workspace-button" onClick={() => setDialog(null)}>Cancel</button>
-              <button type="submit" disabled={busy} className="workspace-primary">{busy ? 'Saving…' : dialog === 'invite' ? 'Send invite' : 'Create workspace'}</button>
-            </div>
-          </form>
-        </AccountingDialog>}
       </div>
     </div>
   );
+}
+
+function WorkspaceTeam({ workspace }: { workspace: AuthWorkspace }) {
+  const canInvite = workspace.role === 'OWNER' || workspace.role === 'ADMIN';
+  const loadMembers = useCallback(() => fetchWorkspaceMembers(workspace.id), [workspace.id]);
+  const loadInvitations = useCallback(() => canInvite ? fetchWorkspaceInvitations(workspace.id) : Promise.resolve([]), [workspace.id, canInvite]);
+  const members = useWorkspaceData(loadMembers);
+  const invitations = useWorkspaceData(loadInvitations);
+  const [inviting, setInviting] = useState(false);
+  const [notice, setNotice] = useState<{ message: string; shareUrl?: string } | null>(null);
+  const [copyStatus, setCopyStatus] = useState('');
+
+  async function copyLink() {
+    if (!notice?.shareUrl) return;
+    try {
+      await navigator.clipboard.writeText(notice.shareUrl);
+      setCopyStatus('Link copied.');
+    } catch {
+      setCopyStatus('Select and copy the link from the field.');
+    }
+  }
+
+  return (
+    <WorkspacePanel title="Team members" description={workspace.name}
+      action={canInvite && <button type="button" className="workspace-button" onClick={() => setInviting(true)}>
+        <UserRoundPlus className="size-4" aria-hidden="true" />Invite member
+      </button>}>
+      {notice && <div className="space-y-2 border-b border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">
+        <p role="status" className="font-semibold">{notice.message}</p>
+        {notice.shareUrl && <div className="flex flex-wrap gap-2">
+          <input className="workspace-field min-w-32 flex-1" aria-label="Invitation link" readOnly value={notice.shareUrl} onFocus={event => event.currentTarget.select()} />
+          <button type="button" className="workspace-button" onClick={copyLink}><Copy className="size-4" aria-hidden="true" />Copy link</button>
+          {copyStatus && <p className="w-full text-xs" role="status">{copyStatus}</p>}
+        </div>}
+      </div>}
+      {members.loading && <p role="status" className="p-4 text-sm text-slate-600">Loading members…</p>}
+      {members.error && <div className="p-4"><WorkspaceNotice title="Team members could not load" onRetry={members.retry} /></div>}
+      <ul className="divide-y divide-slate-200">
+        {members.data?.map(member => <li key={member.id} className="flex items-center gap-3 p-4">
+          <WorkspaceAvatar name={member.user.name || member.user.email} />
+          <div className="min-w-0 flex-1">
+            <p className="text-sm font-semibold break-words">{member.user.name || member.user.email}</p>
+            <p className="text-xs break-words text-slate-600">{member.user.email}</p>
+          </div>
+          <span className="text-xs font-semibold text-slate-700"><WorkspaceRole role={member.role} /></span>
+        </li>)}
+      </ul>
+      {canInvite ? <section className="border-t border-slate-200 p-4">
+        <h3 className="text-sm font-semibold">Pending invitations</h3>
+        {invitations.loading && <p role="status" className="mt-2 text-xs text-slate-600">Loading invitations…</p>}
+        {invitations.error && <div className="mt-2"><WorkspaceNotice title="Pending invitations could not load" onRetry={invitations.retry} /></div>}
+        {invitations.data?.length === 0 && <p className="mt-2 text-xs text-slate-600">No pending invitations.</p>}
+        {!!invitations.data?.length && <ul className="mt-2 divide-y divide-slate-200">
+          {invitations.data.map(invitation => <li key={invitation.id} className="flex flex-wrap items-center justify-between gap-2 py-2 text-sm">
+            <span className="min-w-0 font-medium break-all">{invitation.email}</span>
+            <span className="text-xs text-slate-600"><WorkspaceRole role={invitation.role} /> · Expires {invitation.expiresAt.slice(0, 10)}</span>
+          </li>)}
+        </ul>}
+      </section> : <p className="border-t border-slate-200 p-4 text-xs text-slate-600">Owners and admins can invite members.</p>}
+      {inviting && <InviteDialog workspace={workspace} onDismiss={() => setInviting(false)}
+        onSent={({ email, emailSent, inviteUrl }) => {
+          setInviting(false);
+          setCopyStatus('');
+          setNotice(emailSent ? { message: 'Invitation sent to ' + email + '.' } :
+            { message: 'Invitation created. Share this link with ' + email + '.', shareUrl: inviteUrl });
+          invitations.retry();
+        }} />}
+    </WorkspacePanel>
+  );
+}
+
+function InviteDialog({ workspace, onDismiss, onSent }: {
+  workspace: AuthWorkspace;
+  onDismiss: () => void;
+  onSent: (result: { email: string; emailSent: boolean; inviteUrl: string }) => void;
+}) {
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault();
+    if (busy) return;
+    const email = String(new FormData(event.currentTarget).get('email') ?? '').trim();
+    setBusy(true);
+    setError('');
+    try {
+      const result = await inviteWorkspaceMember({ workspaceId: workspace.id, email, role: 'MEMBER' });
+      onSent({ email, emailSent: result.emailSent, inviteUrl: result.inviteUrl });
+    } catch (cause) {
+      setError(cause instanceof Error ? cause.message : 'Could not create invitation.');
+      setBusy(false);
+    }
+  }
+
+  return <AccountingDialog title="Invite a member" busy={busy} onDismiss={onDismiss}>
+    <form onSubmit={submit} className="space-y-4">
+      <p className="text-sm text-slate-600">Invite someone to {workspace.name} as a member.</p>
+      <label className="grid gap-1.5 text-sm font-semibold">Email address
+        <input name="email" type="email" autoComplete="email" placeholder="colleague@example.com" className="workspace-field" autoFocus required disabled={busy} />
+      </label>
+      {error && <WorkspaceNotice title="Could not create invitation">{error}</WorkspaceNotice>}
+      <div className="flex flex-wrap justify-end gap-2">
+        <button type="button" className="workspace-button" onClick={onDismiss} disabled={busy}>Cancel</button>
+        <button type="submit" className="workspace-primary" disabled={busy}>{busy ? 'Sending…' : 'Send invite'}</button>
+      </div>
+    </form>
+  </AccountingDialog>;
 }

@@ -73,6 +73,15 @@ model Receipt {
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
   vendor         Vendor?       @relation(fields: [vendorId], references: [id])
   bill           Bill?         @relation(fields: [billId], references: [id])
+  image          ReceiptImage?
+
+  @@index([workspaceId, status])
+}
+
+model ReceiptImage {
+  receiptId String  @id
+  receipt   Receipt @relation(fields: [receiptId], references: [id], onDelete: Cascade)
+  jpeg      Bytes
 }
 
 model JournalLine {

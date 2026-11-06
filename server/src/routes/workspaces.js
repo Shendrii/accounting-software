@@ -71,6 +71,28 @@ router.get('/members/:workspaceId', async (req, res) => {
   }
 });
 
+router.get('/:workspaceId/invitations', async (req, res) => {
+  try {
+    const workspaceId = req.params.workspaceId;
+    const membership = await prisma.workspaceMember.findUnique({
+      where: { workspaceId_userId: { workspaceId, userId: req.user.id } },
+      select: { role: true },
+    });
+    if (!membership || !['OWNER', 'ADMIN'].includes(membership.role)) {
+      return res.status(403).json({ error: 'Only owners and admins can view invitations' });
+    }
+
+    const invitations = await prisma.workspaceInvite.findMany({
+      where: { workspaceId, acceptedAt: null, expiresAt: { gt: new Date() } },
+      select: { id: true, email: true, role: true, expiresAt: true },
+      orderBy: { createdAt: 'desc' },
+    });
+    res.json(invitations);
+  } catch {
+    res.status(500).json({ error: 'Failed to fetch invitations' });
+  }
+});
+
 router.post('/invite', async (req, res) => {
   try {
     const { workspaceId, email, role } = req.body;

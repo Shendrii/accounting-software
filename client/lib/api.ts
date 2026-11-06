@@ -342,10 +342,20 @@ export interface Receipt {
   journalEntry?: JournalEntry | null;
 }
 
-export function getReceiptImageUrl(imageUrl: string): string {
-  if (!imageUrl) return '';
-  if (imageUrl.startsWith('http')) return imageUrl;
-  return `${API_URL}${imageUrl.startsWith('/') ? '' : '/'}${imageUrl}`;
+export async function fetchReceiptImage(id: string, signal: AbortSignal): Promise<Blob | null> {
+  const response = await fetch(`${API_URL}/api/receipts/${encodeURIComponent(id)}/image`, { signal });
+  if (response.status === 404) return null;
+  if (!response.ok || !response.headers.get('Content-Type')?.startsWith('image/')) {
+    throw new Error('Could not load receipt image.');
+  }
+  return response.blob();
+}
+
+export async function attachReceiptImage(id: string, file: File): Promise<void> {
+  const formData = new FormData();
+  formData.append('image', file);
+  const response = await fetch(`${API_URL}/api/receipts/${encodeURIComponent(id)}/image`, { method: 'POST', body: formData });
+  await handleResponse<void>(response);
 }
 
 export async function uploadReceipt(file: File): Promise<Receipt> {
@@ -362,6 +372,20 @@ export async function getReceipts(status?: string): Promise<Receipt[]> {
   const params = status ? `?status=${encodeURIComponent(status)}` : '';
   const response = await fetch(`${API_URL}/api/receipts${params}`);
   return handleResponse<Receipt[]>(response);
+}
+
+const pendingCountRequests = new Map<string, Promise<number>>();
+
+export function getPendingReceiptCount(): Promise<number> {
+  const key = `${getAuthToken()}:${getWorkspaceId()}`;
+  const existing = pendingCountRequests.get(key);
+  if (existing) return existing;
+  const request = fetch(`${API_URL}/api/receipts/pending-count`)
+    .then(handleResponse<{ count: number }>)
+    .then(({ count }) => count)
+    .finally(() => pendingCountRequests.delete(key));
+  pendingCountRequests.set(key, request);
+  return request;
 }
 
 export async function getReceipt(id: string): Promise<Receipt> {
@@ -1053,13 +1077,36 @@ export async function fetchWorkspaces(): Promise<AuthWorkspace[]> {
   return handleResponse<AuthWorkspace[]>(response);
 }
 
-export async function createWorkspace(name: string): Promise<AuthWorkspace> {
+export async function createWorkspace(name: string): Promise<Pick<AuthWorkspace, 'id' | 'name' | 'type'>> {
   const response = await fetch(`${API_URL}/api/workspaces`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
     body: JSON.stringify({ name }),
   });
-  return handleResponse<AuthWorkspace>(response);
+  return handleResponse<Pick<AuthWorkspace, 'id' | 'name' | 'type'>>(response);
+}
+
+export interface WorkspaceMember {
+  id: string;
+  role: AuthWorkspace['role'];
+  user: AuthUser;
+}
+
+export interface WorkspaceInvitation {
+  id: string;
+  email: string;
+  role: AuthWorkspace['role'];
+  expiresAt: string;
+}
+
+export async function fetchWorkspaceMembers(workspaceId: string): Promise<WorkspaceMember[]> {
+  const response = await fetch(`${API_URL}/api/workspaces/members/${encodeURIComponent(workspaceId)}`);
+  return handleResponse<WorkspaceMember[]>(response);
+}
+
+export async function fetchWorkspaceInvitations(workspaceId: string): Promise<WorkspaceInvitation[]> {
+  const response = await fetch(`${API_URL}/api/workspaces/${encodeURIComponent(workspaceId)}/invitations`);
+  return handleResponse<WorkspaceInvitation[]>(response);
 }
 
 export async function inviteWorkspaceMember(data: { workspaceId: string; email: string; role?: 'OWNER' | 'ADMIN' | 'MEMBER' }) {

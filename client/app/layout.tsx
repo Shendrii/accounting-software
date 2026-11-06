@@ -2,6 +2,7 @@ import type { Metadata } from "next";
 import { Geist, Geist_Mono } from "next/font/google";
 import "./globals.css";
 import SideNav from "./components/SideNav";
+import { WorkspaceProvider } from "./components/WorkspaceProvider";
 import { ToastProvider } from "./components/Toast";
 import { AIChatPanel } from "./components/AIChatPanel";
 import { AuthGate } from "./components/AuthGate";
@@ -33,10 +34,12 @@ export default function RootLayout({
         className={`${geistSans.variable} ${geistMono.variable} antialiased bg-zinc-50 text-zinc-900`}
       >
         <AuthGate>
-          <SideNav />
-          <main>{children}</main>
-          <ToastProvider />
-          <AIChatPanel />
+          <WorkspaceProvider>
+            <SideNav />
+            <main>{children}</main>
+            <ToastProvider />
+            <AIChatPanel />
+          </WorkspaceProvider>
         </AuthGate>
       </body>
     </html>

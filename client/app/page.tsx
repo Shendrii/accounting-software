@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { ArrowUpRight, BookOpenCheck, Inbox, Landmark, Plus, ReceiptText, ShoppingCart, Wallet } from 'lucide-react';
-import { fetchDashboard, getBills, getCloseChecklist, getInvoices, getReceipts } from '@/lib/api';
+import { fetchDashboard, getBills, getCloseChecklist, getInvoices, getPendingReceiptCount } from '@/lib/api';
 import { useIsAuthenticated } from '@/lib/auth';
 import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
@@ -11,17 +11,16 @@ import { CloseProgress, InvoiceActivity, WorkspaceStatus } from '@/app/component
 import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
 const openBills = () => getBills({ status: 'RECEIVED' });
-const pendingReceipts = () => getReceipts('PENDING');
 const recentInvoices = () => getInvoices();
 
 function Dashboard() {
   const summary = useWorkspaceData(fetchDashboard);
   const bills = useWorkspaceData(openBills);
-  const receipts = useWorkspaceData(pendingReceipts);
+  const receipts = useWorkspaceData(getPendingReceiptCount);
   const close = useWorkspaceData(getCloseChecklist);
   const invoices = useWorkspaceData(recentInvoices);
   const overdueBills = bills.data?.filter(bill => bill.dueDate.slice(0, 10) < localDay());
-  const reviewCount = receipts.data?.length;
+  const reviewCount = receipts.data ?? undefined;
   const unpaidTotal = bills.data?.reduce((total, bill) => total + decimalUnits(bill.total), BigInt(0));
   const empty = summary.data && bills.data?.length === 0 && invoices.data?.length === 0 && reviewCount === 0
     && close.data && close.data.draftJournalEntries === 0 && close.data.unmatchedBankTransactions === 0
@@ -55,7 +54,7 @@ function Dashboard() {
           <WorkspaceMetric label="Bills to pay" icon={ShoppingCart} href="/purchases" value={unpaidTotal === undefined ? '—' : formatUsd(decimalText(unpaidTotal))}
             detail={bills.data ? formatCount(bills.data.length, 'unpaid bill') : bills.loading ? 'Loading…' : 'Unavailable'} />
           <WorkspaceMetric label="Items to review" icon={Inbox} href="/inbox" value={reviewCount === undefined ? '—' : String(reviewCount)}
-            detail={receipts.data ? 'Receipts in your inbox' : receipts.loading ? 'Loading…' : 'Unavailable'} />
+            detail={reviewCount !== undefined ? 'Receipts in your inbox' : receipts.loading ? 'Loading…' : 'Unavailable'} />
         </div>
 
         {empty ? (

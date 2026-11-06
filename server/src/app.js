@@ -1,6 +1,4 @@
 import express from 'express';
-import path from 'path';
-import { fileURLToPath } from 'url';
 import cors from 'cors';
 import dotenv from 'dotenv';
 import cookieParser from 'cookie-parser';
@@ -24,7 +22,6 @@ import { requireAuth } from './middleware/auth.js';
 import { requireWorkspace } from './middleware/workspace.js';
 import { withRequestContext } from './lib/requestContext.js';
 
-const __dirname = path.dirname(fileURLToPath(import.meta.url));
 dotenv.config();
 
 const app = express();
@@ -65,7 +62,6 @@ app.use(
 );
 app.use(express.json());
 app.use(cookieParser());
-app.use('/uploads', express.static(path.join(__dirname, '..', 'uploads')));
 app.use((req, res, next) => withRequestContext({}, () => next()));
 
 const authLimiter = rateLimit({

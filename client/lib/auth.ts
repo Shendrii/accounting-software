@@ -5,7 +5,7 @@ import type { AuthWorkspace, AuthUser } from './api';
 
 const TOKEN_KEY = 'auth_token';
 const USER_KEY = 'auth_user';
-const WORKSPACE_KEY = 'workspace_id';
+export const WORKSPACE_KEY = 'workspace_id';
 const SESSION_CHANGE = 'accountrix:session-change';
 const WORKSPACE_CHANGE = 'accountrix:workspace-change';
 
