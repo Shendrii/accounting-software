@@ -1,9 +1,12 @@
+'use client';
+import { useMoney } from '@/lib/use-money';
 import type { JournalEntry } from '@/lib/api';
-import { decimalUnits, formatUsd } from '@/lib/money';
+import { decimalUnits } from '@/lib/money';
 
 export type PostingLine = { label: string; debit?: string; credit?: string };
 
 export function PostingTable({ lines }: { lines: PostingLine[] }) {
+  const money = useMoney();
   return (
     <div className="overflow-x-auto">
       <table className="w-full text-left text-sm">
@@ -16,8 +19,8 @@ export function PostingTable({ lines }: { lines: PostingLine[] }) {
           {lines.map((line, index) => (
             <tr key={index}>
               <td className="py-2.5 pr-2">{line.label}</td>
-              <td className="whitespace-nowrap py-2.5 pl-2 text-right tabular-nums">{line.debit && decimalUnits(line.debit) ? formatUsd(line.debit) : '—'}</td>
-              <td className="whitespace-nowrap py-2.5 pl-2 text-right tabular-nums">{line.credit && decimalUnits(line.credit) ? formatUsd(line.credit) : '—'}</td>
+              <td className="whitespace-nowrap py-2.5 pl-2 text-right tabular-nums">{line.debit && decimalUnits(line.debit) ? money.format(line.debit) : '—'}</td>
+              <td className="whitespace-nowrap py-2.5 pl-2 text-right tabular-nums">{line.credit && decimalUnits(line.credit) ? money.format(line.credit) : '—'}</td>
             </tr>
           ))}
         </tbody>

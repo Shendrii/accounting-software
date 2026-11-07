@@ -1,9 +1,10 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import React, { useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type JournalEntry } from '@/lib/api';
-import { decimalText, formatUsd, journalTotals, localDay } from '@/lib/money';
+import { decimalText, journalTotals, localDay } from '@/lib/money';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { PostingTable, postedLines } from '@/app/components/PostingTable';
 import { toast } from '@/lib/toast';
@@ -20,6 +21,7 @@ import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import { accountRoles } from '@/lib/account-roles';
 
 export function BookkeepingPage() {
+  const money = useMoney();
   const searchParams = useSearchParams();
   const router = useRouter();
   const requestedTab = searchParams.get('tab');
@@ -403,10 +405,7 @@ export function BookkeepingPage() {
                                   {type}
                                 </td>
                                 <td className="px-6 py-3 text-right font-medium text-zinc-900 dark:text-zinc-50">
-                                  ${total.toLocaleString('en-US', {
-                                    minimumFractionDigits: 2,
-                                    maximumFractionDigits: 2,
-                                  })}
+                                  {money.format(total)}
                                 </td>
                                 <td className="px-6 py-3"></td>
                                 <td className="px-6 py-3"></td>
@@ -433,10 +432,7 @@ export function BookkeepingPage() {
                                     <p className="mt-1 text-xs text-blue-800">{accountRoles.find(role => role.value === account.role)?.label ?? 'Review account role'}</p>
                                   </td>
                                   <td className="px-6 py-4 text-right text-sm text-zinc-900 dark:text-zinc-50">
-                                    ${parseFloat(account.balance).toLocaleString('en-US', {
-                                      minimumFractionDigits: 2,
-                                      maximumFractionDigits: 2,
-                                    })}
+                                    {money.format(account.balance)}
                                   </td>
                                   <td className="px-6 py-4">
                                     <span
@@ -485,10 +481,7 @@ export function BookkeepingPage() {
                               <p className="mt-1 text-xs text-blue-800">{accountRoles.find(role => role.value === account.role)?.label ?? 'Review account role'}</p>
                             </td>
                             <td className="px-6 py-4 text-right text-sm text-zinc-900 dark:text-zinc-50">
-                              ${parseFloat(account.balance).toLocaleString('en-US', {
-                                minimumFractionDigits: 2,
-                                maximumFractionDigits: 2,
-                              })}
+                              {money.format(account.balance)}
                             </td>
                             <td className="px-6 py-4">
                               <span
@@ -784,7 +777,7 @@ export function BookkeepingPage() {
               required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
             <label className="grid gap-1 text-sm font-medium">Reason<input name="reason" required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
           </>}
-          <p className="text-sm text-zinc-600">Total debits and credits · {formatUsd(decimalText(journalTotals(journalAction.entry.journalLines).totalDebits))} each</p>
+          <p className="text-sm text-zinc-600">Total debits and credits · {money.format(decimalText(journalTotals(journalAction.entry.journalLines).totalDebits))} each</p>
           {journalError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{journalError}</p>}
           <div className="flex justify-end gap-2">
             <button type="button" disabled={journalBusy} onClick={() => setJournalAction(null)} className="min-h-11 rounded-lg border border-zinc-200 px-4 text-sm">Cancel</button>

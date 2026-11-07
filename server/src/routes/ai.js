@@ -44,7 +44,7 @@ router.post('/chat', async (req, res) => {
       cashLedgerAccounts(prisma, req.workspace.id),
       prisma.invoice.findMany({
         where: { status: 'SENT', dueDate: { lt: now } },
-        select: { status: true, total: true, payments: { select: { amount: true } } },
+        select: { status: true, total: true, payments: { select: { amount: true, reversalEntryId: true } } },
       }),
       prisma.bill.aggregate({
         where: { status: 'RECEIVED', dueDate: { lt: now } },
@@ -136,7 +136,7 @@ router.post('/chat', async (req, res) => {
     const lastMonthRev = parseFloat((lastMonthRevAgg._sum.credit ?? 0).toString());
     const lastMonthExp = parseFloat((lastMonthExpAgg._sum.debit ?? 0).toString());
 
-    const fmt = (n) => `$${Number(n).toLocaleString('en-US', { minimumFractionDigits: 2, maximumFractionDigits: 2 })}`;
+    const fmt = (n) => new Intl.NumberFormat('en-US', { style: 'currency', currency: req.workspace.currency }).format(Number(n));
 
     const tab = typeof requestedContext?.tab === 'string' ? requestedContext.tab.slice(0, 40) : 'overview';
     const item = typeof requestedContext?.item === 'string' ? requestedContext.item.slice(0, 200) : '';

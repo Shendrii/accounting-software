@@ -6,8 +6,13 @@ import {
 } from '../lib/ledger.js';
 
 import { accountActivity } from '../lib/accountActivity.js';
+import { agingReport } from '../lib/aging.js';
 
 const router = express.Router();
+router.get('/aging', async (req, res) => {
+  try { res.json(await agingReport(prisma, req.workspace, req.query)); }
+  catch (error) { sendLedgerError(res, error, 'The aging report could not load.'); }
+});
 
 router.get('/account-activity', async (req, res) => {
   try { res.json(await accountActivity(prisma, req.workspace.id, req.query)); }
@@ -113,7 +118,7 @@ router.get('/trial-balance', async (req, res) => {
       debitTotal: decimalSum(rows.map(row => row.debitTotal)).toFixed(2),
       creditTotal: decimalSum(rows.map(row => row.creditTotal)).toFixed(2),
     };
-    res.json({ asOf, currency: 'USD', basis: 'Accrual', rows, totals,
+    res.json({ asOf, currency: req.workspace.currency, basis: 'Accrual', rows, totals,
       difference: decimalSum(rows.map(row => row.debitTotal)).minus(decimalSum(rows.map(row => row.creditTotal))).toFixed(2) });
   } catch (error) {
     sendLedgerError(res, error, 'Failed to generate the trial balance.');

@@ -18,6 +18,7 @@ import aiRouter from './routes/ai.js';
 import recurringRouter from './routes/recurring.js';
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
+import workspaceSettingsRouter from './routes/workspaceSettings.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireWorkspace } from './middleware/workspace.js';
 import { withRequestContext } from './lib/requestContext.js';
@@ -60,6 +61,7 @@ app.use(
     },
   })
 );
+app.use('/api/workspace-settings/opening-balances', express.json({ limit: '4mb' }));
 app.use(express.json());
 app.use(cookieParser());
 app.use((req, res, next) => withRequestContext({}, () => next()));
@@ -83,6 +85,7 @@ app.get('/api/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/workspaces', requireAuth, workspacesRouter);
+app.use('/api/workspace-settings', requireWorkspace, workspaceSettingsRouter);
 app.use('/api/accounts', requireWorkspace, accountsRouter);
 app.use('/api/journal-entries', requireWorkspace, journalEntriesRouter);
 app.use('/api/receipts', requireWorkspace, receiptsRouter);
@@ -99,6 +102,7 @@ app.use('/api/recurring', requireWorkspace, recurringRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
+  if (err.type === 'entity.too.large') return res.status(413).json({ error: 'This request is too large. Use CSV files under 1 MB each.' });
   console.error(err.stack);
   res.status(500).json({ 
     error: 'Something went wrong!',

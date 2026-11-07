@@ -26,6 +26,7 @@ router.get('/', async (req, res) => {
         id: m.workspace.id,
         name: m.workspace.name,
         type: m.workspace.type,
+        currency: m.workspace.currency, country: m.workspace.country, setupCompletedAt: m.workspace.setupCompletedAt,
         role: m.role,
         ownerUserId: m.workspace.ownerUserId,
       }))

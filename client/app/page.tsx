@@ -1,16 +1,18 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import Link from 'next/link';
 import { ArrowUpRight, BookOpenCheck, Inbox, Landmark, Plus, ReceiptText, ShoppingCart, Wallet } from 'lucide-react';
 import { fetchDashboard } from '@/lib/api';
 import { useIsAuthenticated } from '@/lib/auth';
-import { decimalUnits, formatUsd } from '@/lib/money';
+import { decimalUnits } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { MarketingLanding } from '@/app/components/MarketingLanding';
 import { CloseProgress, InvoiceActivity, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
 
 function Dashboard() {
+  const money = useMoney();
   const summary = useWorkspaceData(fetchDashboard);
   const dashboard = summary.data;
   const close = dashboard?.closeChecklist;
@@ -36,10 +38,10 @@ function Dashboard() {
         </WorkspaceNotice>}
 
         <div className="grid grid-cols-2 gap-3 xl:grid-cols-4">
-          <WorkspaceMetric label="Cash position" icon={Wallet} href="/banking" value={summary.data ? formatUsd(summary.data.cashBalance) : '—'} detail={summary.loading ? 'Loading…' : summary.error ? 'Unavailable' : 'Posted cash accounts'} />
-          <WorkspaceMetric label="Outstanding invoices" icon={ReceiptText} href="/sales" value={summary.data ? formatUsd(summary.data.outstandingInvoicesTotal) : '—'}
+          <WorkspaceMetric label="Cash position" icon={Wallet} href="/banking" value={summary.data ? money.format(summary.data.cashBalance) : '—'} detail={summary.loading ? 'Loading…' : summary.error ? 'Unavailable' : 'Posted cash accounts'} />
+          <WorkspaceMetric label="Outstanding invoices" icon={ReceiptText} href="/sales" value={summary.data ? money.format(summary.data.outstandingInvoicesTotal) : '—'}
             detail={summary.data ? formatCount(summary.data.outstandingInvoicesCount, 'open invoice') : summary.loading ? 'Loading…' : 'Unavailable'} />
-          <WorkspaceMetric label="Bills to pay" icon={ShoppingCart} href="/purchases" value={purchases ? formatUsd(purchases.openBalance) : '—'}
+          <WorkspaceMetric label="Bills to pay" icon={ShoppingCart} href="/purchases" value={purchases ? money.format(purchases.openBalance) : '—'}
             detail={purchases ? formatCount(purchases.openCount, 'unpaid bill') : summary.loading ? 'Loading…' : 'Unavailable'} />
           <WorkspaceMetric label="Items to review" icon={Inbox} href="/purchases/documents?status=PENDING" value={reviewCount === undefined ? '—' : String(reviewCount)}
             detail={reviewCount !== undefined ? 'Receipts in your inbox' : summary.loading ? 'Loading…' : 'Unavailable'} />

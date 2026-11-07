@@ -1,4 +1,5 @@
 import express from 'express';
+import { reversePaymentHandler } from '../lib/paymentCorrection.js';
 import prisma from '../db/prisma.js';
 import { generateInvoicePdf } from '../lib/generateInvoicePdf.js';
 import { isSmtpConfigured, sendInvoiceEmail } from '../lib/sendEmail.js';
@@ -20,7 +21,7 @@ const detail = {
   lines: { include: { account: { select: accountFields } } },
   journalEntry: true,
   postingEntry: { include: journalDetails },
-  payments: { include: { journalEntry: { include: journalDetails } }, orderBy: { journalEntry: { date: 'asc' } } },
+  payments: { include: { reversalEntry: true, journalEntry: { include: journalDetails } }, orderBy: { journalEntry: { date: 'asc' } } },
 };
 
 const result = invoice => ({ ...invoice, ...invoiceAmounts(invoice) });
@@ -92,7 +93,7 @@ router.get('/', async (req, res) => {
     }
     const invoices = await prisma.invoice.findMany({
       where,
-      include: { customer: { select: { id: true, name: true } }, payments: { select: { amount: true } } },
+      include: { customer: { select: { id: true, name: true } }, payments: { select: { amount: true, reversalEntryId: true } } },
       orderBy: { date: 'desc' },
     });
     res.json(invoices.map(({ payments, ...invoice }) => ({ ...invoice, ...invoiceAmounts({ ...invoice, payments }) })));
@@ -247,6 +248,7 @@ router.post('/:id/send', async (req, res) => {
     const invoice = await ledgerTransaction(async tx => {
       const existing = await getInvoice(tx, where);
       if (existing.status === 'VOID') throw new LedgerError('A void invoice cannot be sent.', 409);
+      if (existing.isOpeningBalance) throw new LedgerError('An opening balance is not a new invoice. Download its opening statement instead.', 409);
       return tx.invoice.update({
         where,
         data: { emailSentAt: existing.emailSentAt ?? new Date(), ...(existing.status === 'DRAFT' && { status: 'SENT' }) },
@@ -325,7 +327,8 @@ router.post('/:id/void', async (req, res) => {
     const invoice = await ledgerTransaction(async tx => {
       const existing = await getInvoice(tx, where);
       if (existing.status === 'VOID') return existing;
-      if (existing.status === 'PAID' || existing.payments.length || existing.journalEntryId) {
+      if (existing.isOpeningBalance) throw new LedgerError('Finalized opening documents cannot be voided. Their original balances remain part of the opening proof.', 409);
+      if (existing.status === 'PAID' || existing.payments.some(payment => !payment.reversalEntryId) || existing.journalEntryId) {
         throw new LedgerError('An invoice with a recorded payment cannot be voided.', 409);
       }
       if (existing.postingEntry) {
@@ -371,6 +374,7 @@ router.get('/:id/pdf', async (req, res) => {
       where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
+        payments: { select: { amount: true, reversalEntryId: true } },
         lines: { include: { account: { select: { name: true } } } },
       },
     });
@@ -399,10 +403,12 @@ router.post('/:id/send-pdf', async (req, res) => {
       where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
+        payments: { select: { amount: true, reversalEntryId: true } },
         lines: { include: { account: { select: { name: true } } } },
       },
     });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
+    if (invoice.isOpeningBalance) return res.status(409).json({ error: 'An opening balance is not a new invoice. Download its opening statement instead.' });
     if (invoice.status === 'VOID') return res.status(409).json({ error: 'A void invoice cannot be sent.' });
 
     const email = req.body.email || invoice.customer?.email;
@@ -429,5 +435,7 @@ router.post('/:id/send-pdf', async (req, res) => {
     res.status(500).json({ error: error.message || 'Failed to send invoice email' });
   }
 });
+
+router.post('/:id/payments/:paymentId/reverse', reversePaymentHandler('invoice', getInvoice, result));
 
 export default router;

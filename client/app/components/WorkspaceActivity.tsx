@@ -1,6 +1,8 @@
+'use client';
+import { useMoney } from '@/lib/use-money';
 import Link from 'next/link';
 import type { CloseChecklist, Bill, Invoice } from '@/lib/api';
-import { formatUsd, decimalUnits, localDay } from '@/lib/money';
+import { decimalUnits, localDay } from '@/lib/money';
 import { cn } from '@/lib/utils';
 
 export const closeItems = [
@@ -56,6 +58,7 @@ export function WorkspaceStatus({ children }: { children: string }) {
 }
 
 export function InvoiceActivity({ invoices }: { invoices: import('@/lib/api').RecentInvoice[] }) {
+  const money = useMoney();
   return (
     <div className="workspace-table-wrap">
       <table className="workspace-table">
@@ -65,8 +68,8 @@ export function InvoiceActivity({ invoices }: { invoices: import('@/lib/api').Re
             <td><Link href={`/sales/invoices/${invoice.id}`} className="font-semibold whitespace-nowrap text-blue-800 hover:underline">{invoice.invoiceNo}</Link></td>
             <td>{invoice.customer?.name ?? '—'}</td>
             <td><WorkspaceStatus>{invoiceStatus(invoice)}</WorkspaceStatus></td>
-            <td className="workspace-number">{formatUsd(invoice.total)}</td>
-            <td className="workspace-number">{invoice.status === 'DRAFT' || invoice.status === 'VOID' ? '—' : formatUsd(invoice.balanceDue)}</td>
+            <td className="workspace-number">{money.format(invoice.total)}</td>
+            <td className="workspace-number">{invoice.status === 'DRAFT' || invoice.status === 'VOID' ? '—' : money.format(invoice.balanceDue)}</td>
           </tr>
         ))}</tbody>
       </table>

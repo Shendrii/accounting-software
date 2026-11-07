@@ -31,7 +31,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const customer = await prisma.customer.findUnique({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         invoices: { orderBy: { date: 'desc' }, take: 10 },
       },
@@ -61,7 +61,7 @@ router.put('/:id', async (req, res) => {
   try {
     const { name, email, phone, address, city, country, isActive } = req.body;
     const customer = await prisma.customer.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       data: { name, email, phone, address, city, country, isActive },
     });
     res.json(customer);
@@ -81,7 +81,7 @@ router.delete('/:id', async (req, res) => {
     }
 
     await prisma.customer.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       data: { isActive: false },
     });
     res.status(204).send();

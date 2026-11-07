@@ -1,4 +1,5 @@
 'use client';
+import Link from 'next/link';
 
 import { useCallback, useState, type FormEvent } from 'react';
 import { ArrowRight, Copy, Mail, Plus, ScanText, UserRound, UserRoundPlus } from 'lucide-react';
@@ -18,6 +19,7 @@ export default function SettingsPage() {
     <div className="workspace-page">
       <div className="workspace-content space-y-5">
         <WorkspaceHeading section="Admin" title="Settings" description="Manage your account, workspaces, and integrations." />
+        <WorkspacePanel title="Business profile and opening books" description={active ? 'Country, currency and bookkeeping setup for ' + active.name + '.' : 'Choose a workspace to configure its books.'}><div className="flex flex-wrap gap-3 p-4"><Link href="/settings/setup" className="workspace-primary">Business profile</Link><Link href="/settings/opening-balances" className="workspace-button">Opening balances</Link></div></WorkspacePanel>
         <section id="workspaces" aria-labelledby="workspace-settings-heading" className="scroll-mt-4 space-y-3">
           <div>
             <h2 id="workspace-settings-heading" className="text-xl font-semibold tracking-tight">Workspaces and team</h2>

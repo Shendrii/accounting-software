@@ -1,3 +1,4 @@
+import { getRequestContext } from './requestContext.js';
 import { Prisma } from '@prisma/client';
 import { Decimal, LedgerError, nextDay } from './ledger.js';
 import { pageOptions } from './workbenchQueries.js';
@@ -54,7 +55,7 @@ export async function accountActivity(prisma, workspaceId, query) {
     }
     const entriesById = new Map(entries.map(entry => [entry.id, entry]));
     const fixed = value => new Decimal(value).toFixed(2);
-    return { account, startDate: options.start, endDate: options.end, currency: 'USD', basis: 'Accrual',
+    return { account, startDate: options.start, endDate: options.end, currency: getRequestContext().currency ?? 'USD', basis: 'Accrual',
       opening: fixed(result.opening), debit: fixed(result.debit), credit: fixed(result.credit), closing: fixed(result.closing),
       items: result.items.map(row => { const entry = entriesById.get(row.entryId); return { ...row, debit: fixed(row.debit), credit: fixed(row.credit), balance: fixed(row.balance), sources: sources(entry?.reversalOf ?? entry) }; }),
       total: result.total, page: options.page, pageSize: options.pageSize, totalPages: Math.max(1, Math.ceil(result.total / options.pageSize)) };

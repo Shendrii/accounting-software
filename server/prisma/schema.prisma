@@ -57,6 +57,10 @@ model JournalEntry {
   reversalOfId       String?       @unique
   reversalOf         JournalEntry? @relation("JournalReversal", fields: [reversalOfId], references: [id], onDelete: Restrict)
   reversal           JournalEntry? @relation("JournalReversal")
+  openingBatchId     String?
+  openingBatch       OpeningBalanceBatch? @relation(fields: [openingBatchId], references: [id], onDelete: Restrict)
+  invoicePaymentReversal InvoicePayment? @relation("InvoicePaymentReversal")
+  billPaymentReversal BillPayment? @relation("BillPaymentReversal")
 
   @@index([workspaceId, status, date])
 }
@@ -157,6 +161,7 @@ model Invoice {
   postingEntryId String?       @unique
   postingEntry   JournalEntry? @relation("InvoicePosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
   emailSentAt    DateTime?
+  isOpeningBalance Boolean      @default(false)
   payments       InvoicePayment[]
   lines          InvoiceLine[]
   createdAt      DateTime      @default(now())
@@ -175,6 +180,12 @@ model InvoicePayment {
   journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
   requestId      String
   amount         Decimal      @db.Decimal(15, 2)
+  reversalEntryId String?      @unique
+  reversalEntry  JournalEntry? @relation("InvoicePaymentReversal", fields: [reversalEntryId], references: [id], onDelete: Restrict)
+  reversalRequestId String?
+  reversalReason String?
+  reversedById   String?
+  reversedAt     DateTime?
 
   @@unique([invoiceId, requestId])
 }
@@ -210,6 +221,7 @@ model Bill {
   journalEntryId     String?       @unique
   journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
   postingEntryId     String?       @unique
+  isOpeningBalance   Boolean       @default(false)
   postingEntry       JournalEntry? @relation("BillPosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
   payments           BillPayment[]
   lines              BillLine[]
@@ -231,6 +243,12 @@ model BillPayment {
   journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Restrict)
   requestId      String
   amount         Decimal      @db.Decimal(15, 2)
+  reversalEntryId String?      @unique
+  reversalEntry  JournalEntry? @relation("BillPaymentReversal", fields: [reversalEntryId], references: [id], onDelete: Restrict)
+  reversalRequestId String?
+  reversalReason String?
+  reversedById   String?
+  reversedAt     DateTime?
 
   @@unique([billId, requestId])
 }
@@ -347,6 +365,16 @@ model Workspace {
   slug             String            @unique
   type             WorkspaceType     @default(PERSONAL)
   ownerUserId      String
+  country          String?           @db.VarChar(2)
+  currency         String            @default("USD") @db.VarChar(3)
+  legalName        String?
+  entityType       String?
+  region           String?
+  fiscalYearStartMonth Int           @default(1)
+  booksStartDate   DateTime?         @db.Date
+  accountingBasis String            @default("ACCRUAL")
+  taxSettings      Json?
+  setupCompletedAt DateTime?
   ownerUser        User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -361,6 +389,21 @@ model Workspace {
   bills            Bill[]
   bankTransactions BankTransaction[]
   reconciliations  Reconciliation[]
+  openingBalance   OpeningBalanceBatch?
+}
+
+model OpeningBalanceBatch {
+  id          String      @id @default(cuid())
+  workspaceId String      @unique
+  workspace   Workspace   @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  requestId   String
+  fingerprint String
+  asOfDate    DateTime    @db.Date
+  currency    String      @db.VarChar(3)
+  createdById String
+  snapshot    Json
+  createdAt   DateTime    @default(now())
+  entries     JournalEntry[]
 }
 
 model WorkspaceMember {

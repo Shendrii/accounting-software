@@ -25,7 +25,7 @@ export default function SignupPage() {
       const workspaces = res.workspace ? [res.workspace] : (res.workspaces ?? []);
       setSession(res.token, res.user, workspaces);
       if (workspaces[0]) setWorkspaceId(workspaces[0].id);
-      router.replace('/');
+      router.replace('/settings/setup');
     } catch (e: unknown) {
       setError(e instanceof Error ? e.message : 'Signup failed');
     } finally {

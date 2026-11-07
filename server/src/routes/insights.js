@@ -1,3 +1,4 @@
+import { getRequestContext } from '../lib/requestContext.js';
 import express from 'express';
 import prisma from '../db/prisma.js';
 import { cashLedgerAccounts, decimalSum } from '../lib/ledger.js';
@@ -6,7 +7,7 @@ import { invoiceAmounts } from '../lib/invoiceLedger.js';
 const router = express.Router();
 
 function fmt(n) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: getRequestContext().currency ?? 'USD' }).format(n);
 }
 
 /**
@@ -22,7 +23,7 @@ router.get('/', async (req, res) => {
     // ── 1. Overdue invoices ────────────────────────────────────────────────
     const overdueInvoices = await prisma.invoice.findMany({
       where: { status: 'SENT', dueDate: { lt: now } },
-      select: { total: true, status: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amount: true } } },
+      select: { total: true, status: true, dueDate: true, customer: { select: { name: true } }, payments: { select: { amount: true, reversalEntryId: true } } },
     });
     if (overdueInvoices.length > 0) {
       const total = decimalSum(overdueInvoices.map(invoice => invoiceAmounts(invoice).balanceDue));

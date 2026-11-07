@@ -1,4 +1,5 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,6 +21,7 @@ const emptyLine = (): DocumentLine => ({
 });
 
 export function NewInvoicePage() {
+  const money = useMoney();
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -168,13 +170,13 @@ export function NewInvoicePage() {
                 </div>
               </div>
             </div>
-              <WorkspacePanel title="Totals" description="USD">
+              <WorkspacePanel title="Totals" description={money.currency}>
                 <div className="space-y-2 p-4 text-sm sm:p-5">
-                  <div className="flex justify-between gap-2"><span>Subtotal</span><strong className="tabular-nums">${decimalText(subtotal)}</strong></div>
+                  <div className="flex justify-between gap-2"><span>Subtotal</span><strong className="tabular-nums">{money.format(decimalText(subtotal))}</strong></div>
                   <label className="flex items-center justify-between gap-3">Tax
                     <input type="number" min="0" step="0.01" value={tax} onChange={event => setTax(event.target.value)} className="workspace-field max-w-28 text-right" />
                   </label>
-                  <div className="flex justify-between gap-2 rounded-lg bg-blue-50 p-3 font-semibold"><span>Total</span><span className="tabular-nums">${decimalText(total)}</span></div>
+                  <div className="flex justify-between gap-2 rounded-lg bg-blue-50 p-3 font-semibold"><span>Total</span><span className="tabular-nums">{money.format(decimalText(total))}</span></div>
                 </div>
               </WorkspacePanel>
           </div>

@@ -25,8 +25,11 @@ A signed-in user selects an active workspace and works on that workspace's books
 - Receipt review confirms extracted details before posting or attaching evidence to bills.
 - Reconciliation includes statement controls, transaction matching, outstanding items, and a saved proof.
 - Financial reports derive from posted journal lines.
+- Client workspace setup supports Philippine and US business profiles, PHP or USD books, entity type, fiscal year, and confirmed registration preferences. Tax calculation and filing are not yet provided. Each workspace uses one accrual ledger and one base currency.
+- Reviewed opening balances include a trial balance and individual unpaid customer/supplier documents. The import posts atomically once, proves AR/AP support, and avoids duplicating revenue or expenses. A new business can confirm zero balances.
+- Owner/admin payment corrections preserve the original recorded payment and create a dated reversal with a reason. Historical AR/AP aging reconstructs open balances at a cutoff, shows party and document aging, and compares each control account with the ledger.
 - Keep the existing Vercel, Render, and Neon free plans. Lightweight pages and restrained asset sizes matter; idle backend cold starts remain possible.
-- The user selected Prism and authorized workspace implementation. This release adds bounded searchable worklists, saved views, read-only record previews, protected document review, and report drill-down into posted ledger entries and source records. Larger approvals, period locks, aging, and credits remain outside this batch. Marketing and authentication retain their existing surfaces.
+- The user selected Prism and authorized workspace implementation. Bounded searchable worklists, saved views, read-only record previews, protected document review, and report drill-down remain available. Larger approvals, general period locks, credit notes, refunds and tax filing remain outside this batch. Marketing and authentication retain their existing surfaces.
 - Cross-client financial rollups, bank connections, subscription pricing, and a claimed unique market position are not established product facts.
 
 ## Brand Commitments

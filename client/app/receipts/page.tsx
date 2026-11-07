@@ -1,11 +1,12 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { Check, Loader2, Upload, X } from 'lucide-react';
 import { approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBillPage, getReceipt, getReceiptPage, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
 import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
-import { decimalUnits, formatUsd } from '@/lib/money';
+import { decimalUnits } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import AccountingDialog from '@/app/components/AccountingDialog';
@@ -42,6 +43,7 @@ async function loadLookups() {
 }
 
 function DocumentsContent() {
+  const money = useMoney();
   const state = useWorklist(); const { params, update } = state;
   const selectedId = params.receipt || null;
   const guard = useRef({ dirty: false, busy: false });
@@ -100,11 +102,11 @@ function DocumentsContent() {
     {!selectedId && <WorkspacePanel title="Document queue" description={queue.loading ? 'Loading…' : (queue.data?.total ?? 0) + ' documents'}>
       {queue.loading || !receipts.length ? <p className="p-4 text-sm text-slate-600" role="status">{queue.loading ? 'Loading receipts…' : 'No receipts in this view.'}</p> :
         <div className="workspace-table-wrap"><table className={'workspace-table workbench-table ' + (params.density === 'compact' ? 'workbench-compact' : '')}>
-          <thead><tr><th scope="col">Document</th><th scope="col">Document date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Total (USD)</th></tr></thead>
+          <thead><tr><th scope="col">Document</th><th scope="col">Document date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Total ({money.currency})</th></tr></thead>
           <tbody>{receipts.map(receipt => <tr key={receipt.id}>
             <td data-label="Document"><button type="button" className="min-h-11 text-left font-semibold text-blue-800 hover:underline" aria-expanded={selectedId === receipt.id} onClick={() => choose(receipt.id)}>{receipt.extractedData.vendor || 'Unnamed receipt'}</button><p className="text-xs text-slate-600">{receipt.extractedData.invoiceNumber}</p></td>
             <td data-label="Document date">{validDate(receipt.extractedData.invoiceDate || receipt.extractedData.date || '') ? receipt.extractedData.invoiceDate || receipt.extractedData.date : 'Confirm date'}</td><td data-label="Status"><WorkspaceStatus>{status(receipt)}</WorkspaceStatus></td>
-            <td data-label="Total" className="workspace-number">{formatUsd(receipt.extractedData.total ?? receipt.extractedData.amount ?? 0)}</td>
+            <td data-label="Total" className="workspace-number">{money.format(receipt.extractedData.total ?? receipt.extractedData.amount ?? 0)}</td>
           </tr>)}</tbody>
         </table></div>}
       <WorklistPagination data={queue.data} loading={queue.loading} onPage={page => leave(() => update({ page: String(page), receipt: '' }, false))} onPageSize={pageSize => leave(() => update({ pageSize, receipt: '' }))} />
@@ -122,6 +124,7 @@ function DocumentsContent() {
 }
 
 function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReviewState }: { receipt: Receipt; accounts: Account[]; vendors: Vendor[]; bills: Bill[]; onComplete: (receipt: Receipt, text: string) => void; onReviewState: (dirty: boolean, busy: boolean) => void }) {
+  const money = useMoney();
   const original = receipt.extractedData;
   const [data, setData] = useState(() => ({
     vendor: original.vendor ?? '', invoiceNumber: original.invoiceNumber ?? '',
@@ -187,9 +190,9 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
       <div className="flex flex-wrap items-center justify-between gap-2"><WorkspaceStatus>{status(receipt)}</WorkspaceStatus>
         {receipt.billId && <Link className="workspace-text-action" href={'/purchases/bills/' + receipt.billId}>Open bill</Link>}
         {receipt.journalEntryId && <Link className="workspace-text-action" href="/ledger?tab=journal">View journal entries</Link>}</div>
-      <div><h3 className="font-semibold">Check the source details</h3><p className="mt-1 text-xs text-slate-600">Amounts are in USD. Extracted payment details are evidence, not a recorded payment.</p></div>
+      <div><h3 className="font-semibold">Check the source details</h3><p className="mt-1 text-xs text-slate-600">Amounts are in {money.currency}. Extracted payment details are evidence, not a recorded payment.</p></div>
       <div className="grid gap-3 sm:grid-cols-2">{field('vendor', 'Vendor shown on document')}{field('invoiceNumber', 'Supplier invoice / receipt number')}
-        {field('invoiceDate', 'Confirmed document date', 'date', true)}{field('total', 'Document total (USD)', 'number', action !== 'attach')}
+        {field('invoiceDate', 'Confirmed document date', 'date', true)}{field('total', 'Document total (' + money.currency + ')', 'number', action !== 'attach')}
         {field('amountPaid', 'Paid amount shown on document', 'number')}{field('balanceDue', 'Outstanding amount shown on document', 'number')}</div>
       {issues.items && <p role="alert" className="text-sm text-red-800">{issues.items}</p>}
       <details className="rounded-lg border border-slate-200 p-3"><summary className="min-h-8 cursor-pointer text-sm font-semibold">Check line items, tax, and tip</summary>
@@ -217,14 +220,14 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
         {action === 'expense' && <>
           {partial && <WorkspaceNotice title="This document has an unpaid balance">Choose the bill workflow, or correct the extracted payment details using the source document.</WorkspaceNotice>}
           <label className="grid gap-1 text-sm font-medium">Paid from<select className="workspace-field" required value={paymentId} disabled={busy} onChange={event => { setPaymentId(event.target.value); setPaidInFull(false); }}><option value="">Select cash, bank, or credit card…</option>{accounts.filter(account => isPaymentAccount(account, true)).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>
-          <label className="flex min-h-11 items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm"><input type="checkbox" required checked={paidInFull} disabled={busy || partial} onChange={event => setPaidInFull(event.target.checked)} />I confirm {formatUsd(data.total)} was paid in full from this account.</label>
+          <label className="flex min-h-11 items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm"><input type="checkbox" required checked={paidInFull} disabled={busy || partial} onChange={event => setPaidInFull(event.target.checked)} />I confirm {money.format(data.total)} was paid in full from this account.</label>
         </>}
         {action === 'bill' && <>
           <label className="grid gap-1 text-sm font-medium">Bill due date<input className="workspace-field" type="date" min={data.invoiceDate} value={dueDate} required disabled={busy} onChange={event => setDueDate(event.target.value)} /></label>
-          <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-950">Creates a draft for the full {formatUsd(data.total)}. Cash and the ledger are unchanged until you post the bill and record its actual payments.</p>
+          <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-950">Creates a draft for the full {money.format(data.total)}. Cash and the ledger are unchanged until you post the bill and record its actual payments.</p>
           {duplicate && <WorkspaceNotice title="This supplier reference already exists">Choose Attach to an existing bill. <Link className="font-semibold underline" href={'/purchases/bills/' + duplicate.id}>Open {duplicate.billNo}</Link></WorkspaceNotice>}
         </>}
-        {action === 'attach' && <><label className="grid gap-1 text-sm font-medium">Find a bill<input className="workspace-field" value={billSearch} onChange={event => setBillSearch(event.target.value)} placeholder="Bill number, supplier reference, or vendor…" /></label>{matchingBills.error && <WorkspaceNotice title="Bills could not load" onRetry={matchingBills.retry} />}<p className="text-xs text-slate-600">{matchingBills.loading ? 'Finding bills…' : (matchingBills.data?.total ?? bills.length) + ' matching bills. Showing up to 50; refine your search if needed.'}</p><label className="grid gap-1 text-sm font-medium">Existing bill<select className="workspace-field" value={billId} required disabled={busy} onChange={event => setBillId(event.target.value)}><option value="">Select existing bill…</option>{availableBills.filter(bill => !vendorId || bill.vendorId === vendorId).map(bill => <option key={bill.id} value={bill.id}>{bill.billNo} · {bill.vendor?.name} · {formatUsd(bill.total)}</option>)}</select></label></>}
+        {action === 'attach' && <><label className="grid gap-1 text-sm font-medium">Find a bill<input className="workspace-field" value={billSearch} onChange={event => setBillSearch(event.target.value)} placeholder="Bill number, supplier reference, or vendor…" /></label>{matchingBills.error && <WorkspaceNotice title="Bills could not load" onRetry={matchingBills.retry} />}<p className="text-xs text-slate-600">{matchingBills.loading ? 'Finding bills…' : (matchingBills.data?.total ?? bills.length) + ' matching bills. Showing up to 50; refine your search if needed.'}</p><label className="grid gap-1 text-sm font-medium">Existing bill<select className="workspace-field" value={billId} required disabled={busy} onChange={event => setBillId(event.target.value)}><option value="">Select existing bill…</option>{availableBills.filter(bill => !vendorId || bill.vendorId === vendorId).map(bill => <option key={bill.id} value={bill.id}>{bill.billNo} · {bill.vendor?.name} · {money.format(bill.total)}</option>)}</select></label></>}
         <p className="text-xs text-slate-600">Configure account roles in <Link href="/ledger?tab=accounts" className="font-semibold text-blue-800 underline">Chart of accounts</Link>. Need a vendor? <Link href="/purchases/vendors" className="font-semibold text-blue-800 underline">Manage vendors</Link>.</p>
         {error && <WorkspaceNotice title="Review could not finish">{error}</WorkspaceNotice>}
         {saved && <p role="status" className="text-sm text-emerald-800">Details saved. Nothing has been posted.</p>}

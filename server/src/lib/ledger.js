@@ -118,7 +118,9 @@ export async function updateBalanceCache(tx, workspaceId, lines, accounts) {
   }
 }
 
-export async function checkBankPostingDate(tx, workspaceId, date, accounts) {
+export async function checkBankPostingDate(tx, workspaceId, date, accounts, opening = false) {
+  const workspace = await tx.workspace.findUnique({ where: { id: workspaceId }, select: { booksStartDate: true } });
+  if (!opening && workspace?.booksStartDate && date < workspace.booksStartDate) throw new LedgerError('The posting date must be on or after the books starting date. Use the opening-balances workflow for brought-forward amounts.');
   const accountIds = [...accounts.values()].filter(account => account.isBankAccount).map(account => account.id);
   if (!accountIds.length) return;
   const through = ledgerDate(date.toISOString());
@@ -135,7 +137,7 @@ export async function checkBankPostingDate(tx, workspaceId, date, accounts) {
 export async function createPosting(tx, workspaceId, { lines: input, ...data }, allowInactive = false) {
   const lines = journalLines(input);
   const accounts = await ledgerAccounts(tx, workspaceId, lines.map(line => line.accountId), allowInactive);
-  await checkBankPostingDate(tx, workspaceId, data.date, accounts);
+  await checkBankPostingDate(tx, workspaceId, data.date, accounts, Boolean(data.openingBatchId));
   const entry = await tx.journalEntry.create({
     data: { ...data, workspaceId, status: 'POSTED', journalLines: { create: lines } },
     include: { journalLines: { include: { account: true } } },

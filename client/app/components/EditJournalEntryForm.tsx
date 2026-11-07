@@ -1,4 +1,5 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { useState, useEffect } from 'react';
 import { updateJournalEntry, getAccounts, type Account, type JournalEntry, type UpdateJournalEntryInput } from '@/lib/api';
@@ -19,6 +20,7 @@ interface JournalLineForm {
 }
 
 export default function EditJournalEntryForm({ entry, onSuccess, onCancel }: EditJournalEntryFormProps) {
+  const money = useMoney();
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [formData, setFormData] = useState({
     date: entry.date.split('T')[0],
@@ -290,20 +292,20 @@ export default function EditJournalEntryForm({ entry, onSuccess, onCancel }: Edi
                 <div className="flex justify-between text-sm">
                   <span className="text-zinc-600 dark:text-zinc-400">Total Debits:</span>
                   <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                    ${decimalText(totalDebits)}
+                    {money.format(decimalText(totalDebits))}
                   </span>
                 </div>
                 <div className="flex justify-between text-sm mt-1">
                   <span className="text-zinc-600 dark:text-zinc-400">Total Credits:</span>
                   <span className="font-medium text-zinc-900 dark:text-zinc-50">
-                    ${decimalText(totalCredits)}
+                    {money.format(decimalText(totalCredits))}
                   </span>
                 </div>
                 {!isBalanced && (
                   <div className="flex justify-between text-sm mt-1">
                     <span className="text-red-600 dark:text-red-400">Difference:</span>
                     <span className="font-medium text-red-600 dark:text-red-400">
-                      ${decimalText(difference)}
+                      {money.format(decimalText(difference))}
                     </span>
                   </div>
                 )}

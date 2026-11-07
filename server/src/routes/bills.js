@@ -1,4 +1,5 @@
 import express from 'express';
+import { reversePaymentHandler } from '../lib/paymentCorrection.js';
 import prisma from '../db/prisma.js';
 import { purchaseSummary, summaryDay } from '../lib/workflowSummaries.js';
 import { checkDates, checkVendor, checkPaidReceiptReference, createDraftBill, draftLines, vendorReference } from '../lib/billDraft.js';
@@ -15,7 +16,7 @@ const posting = { journalLines: { include: { account: { select: { name: true, ty
 const detail = {
   vendor: true, lines: { include: { account: { select: { id: true, name: true, code: true } } } },
   journalEntry: { include: posting }, postingEntry: { include: posting },
-  payments: { include: { journalEntry: { include: posting } }, orderBy: { journalEntry: { date: 'asc' } } },
+  payments: { include: { reversalEntry: true, journalEntry: { include: posting } }, orderBy: { journalEntry: { date: 'asc' } } },
   receipts: { select: { id: true, createdAt: true } },
 };
 
@@ -23,7 +24,7 @@ const billWhere = req => ({ id: req.params.id, workspaceId: req.workspace.id });
 
 function billAmounts(bill) {
   const total = new Decimal(bill.total);
-  const paid = bill.status === 'PAID' && !bill.payments.length ? total : decimalSum(bill.payments.map(item => item.amount));
+  const paid = bill.status === 'PAID' && !bill.payments.length ? total : decimalSum(bill.payments.filter(item => !item.reversalEntryId).map(item => item.amount));
   const balanceDue = bill.status === 'RECEIVED' && bill.postingEntryId ? total.minus(paid).toFixed(2) : '0.00';
   return { ...bill, amountPaid: paid.toFixed(2), balanceDue };
 }
@@ -47,7 +48,7 @@ router.get('/', async (req, res) => {
       if (endDate) where.date.lt = nextDay(endDate);
     }
     const bills = await prisma.bill.findMany({
-      where, include: { vendor: { select: { id: true, name: true } }, payments: { select: { amount: true } } },
+      where, include: { vendor: { select: { id: true, name: true } }, payments: { select: { amount: true, reversalEntryId: true } } },
       orderBy: { date: 'desc' },
     });
     res.json(bills.map(billAmounts));
@@ -205,7 +206,8 @@ router.post('/:id/void', async (req, res) => {
     const bill = await ledgerTransaction(async tx => {
       const current = await getBill(tx, where);
       if (current.status === 'VOID') return current;
-      if (current.status === 'PAID' || current.payments.length) throw new LedgerError('A bill with a recorded payment cannot be voided.', 409);
+      if (current.isOpeningBalance) throw new LedgerError('Finalized opening documents cannot be voided. Their original balances remain part of the opening proof.', 409);
+      if (current.status === 'PAID' || current.payments.some(payment => !payment.reversalEntryId)) throw new LedgerError('A bill with a recorded payment cannot be voided.', 409);
       if (current.status === 'RECEIVED') {
         const entry = current.postingEntry ?? current.journalEntry;
         if (!entry || entry.workspaceId !== where.workspaceId || entry.status !== 'POSTED') throw new LedgerError('The original bill posting could not be verified.', 409);
@@ -233,5 +235,7 @@ router.delete('/:id', async (req, res) => {
     sendLedgerError(res, error, 'Failed to delete the bill.');
   }
 });
+
+router.post('/:id/payments/:paymentId/reverse', reversePaymentHandler('bill', getBill, billAmounts));
 
 export default router;

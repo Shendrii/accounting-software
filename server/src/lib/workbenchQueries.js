@@ -58,7 +58,7 @@ export async function documentPage(client, workspaceId, kind, query) {
     WITH payments AS (
       SELECT p.${paymentKey} AS document_id, SUM(p."amount") AS paid
       FROM ${paymentTable} p JOIN ${table} d ON d."id" = p.${paymentKey}
-      WHERE d."workspaceId" = ${workspaceId} GROUP BY p.${paymentKey}
+      WHERE d."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL GROUP BY p.${paymentKey}
     ), documents AS (
       SELECT d.*, d.${reference} AS reference, c."name" AS "contactName", c."id" AS "contactId", ${paid} AS paid
       FROM ${table} d JOIN ${contactTable} c ON c."id" = d.${contactKey} AND c."workspaceId" = ${workspaceId}

@@ -12,7 +12,7 @@ export async function salesSummary(client, workspaceId, day) {
       SELECT p."invoiceId", SUM(p."amount") AS paid
       FROM "InvoicePayment" p
       JOIN "Invoice" i ON i."id" = p."invoiceId"
-      WHERE i."workspaceId" = ${workspaceId}
+      WHERE i."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL
       GROUP BY p."invoiceId"
     ), documents AS (
       SELECT i."id", i."customerId", i."invoiceNo", i."status", i."postingEntryId", i."date", i."dueDate", i."total", CASE WHEN i."status" = 'PAID' AND i."postingEntryId" IS NULL
@@ -60,7 +60,7 @@ export async function purchaseSummary(client, workspaceId, day) {
       SELECT p."billId", SUM(p."amount") AS paid
       FROM "BillPayment" p
       JOIN "Bill" b ON b."id" = p."billId"
-      WHERE b."workspaceId" = ${workspaceId}
+      WHERE b."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL
       GROUP BY p."billId"
     ), documents AS (
       SELECT b."id", b."vendorId", b."billNo", b."status", b."postingEntryId", b."date", b."dueDate", b."total", COALESCE(p.paid, 0) AS paid,

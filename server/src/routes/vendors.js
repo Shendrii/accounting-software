@@ -25,7 +25,7 @@ router.get('/', async (req, res) => {
 router.get('/:id', async (req, res) => {
   try {
     const vendor = await prisma.vendor.findUnique({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       include: { bills: { orderBy: { date: 'desc' }, take: 10 } },
     });
     if (!vendor) return res.status(404).json({ error: 'Vendor not found' });
@@ -50,7 +50,7 @@ router.put('/:id', async (req, res) => {
   try {
     const { name, email, phone, address, isActive } = req.body;
     const vendor = await prisma.vendor.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       data: { name, email, phone, address, isActive },
     });
     res.json(vendor);
@@ -69,7 +69,7 @@ router.delete('/:id', async (req, res) => {
       return res.status(400).json({ error: 'Cannot delete vendor with received or paid bills' });
     }
     await prisma.vendor.update({
-      where: { id: req.params.id },
+      where: { id: req.params.id, workspaceId: req.workspace.id },
       data: { isActive: false },
     });
     res.status(204).send();

@@ -149,7 +149,7 @@ router.post('/:id/reverse', async (req, res) => {
     const reversal = await ledgerTransaction(async tx => {
       const entry = await requireEntry(tx, where, withSources);
       if (entry.status !== 'POSTED' || entry.reversalOfId) throw new LedgerError('Choose an original posted entry.', 409);
-      if (entry.invoicePosting || entry.invoicePayment || entry.billPosting || entry.billPayment || entry.invoices.length || entry.bills.length || entry.receipt) {
+      if (entry.openingBatchId || entry.invoicePosting || entry.invoicePayment || entry.billPosting || entry.billPayment || entry.invoices.length || entry.bills.length || entry.receipt) {
         throw new LedgerError('Correct this entry from its source transaction.', 409);
       }
       if (entry.reversal) return requireEntry(tx, { id: entry.reversal.id, workspaceId: where.workspaceId });

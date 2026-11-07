@@ -1,4 +1,5 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,6 +21,7 @@ const emptyLine = (): DocumentLine => ({
 });
 
 export function NewBillPage() {
+  const money = useMoney();
   const router = useRouter();
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -175,8 +177,8 @@ export function NewBillPage() {
                 </div>
               </div>
             </div>
-            <WorkspacePanel title="Total" description="USD">
-              <p className="p-4 text-2xl font-semibold tabular-nums sm:p-5">${total.toFixed(2)}</p>
+            <WorkspacePanel title="Total" description={money.currency}>
+              <p className="p-4 text-2xl font-semibold tabular-nums sm:p-5">{money.format(total.toFixed(2))}</p>
             </WorkspacePanel>
           </div>
 

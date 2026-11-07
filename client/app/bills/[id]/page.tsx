@@ -3,6 +3,7 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { PaymentCorrections } from '@/app/components/PaymentCorrections';
 import BackToWorklist from '@/app/components/BackToWorklist';
 import { Loader2 } from 'lucide-react';
 import {
@@ -14,18 +15,17 @@ import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/compone
 import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import AccountingDialog from '@/app/components/AccountingDialog';
+import { useMoney } from '@/lib/use-money';
 import { decimalUnits, localDay } from '@/lib/money';
 import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
 
-function formatCurrency(v: string | number) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
-}
 
 function formatDate(d: string) {
   return new Date(d).toLocaleDateString('en-US', { month: 'long', day: 'numeric', year: 'numeric', timeZone: 'UTC' });
 }
 
 export function BillDetailPage() {
+  const { format: formatCurrency } = useMoney();
   const { id } = useParams<{ id: string }>();
   const [bill, setBill] = useState<Bill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -183,7 +183,7 @@ export function BillDetailPage() {
               </button>
             )}
             {bill.status === 'DRAFT' && <button type="button" className="workspace-button" disabled={actionLoading} onClick={() => setCoding(current => !current)}>Assign line accounts</button>}
-            {decimalUnits(amountPaid) === BigInt(0) && <button
+            {!bill.isOpeningBalance && decimalUnits(amountPaid) === BigInt(0) && <button
               onClick={handleVoid}
               disabled={actionLoading}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
@@ -254,11 +254,7 @@ export function BillDetailPage() {
             <div className="flex justify-between gap-3"><dt>Payments recorded</dt><dd>{formatCurrency(amountPaid)}</dd></div>
             {bill.status !== 'DRAFT' && <div className="flex justify-between gap-3 border-t border-slate-200 pt-2 font-semibold"><dt>Remaining balance</dt><dd>{formatCurrency(balanceDue)}</dd></div>}
           </dl>
-          {!!bill.payments?.length && <ul className="divide-y divide-slate-200 border-t border-slate-200 px-4 text-sm">
-            {bill.payments.map(payment => <li key={payment.id} className="flex justify-between gap-2 py-2">
-              <span>{formatDate(payment.journalEntry.date)}</span><strong>{formatCurrency(payment.amount)}</strong>
-            </li>)}
-          </ul>}
+          <PaymentCorrections kind="bill" documentId={bill.id} payments={bill.payments ?? []} onCorrected={load} />
           {!!bill.receipts?.length && <p className="border-t border-slate-200 p-4 text-sm text-slate-600">
             {bill.receipts.length} attached {bill.receipts.length === 1 ? 'receipt' : 'receipts'} · <Link className="font-semibold text-blue-800 underline" href="/inbox">View receipts</Link>
           </p>}

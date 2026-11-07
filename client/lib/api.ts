@@ -8,6 +8,7 @@
 import { clearSession } from './auth';
 import { isPublicPath } from './public-paths';
 import { localDay } from './money';
+import type { PaymentHistory } from './books-api';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = API_BASE_URL;
@@ -24,7 +25,7 @@ function getWorkspaceId(): string | null {
   return localStorage.getItem('workspace_id');
 }
 
-async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
+export async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<Response> {
   const headers = new Headers(init?.headers ?? {});
   const token = getAuthToken();
   const workspaceId = getWorkspaceId();
@@ -667,7 +668,7 @@ export interface InvoiceLine {
   account?: { id: string; name: string; code: string } | null;
 }
 
-export interface InvoicePayment {
+export interface InvoicePayment extends PaymentHistory {
   id: string;
   amount: string;
   journalEntry: JournalEntry;
@@ -686,6 +687,7 @@ export interface Invoice {
   total: string;
   notes?: string | null;
   journalEntryId?: string | null;
+  isOpeningBalance?: boolean;
   postingEntryId?: string | null;
   postingEntry?: JournalEntry | null;
   emailSentAt?: string | null;
@@ -836,9 +838,10 @@ export interface Bill {
   total: string;
   amountPaid?: string;
   balanceDue?: string;
+  isOpeningBalance?: boolean;
   postingEntryId?: string | null;
   postingEntry?: JournalEntry | null;
-  payments?: { id: string; amount: string; journalEntry: { id: string; date: string } }[];
+  payments?: PaymentHistory[];
   receipts?: { id: string; createdAt: string }[];
   notes?: string | null;
   isRecurring?: boolean;
@@ -1199,6 +1202,9 @@ export interface AuthWorkspace {
   name: string;
   type: 'PERSONAL' | 'TEAM';
   role: 'OWNER' | 'ADMIN' | 'MEMBER';
+  currency?: 'PHP' | 'USD';
+  country?: 'PH' | 'US' | null;
+  setupCompletedAt?: string | null;
 }
 
 export interface AuthResponse {

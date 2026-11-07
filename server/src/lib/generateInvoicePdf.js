@@ -1,3 +1,5 @@
+import { invoiceAmounts } from './invoiceLedger.js';
+import { getRequestContext } from './requestContext.js';
 import PDFDocument from 'pdfkit';
 
 /**
@@ -20,7 +22,7 @@ export function generateInvoicePdf(invoice) {
 
     // ── Header ────────────────────────────────────────────────────────────
     doc.rect(0, 0, doc.page.width, 80).fill(primary);
-    doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text('INVOICE', 50, 28);
+    doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text(invoice.isOpeningBalance ? 'OPENING BALANCE' : 'INVOICE', 50, 28);
     doc.fillColor('#93c5fd').fontSize(10).font('Helvetica').text(`#${invoice.invoiceNo}`, 50, 58);
 
     // Company name (right side of header)
@@ -28,7 +30,7 @@ export function generateInvoicePdf(invoice) {
       .fillColor('#ffffff')
       .fontSize(12)
       .font('Helvetica-Bold')
-      .text('Sky Accounting Services', doc.page.width - 200, 28, { width: 150, align: 'right' });
+      .text(getRequestContext().legalName ?? 'Accountrix', doc.page.width - 200, 28, { width: 150, align: 'right' });
 
     doc.moveDown(2);
     doc.y = 100;
@@ -104,6 +106,7 @@ export function generateInvoicePdf(invoice) {
       ['Subtotal', fmt(subtotal)],
       ...(tax > 0 ? [['Tax', fmt(tax)]] : []),
       ['Total', fmt(total)],
+      ...(invoice.payments && invoice.status !== 'DRAFT' && invoice.status !== 'VOID' ? [['Payments recorded', fmt(Number(invoiceAmounts(invoice).amountPaid))], ['Balance due', fmt(Number(invoiceAmounts(invoice).balanceDue))]] : []),
     ];
 
     for (const [label, value] of totals) {
@@ -138,5 +141,5 @@ export function generateInvoicePdf(invoice) {
 }
 
 function fmt(n) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(n);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: getRequestContext().currency ?? 'USD', currencyDisplay: 'code' }).format(n);
 }

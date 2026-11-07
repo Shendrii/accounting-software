@@ -96,6 +96,7 @@ router.post('/login', authWriteLimiter, async (req, res) => {
         id: m.workspace.id,
         name: m.workspace.name,
         type: m.workspace.type,
+        currency: m.workspace.currency, country: m.workspace.country, setupCompletedAt: m.workspace.setupCompletedAt,
         role: m.role,
       })),
     });
@@ -121,6 +122,7 @@ router.get('/me', async (req, res) => {
         id: m.workspace.id,
         name: m.workspace.name,
         type: m.workspace.type,
+        currency: m.workspace.currency, country: m.workspace.country, setupCompletedAt: m.workspace.setupCompletedAt,
         role: m.role,
       })),
     });
@@ -267,6 +269,7 @@ router.get('/google/callback', async (req, res) => {
         id: m.workspace.id,
         name: m.workspace.name,
         type: m.workspace.type,
+        currency: m.workspace.currency, country: m.workspace.country, setupCompletedAt: m.workspace.setupCompletedAt,
         role: m.role,
       })),
     };

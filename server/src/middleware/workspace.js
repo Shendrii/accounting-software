@@ -21,10 +21,10 @@ export async function requireWorkspace(req, res, next) {
     // Check the current user and membership together without caching authorization.
     const [session] = await prisma.$queryRaw`
       SELECT u."id", u."email", u."name",
-        membership."workspaceId", membership."workspaceName", membership."type", membership."role"
+        membership."workspaceId", membership."workspaceName", membership."type", membership."role", membership."currency", membership."country", membership."setupCompletedAt", membership."legalName"
       FROM "User" u
       LEFT JOIN LATERAL (
-        SELECT m."workspaceId", w."name" AS "workspaceName", w."type", m."role"
+        SELECT m."workspaceId", w."name" AS "workspaceName", w."type", m."role", w."currency", w."country", w."setupCompletedAt", w."legalName"
         FROM "WorkspaceMember" m JOIN "Workspace" w ON w."id" = m."workspaceId"
         WHERE m."userId" = u."id" ${workspaceFilter}
         ORDER BY m."createdAt" ASC, m."id" ASC LIMIT 1
@@ -35,8 +35,8 @@ export async function requireWorkspace(req, res, next) {
     if (!session.workspaceId) return res.status(403).json({ error: 'No accessible workspace' });
 
     req.user = { id: session.id, email: session.email, name: session.name };
-    req.workspace = { id: session.workspaceId, name: session.workspaceName, type: session.type, role: session.role };
-    withRequestContext({ userId: session.id, workspaceId: session.workspaceId }, () => next());
+    req.workspace = { id: session.workspaceId, name: session.workspaceName, type: session.type, role: session.role, currency: session.currency, country: session.country, setupCompletedAt: session.setupCompletedAt };
+    withRequestContext({ userId: session.id, workspaceId: session.workspaceId, currency: session.currency, legalName: session.legalName ?? session.workspaceName }, () => next());
   } catch (error) {
     console.error('Workspace authentication failed:', error);
     res.status(503).json({ error: 'The workspace could not load. Try again shortly.' });

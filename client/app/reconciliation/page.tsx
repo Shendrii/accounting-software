@@ -1,4 +1,5 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { useCallback, useState, type FormEvent } from 'react';
 import Link from 'next/link';
@@ -8,7 +9,7 @@ import {
   matchTransaction, postBankFee, reviewStatement, unmatchTransaction,
   type ReconciliationRecord, type StatementInput, type StatementReview,
 } from '@/lib/api';
-import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { decimalText, decimalUnits, localDay } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { toast } from '@/lib/toast';
 import AccountingDialog from '@/app/components/AccountingDialog';
@@ -27,14 +28,16 @@ function nextDate(value: string) {
 }
 
 function Amounts({ rows }: { rows: [string, string][] }) {
+  const money = useMoney();
   return <dl className="divide-y divide-slate-100 px-4 sm:px-5">
     {rows.map(([label, amount]) => <div key={label} className="flex justify-between gap-3 py-2.5 text-sm last:font-semibold">
-      <dt>{label}</dt><dd className="shrink-0 tabular-nums">{formatUsd(amount)}</dd>
+      <dt>{label}</dt><dd className="shrink-0 tabular-nums">{money.format(amount)}</dd>
     </div>)}
   </dl>;
 }
 
 export function ReconciliationPage() {
+  const money = useMoney();
   const accounts = useWorkspaceData(getAccounts);
   const [tab, setTab] = useState<'reconcile' | 'history'>('reconcile');
   const [step, setStep] = useState(0);
@@ -182,7 +185,7 @@ export function ReconciliationPage() {
         {history.error && <WorkspaceNotice title="History could not load" onRetry={history.retry} />}
         {input.accountId && history.data?.length === 0 && <p className="text-sm text-slate-600">No reconciliations for this account yet.</p>}
         {history.data?.map(record => <div key={record.id} className="flex flex-wrap items-center justify-between gap-3 border-t border-slate-200 py-3">
-          <div><p className="text-sm font-semibold">{record.statementDate.slice(0, 10)} · {formatUsd(record.statementBalance)}</p>
+          <div><p className="text-sm font-semibold">{record.statementDate.slice(0, 10)} · {money.format(record.statementBalance)}</p>
             <p className="text-xs text-slate-600">{record.proof ? 'Verified reconciliation' : 'Legacy record · saved proof unavailable'}</p></div>
           {record.proof && <button type="button" className="workspace-button" onClick={() => open({ kind: 'proof', record })}>View proof</button>}
         </div>)}
@@ -205,7 +208,7 @@ export function ReconciliationPage() {
               Mark an active asset as a bank account in <Link className="font-semibold text-blue-800 underline" href="/ledger?tab=accounts">Chart of accounts</Link>.
             </p>}
             {prior?.proof && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
-              <p>Last statement ended {prior.statementDate.slice(0, 10)} with {formatUsd(prior.statementBalance)}.</p>
+              <p>Last statement ended {prior.statementDate.slice(0, 10)} with {money.format(prior.statementBalance)}.</p>
               <button type="button" className="workspace-button" disabled={busy} onClick={() => {
                 field('statementStart', nextDate(prior.statementDate));
                 field('openingBalance', prior.statementBalance);
@@ -231,12 +234,12 @@ export function ReconciliationPage() {
       </div>}
       {step === 1 && review && <>
         <div className="grid grid-cols-1 gap-3 sm:grid-cols-3">
-          <WorkspaceMetric icon={Landmark} label="Statement ending balance" value={formatUsd(review.statementBalance)} detail={'Through ' + review.statementDate} />
-          <WorkspaceMetric icon={BookOpenCheck} label="Cleared book balance" value={formatUsd(review.clearedBalance)} detail="Opening balance plus matched lines" />
-          <WorkspaceMetric icon={ArrowLeftRight} label="Remaining to clear" value={formatUsd(decimalText(remaining))} detail={review.unresolved + ' statement lines to review'} />
+          <WorkspaceMetric icon={Landmark} label="Statement ending balance" value={money.format(review.statementBalance)} detail={'Through ' + review.statementDate} />
+          <WorkspaceMetric icon={BookOpenCheck} label="Cleared book balance" value={money.format(review.clearedBalance)} detail="Opening balance plus matched lines" />
+          <WorkspaceMetric icon={ArrowLeftRight} label="Remaining to clear" value={money.format(decimalText(remaining))} detail={review.unresolved + ' statement lines to review'} />
         </div>
         {!importedAgrees && <WorkspaceNotice title="Imported lines do not tie to the statement">
-          {review.bankTransactions.length} of {review.statementLineCount} statement lines are loaded. Opening balance plus imported activity is {formatUsd(review.importedEnding)}.
+          {review.bankTransactions.length} of {review.statementLineCount} statement lines are loaded. Opening balance plus imported activity is {money.format(review.importedEnding)}.
         </WorkspaceNotice>}
         <WorkspacePanel title="Statement transactions" description={review.statementStart + ' through ' + review.statementDate} action={importActions}>
           {importNote && <p role="status" className="px-4 pt-3 text-sm font-semibold text-blue-800">{importNote}</p>}
@@ -246,7 +249,7 @@ export function ReconciliationPage() {
             const suggested = eligible.some(line => Math.abs(Date.parse(line.date) - Date.parse(row.date)) <= 5 * 86400000);
             return <div key={row.id} className="flex flex-wrap items-center justify-between gap-3 border-b border-slate-200 p-4 last:border-0">
               <div className="min-w-0"><p className="break-words text-sm font-semibold">{row.description}</p>
-                <p className="text-xs text-slate-600">{row.date.slice(0, 10)} · {formatUsd(row.amount)}{row.matchDescription ? ' · ' + row.matchDescription : ''}</p></div>
+                <p className="text-xs text-slate-600">{row.date.slice(0, 10)} · {money.format(row.amount)}{row.matchDescription ? ' · ' + row.matchDescription : ''}</p></div>
               <div className="flex flex-wrap items-center gap-2">
                 <WorkspaceStatus>{row.validMatch ? 'Matched' : row.isMatched ? 'Check match' : suggested ? 'Suggested match' : 'Unmatched'}</WorkspaceStatus>
                 {row.isMatched ? <button type="button" className="workspace-button" disabled={busy}
@@ -275,7 +278,7 @@ export function ReconciliationPage() {
             }} />
             <span className="min-w-0 flex-1"><strong className="break-words">{line.description}</strong>
               <span className="block text-xs text-slate-600">{decimalUnits(line.amount) > BigInt(0) ? 'Deposit in transit' : 'Outstanding payment'} · {line.date.slice(0, 10)}{line.referenceNo ? ' · ' + line.referenceNo : ''}</span>
-            </span><span className="shrink-0 tabular-nums">{formatUsd(line.amount)}</span>
+            </span><span className="shrink-0 tabular-nums">{money.format(line.amount)}</span>
           </label>)}
         </WorkspacePanel>
         <div className="grid items-start gap-3 md:grid-cols-2">
@@ -292,8 +295,8 @@ export function ReconciliationPage() {
             ]} />
           </WorkspacePanel>
         </div>
-        {ready ? <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-900">Unexplained difference · {formatUsd(decimalText(difference))}. Ready to complete.</p> :
-          <WorkspaceNotice title={'Unexplained difference · ' + formatUsd(decimalText(difference))}>
+        {ready ? <p role="status" className="rounded-lg bg-emerald-50 p-4 text-sm font-semibold text-emerald-900">Unexplained difference · {money.format(decimalText(difference))}. Ready to complete.</p> :
+          <WorkspaceNotice title={'Unexplained difference · ' + money.format(decimalText(difference))}>
             {!review.openingAgrees ? 'The posted opening book balance does not tie to the statement or previous verified proof. Review the opening entries.' :
               !importedAgrees ? 'Verify that the imported transactions add up to the statement ending balance.' :
               review.unresolved ? 'Resolve all unmatched statement lines before finishing.' :
@@ -312,16 +315,16 @@ export function ReconciliationPage() {
         <p className="text-sm text-slate-600">{action.record.proof.statementStart} through {action.record.proof.statementDate}</p>
         <Amounts rows={[[ 'Statement ending balance', action.record.proof.statementBalance], ['Cleared book balance', action.record.proof.clearedBalance], ['Adjusted bank balance', action.record.proof.adjustedBank], ['Adjusted book balance', action.record.proof.adjustedBook], ['Unexplained difference', action.record.proof.difference]]} />
         <details className="rounded-lg border border-slate-200 p-3 text-sm"><summary>{action.record.proof.matches.length} matched statement lines</summary>
-          <ul className="mt-2 space-y-2">{action.record.proof.matches.map(row => <li key={row.id}>{row.date.slice(0, 10)} · {row.description} · {formatUsd(row.amount)}<br /><span className="text-slate-600">{row.matchDescription}</span></li>)}</ul>
+          <ul className="mt-2 space-y-2">{action.record.proof.matches.map(row => <li key={row.id}>{row.date.slice(0, 10)} · {row.description} · {money.format(row.amount)}<br /><span className="text-slate-600">{row.matchDescription}</span></li>)}</ul>
         </details>
         <details className="rounded-lg border border-slate-200 p-3 text-sm"><summary>{action.record.proof.outstanding.length} confirmed outstanding items</summary>
-          <ul className="mt-2 space-y-2">{action.record.proof.outstanding.map(line => <li key={line.id}>{line.date.slice(0, 10)} · {line.description} · {formatUsd(line.amount)}</li>)}</ul>
+          <ul className="mt-2 space-y-2">{action.record.proof.outstanding.map(line => <li key={line.id}>{line.date.slice(0, 10)} · {line.description} · {money.format(line.amount)}</li>)}</ul>
         </details>
       </div>
     </AccountingDialog>}
     {action && action.kind !== 'proof' && <AccountingDialog title={action.kind === 'match' ? 'Review transaction match' : action.kind === 'fee' ? 'Record bank fee' : 'Add statement line'} busy={busy} onDismiss={() => setAction(null)}>
       <form onSubmit={submitAction} className="space-y-3">
-        {action.kind !== 'manual' && <p className="text-sm font-semibold">{action.row.description} · {action.row.date.slice(0, 10)} · {formatUsd(action.row.amount)}</p>}
+        {action.kind !== 'manual' && <p className="text-sm font-semibold">{action.row.description} · {action.row.date.slice(0, 10)} · {money.format(action.row.amount)}</p>}
         {action.kind === 'match' && <label className="grid gap-1 text-sm font-semibold">Posted ledger transaction
           <select name="journalLineId" className="workspace-field" required disabled={busy}>
             <option value="">Choose the matching transaction…</option>

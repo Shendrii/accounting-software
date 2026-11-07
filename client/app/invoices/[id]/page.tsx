@@ -1,15 +1,17 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import { PaymentCorrections } from '@/app/components/PaymentCorrections';
 import BackToWorklist from '@/app/components/BackToWorklist';
 import { Download, Loader2, Mail } from 'lucide-react';
 import {
   downloadInvoicePdf, getAccounts, getInvoice, postInvoice, recordInvoicePayment,
   sendInvoiceEmail, voidInvoice, type Account, type Invoice, type JournalEntry,
 } from '@/lib/api';
-import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { decimalText, decimalUnits, localDay } from '@/lib/money';
 import { isPaymentAccount } from '@/lib/account-roles';
 import { toast } from '@/lib/toast';
 import AccountingDialog from '@/app/components/AccountingDialog';
@@ -40,6 +42,7 @@ function AccountSelect({ name, label, accounts }: { name: string; label: string;
 }
 
 export function InvoiceDetailPage() {
+  const money = useMoney();
   const { id } = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -143,7 +146,7 @@ export function InvoiceDetailPage() {
   const isVoid = invoice.status === 'VOID';
   const canPost = !posted && (invoice.status === 'DRAFT' || invoice.status === 'SENT');
   const canPay = Boolean(posted) && invoice.status === 'SENT';
-  const canVoid = (invoice.status === 'DRAFT' || invoice.status === 'SENT') && !decimalUnits(invoice.amountPaid);
+  const canVoid = !invoice.isOpeningBalance && (invoice.status === 'DRAFT' || invoice.status === 'SENT') && !decimalUnits(invoice.amountPaid);
   const hasTax = decimalUnits(invoice.tax) > BigInt(0);
   const missingRevenue = invoice.lines?.some(line => !line.accountId && decimalUnits(line.amount) > BigInt(0));
   const receivableId = posted?.journalLines.find(line => decimalUnits(line.debit) > BigInt(0))?.accountId;
@@ -169,13 +172,13 @@ export function InvoiceDetailPage() {
   const paymentCents = decimalUnits(paymentAmount);
   let submitLabel = modalTitle;
   if (modal?.kind === 'payment' && paymentCents > BigInt(0) && paymentCents <= decimalUnits(invoice.balanceDue)) {
-    submitLabel = 'Record ' + formatUsd(decimalText(paymentCents)) + ' payment';
+    submitLabel = 'Record ' + money.format(decimalText(paymentCents)) + ' payment';
   }
 
   let fields: ReactNode;
   if (modal?.kind === 'post') {
     fields = <>
-      <p className="text-sm text-slate-600">Post {invoice.invoiceNo} on {formatDate(invoice.date)} for {formatUsd(invoice.total)}.</p>
+      <p className="text-sm text-slate-600">Post {invoice.invoiceNo} on {formatDate(invoice.date)} for {money.format(invoice.total)}.</p>
       <AccountSelect name="receivable" label="Accounts receivable" accounts={receivableAccounts} />
       <p className="text-xs text-slate-600">Posting records money owed by the customer. It does not increase cash.</p>
       {missingRevenue && <AccountSelect name="revenue" label="Revenue account for uncategorized lines" accounts={accounts.filter(account => account.type === 'REVENUE')} />}
@@ -191,8 +194,8 @@ export function InvoiceDetailPage() {
     </>;
   } else if (modal?.kind === 'payment') {
     fields = <>
-      <p className="text-sm text-slate-600">{invoice.invoiceNo} · {formatUsd(invoice.balanceDue)} due</p>
-      <label className="block text-sm font-medium">Payment amount (USD)
+      <p className="text-sm text-slate-600">{invoice.invoiceNo} · {money.format(invoice.balanceDue)} due</p>
+      <label className="block text-sm font-medium">Payment amount ({money.currency})
         <input className={field} type="number" autoFocus min="0.01" max={invoice.balanceDue} step="0.01" required value={paymentAmount} onChange={event => setPaymentAmount(event.target.value)} />
       </label>
       <label className="block text-sm font-medium">Payment date
@@ -222,8 +225,8 @@ export function InvoiceDetailPage() {
           actions={<>
             {canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
             {canPay && <button type="button" className={primary} onClick={() => open({ kind: 'payment' })}>Record payment</button>}
-            <button type="button" onClick={download} className={button}><Download className="size-4" aria-hidden="true" /> PDF</button>
-            {!isVoid && (posted || invoice.status !== 'DRAFT') && (
+            <button type="button" onClick={download} className={button}><Download className="size-4" aria-hidden="true" /> {invoice.isOpeningBalance ? 'Opening statement PDF' : 'PDF'}</button>
+            {!invoice.isOpeningBalance && !isVoid && (posted || invoice.status !== 'DRAFT') && (
               <button type="button" onClick={() => open({ kind: 'email' })} className={button}><Mail className="size-4" aria-hidden="true" /> Send email</button>
             )}
             <BackToWorklist fallback="/sales/invoices" label="Invoices" className={button} />
@@ -233,7 +236,7 @@ export function InvoiceDetailPage() {
         <div className="grid grid-cols-2 gap-2 sm:grid-cols-3 sm:gap-3" aria-live="polite">
           {metrics.map(([label, value]) => <div key={label} className="workspace-panel min-w-0 p-3.5 sm:p-4">
             <p className="text-xs text-slate-600 sm:text-sm">{label}</p>
-            <p className="mt-2 text-lg font-semibold tracking-tight break-words text-slate-950 tabular-nums sm:text-2xl">{formatUsd(value)}</p>
+            <p className="mt-2 text-lg font-semibold tracking-tight break-words text-slate-950 tabular-nums sm:text-2xl">{money.format(value)}</p>
           </div>)}
         </div>
         <div className="grid items-start gap-3 md:grid-cols-[1.25fr_1fr]">
@@ -246,16 +249,16 @@ export function InvoiceDetailPage() {
               <thead className="border-b border-slate-200 text-slate-600"><tr><th scope="col" className="py-2 text-left font-medium">Line item</th><th scope="col" className="py-2 text-right font-medium">Amount</th></tr></thead>
               <tbody className="divide-y divide-slate-100">{invoice.lines?.map(line => (
                 <tr key={line.id}><td className="py-2.5 pr-2">{line.description}<p className="text-xs text-slate-600">{line.account?.name}</p></td>
-                  <td className="whitespace-nowrap py-2.5 text-right tabular-nums">{formatUsd(line.amount)}</td></tr>
+                  <td className="whitespace-nowrap py-2.5 text-right tabular-nums">{money.format(line.amount)}</td></tr>
               ))}</tbody>
               <tfoot className="border-t border-slate-200">
-                {hasTax && <tr><th scope="row" className="pt-2 text-left font-medium">Tax</th><td className="pt-2 text-right tabular-nums">{formatUsd(invoice.tax)}</td></tr>}
-                <tr><th scope="row" className="pt-2 text-left">Total</th><td className="pt-2 text-right font-semibold tabular-nums">{formatUsd(invoice.total)}</td></tr>
+                {hasTax && <tr><th scope="row" className="pt-2 text-left font-medium">Tax</th><td className="pt-2 text-right tabular-nums">{money.format(invoice.tax)}</td></tr>}
+                <tr><th scope="row" className="pt-2 text-left">Total</th><td className="pt-2 text-right font-semibold tabular-nums">{money.format(invoice.total)}</td></tr>
               </tfoot>
             </table>
             {invoice.notes && <p className="mt-3 whitespace-pre-wrap text-sm text-slate-600">{invoice.notes}</p>}
             <div className="mt-3 flex flex-wrap items-center justify-between gap-2 text-xs text-slate-600">
-              <p>Delivery · {invoice.emailSentAt ? 'Sent ' + formatDate(invoice.emailSentAt) : invoice.status === 'SENT' && !posted ? 'Marked as sent' : 'Awaiting delivery'}</p>
+              <p>{invoice.isOpeningBalance ? 'Imported remaining balance. No new invoice is issued.' : <>Delivery · {invoice.emailSentAt ? 'Sent ' + formatDate(invoice.emailSentAt) : invoice.status === 'SENT' && !posted ? 'Marked as sent' : 'Awaiting delivery'}</>}</p>
               {canVoid && <button type="button" className="min-h-10 text-sm font-medium text-red-800 underline underline-offset-4" onClick={() => open({ kind: 'void' })}>Void invoice</button>}
             </div>
           </section>
@@ -271,18 +274,8 @@ export function InvoiceDetailPage() {
         </div>
         <section className={panel}>
           <h2 className="font-semibold text-slate-900">Payment history</h2>
-          {invoice.payments?.length ? (
-            <ul className="mt-2 divide-y divide-slate-100">
-              {invoice.payments.map(payment => {
-                const deposit = payment.journalEntry.journalLines.find(line => decimalUnits(line.debit) > BigInt(0));
-                return <li key={payment.id} className="flex items-center justify-between gap-3 py-2">
-                  <div><button type="button" className={textLink} onClick={() => open({ kind: 'journal', entry: payment.journalEntry })}>
-                    {formatDate(payment.journalEntry.date)}</button><p className="text-xs text-slate-600">{deposit?.account?.name}</p></div>
-                  <strong className="text-sm tabular-nums">{formatUsd(payment.amount)}</strong>
-                </li>;
-              })}
-            </ul>
-          ) : <p className="mt-2 text-sm text-slate-600">{invoice.status === 'PAID' ? 'Paid before itemized payment history was available.' : 'No payments recorded.'}</p>}
+          {invoice.payments?.length ? <PaymentCorrections kind="invoice" documentId={invoice.id} payments={invoice.payments} onCorrected={async () => { setInvoice(await getInvoice(id)); }}
+            onInspect={paymentId => { const payment = invoice.payments?.find(item => item.id === paymentId); if (payment) open({ kind: 'journal', entry: payment.journalEntry }); }} /> : <p className="mt-2 text-sm text-slate-600">No itemized payments recorded.</p>}
         </section>
 
         {modal && <AccountingDialog title={modalTitle ?? ''} busy={busy} onDismiss={() => setModal(null)}>

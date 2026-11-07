@@ -1,6 +1,8 @@
+'use client';
+import { useMoney } from '@/lib/use-money';
 import { Plus, Trash2 } from 'lucide-react';
 import type { Account } from '@/lib/api';
-import { formatUsd } from '@/lib/money';
+
 import { WorkspacePanel } from './WorkspaceUI';
 
 export type DocumentLine = {
@@ -18,6 +20,7 @@ export function DocumentLines({ lines, accounts, onChange, onAdd, onRemove }: {
   onAdd: () => void;
   onRemove: (index: number) => void;
 }) {
+  const money = useMoney();
   return (
     <WorkspacePanel title="Line items" description="Enter the details for each item."
       action={<button type="button" onClick={onAdd} className="workspace-button"><Plus className="size-4" aria-hidden="true" />Add line item</button>}>
@@ -41,7 +44,7 @@ export function DocumentLines({ lines, accounts, onChange, onAdd, onRemove }: {
                   {accounts.map(account => <option key={account.id} value={account.id}>{account.name}</option>)}
                 </select>
               </label>
-              <div className="min-w-0 text-sm"><p className="text-slate-600">Amount</p><p className="font-semibold break-words tabular-nums">{formatUsd(line.amount)}</p></div>
+              <div className="min-w-0 text-sm"><p className="text-slate-600">Amount</p><p className="font-semibold break-words tabular-nums">{money.format(line.amount)}</p></div>
               {lines.length > 1 && <button type="button" onClick={() => onRemove(index)} className="workspace-button justify-self-end px-2" aria-label={'Remove line ' + (index + 1)}>
                 <Trash2 className="size-4 text-rose-700" aria-hidden="true" />
               </button>}

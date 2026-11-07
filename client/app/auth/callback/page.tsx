@@ -62,7 +62,7 @@ export default function OAuthCallbackPage() {
     const workspaces = data.workspaces ?? [];
     setSession(data.token, data.user, workspaces);
     if (workspaces[0]) setWorkspaceId(workspaces[0].id);
-    router.replace('/');
+    router.replace(workspaces[0]?.setupCompletedAt === null ? '/settings/setup' : '/');
   }, [hash, data, router]);
 
   if (hash !== null && (!data?.token || !data.user) && !signedIn) {

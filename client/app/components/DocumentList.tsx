@@ -1,14 +1,16 @@
 'use client';
+import { useMoney } from '@/lib/use-money';
 import { Suspense, useCallback, useState } from 'react';
 import Link from 'next/link';
 import { getInvoicePage, getBillPage, triggerRecurring, type Invoice, type Bill, type PageResult } from '@/lib/api';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
-import { formatUsd, localDay } from '@/lib/money';
+import { localDay } from '@/lib/money';
 import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice } from './WorkspaceUI';
 import { billStatus, invoiceStatus, WorkspaceStatus } from './WorkspaceActivity';
 import { useWorklist, WorklistControls, WorklistPagination } from './WorklistControls';
 import RecordPreview from './RecordPreview';
 function Content({ kind }: { kind: 'invoice' | 'bill' }) {
+  const money = useMoney();
   const state = useWorklist(); const { params, update } = state; const invoice = kind === 'invoice';
   const [recurringBusy, setRecurringBusy] = useState(false); const [message, setMessage] = useState('');
   const filters = JSON.stringify(Object.fromEntries(['page', 'pageSize', 'q', 'status', 'view', 'startDate', 'endDate', 'sort', 'direction'].flatMap(key => params[key] ? [[key, params[key]]] : [])));
@@ -27,13 +29,13 @@ function Content({ kind }: { kind: 'invoice' | 'bill' }) {
     {message && <p role="status" className="text-sm">{message}</p>}
     <div className="workspace-panel" aria-busy={list.loading}>
       <div className="workspace-table-wrap"><table className={'workspace-table workbench-table ' + (params.density === 'compact' ? 'workbench-compact' : '')}>
-        <caption className="sr-only">{invoice ? 'Invoices' : 'Bills'}, USD, filtered and sorted before pagination</caption>
+        <caption className="sr-only">{invoice ? 'Invoices' : 'Bills'}, {money.currency}, filtered and sorted before pagination</caption>
         <thead><tr>{[['reference', invoice ? 'Invoice' : 'Bill'], ['counterparty', invoice ? 'Customer' : 'Vendor'], ['date', 'Date'], ['dueDate', 'Due date'], ['total', 'Total'], ['balance', 'Balance due'], ['', 'Status']].map(([key, label]) => <th key={label} scope="col" aria-sort={key && (params.sort || 'date') === key ? (params.direction || 'desc') === 'asc' ? 'ascending' : 'descending' : undefined}>{key ? <button type="button" onClick={() => sort(key)}>{label}{(params.sort || 'date') === key ? (params.direction || 'desc') === 'asc' ? ' ↑' : ' ↓' : ''}</button> : label}</th>)}</tr></thead>
         <tbody>{items.map(item => <tr key={item.id}>
           <td data-label={invoice ? 'Invoice' : 'Bill'}><button type="button" className="workspace-text-action min-h-11 text-left" onClick={() => update({ preview: item.id }, false)}>{'invoiceNo' in item ? item.invoiceNo : item.billNo}</button>{'isRecurring' in item && item.isRecurring && <p className="text-xs">Recurring · {item.recurrenceInterval}{item.nextDueDate ? ' · Next ' + item.nextDueDate.slice(0, 10) : ''}</p>}</td>
           <td data-label={invoice ? 'Customer' : 'Vendor'}>{'invoiceNo' in item ? item.customer?.name : item.vendor?.name}</td>
-          <td data-label="Date">{item.date.slice(0, 10)}</td><td data-label="Due date">{item.dueDate.slice(0, 10)}</td><td data-label="Total" className="workspace-number">{formatUsd(item.total)}</td>
-          <td data-label="Balance due" className="workspace-number">{item.status === 'DRAFT' || item.status === 'VOID' ? '—' : formatUsd(item.balanceDue ?? '0')}</td><td data-label="Status"><WorkspaceStatus>{invoice ? invoiceStatus(item as Invoice) : billStatus(item as Bill)}</WorkspaceStatus></td>
+          <td data-label="Date">{item.date.slice(0, 10)}</td><td data-label="Due date">{item.dueDate.slice(0, 10)}</td><td data-label="Total" className="workspace-number">{money.format(item.total)}</td>
+          <td data-label="Balance due" className="workspace-number">{item.status === 'DRAFT' || item.status === 'VOID' ? '—' : money.format(item.balanceDue ?? '0')}</td><td data-label="Status"><WorkspaceStatus>{invoice ? invoiceStatus(item as Invoice) : billStatus(item as Bill)}</WorkspaceStatus></td>
         </tr>)}</tbody>
       </table></div>
       {!items.length && <p className="p-6 text-sm text-slate-600" role="status">{list.loading ? 'Loading records…' : list.error ? 'Records are unavailable. Retry above.' : 'No records match this view.'}</p>}

@@ -1,6 +1,7 @@
 'use client';
 
 import { createContext, useCallback, useContext, useEffect, useState, type FormEvent, type ReactNode } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { createWorkspace, fetchWorkspaces, type AuthWorkspace } from '@/lib/api';
 import { getCurrentUser, getWorkspaceId, setWorkspaceId, useActiveWorkspaceId, useIsAuthenticated, WORKSPACE_KEY } from '@/lib/auth';
@@ -63,7 +64,7 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const active = workspaces.find(workspace => workspace.id === activeId);
 
   function navigateToWorkspace(workspace: Pick<AuthWorkspace, 'id' | 'name'>, created = false) {
-    const destination = created ? '/' : switchDestination();
+    const destination = created ? '/settings/setup' : switchDestination();
     setSwitching(true);
     try {
       sessionStorage.setItem(flashKey, (created ? 'Created and switched to ' : 'Switched to ') + workspace.name);
@@ -102,7 +103,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
       },
       openCreate: () => setCreating(true),
     }}>
-      {children}
+      {signedIn && active && active.setupCompletedAt === null && !pathname.startsWith('/settings') && !hideAppChrome(pathname, signedIn) && <div className="workspace-page py-3"><div className="flex flex-wrap items-center justify-between gap-3 border-y border-slate-300 py-3 text-sm"><p>Confirm the country, currency and opening books for <strong>{active.name}</strong>.</p><Link className="workspace-text-action" href="/settings/setup">Finish workspace setup</Link></div></div>}
+      {signedIn && !hideAppChrome(pathname, signedIn) && query.loading && !active ? <div role="status" className="grid min-h-screen place-items-center p-6 text-sm text-slate-600">Opening client workspace…</div> : children}
       {switching && <div className="fixed inset-0 z-[80] grid place-items-center bg-slate-50 p-4 text-sm text-slate-700" role="status">Opening workspace…</div>}
       {creating && <CreateWorkspaceDialog workspaces={workspaces} onDismiss={() => setCreating(false)}
         onCreate={workspace => navigateToWorkspace(workspace, true)} />}
