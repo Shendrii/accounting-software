@@ -22,6 +22,8 @@ const upload = multer({
   },
 });
 
+import { isPaged, receiptPage } from '../lib/workbenchQueries.js';
+
 const router = express.Router();
 const OCR_SERVICE_URL = process.env.OCR_SERVICE_URL || 'http://localhost:5001';
 
@@ -126,6 +128,7 @@ router.post('/upload', uploadImage, async (req, res) => {
 // GET /api/receipts - list receipts (optional ?status=)
 router.get('/', async (req, res) => {
   try {
+    if (isPaged(req.query)) return res.json(await receiptPage(prisma, req.workspace.id, req.query));
     const { status } = req.query;
     const where = status ? { status } : {};
     const receipts = await prisma.receipt.findMany({
@@ -139,7 +142,7 @@ router.get('/', async (req, res) => {
     });
     res.json(receipts);
   } catch (error) {
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to load receipt documents.');
   }
 });
 

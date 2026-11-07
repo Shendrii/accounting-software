@@ -8,6 +8,8 @@ import {
   ledgerTransaction, nextDay, reversePosting, sendLedgerError,
 } from '../lib/ledger.js';
 
+import { isPaged, documentPage } from '../lib/workbenchQueries.js';
+
 const router = express.Router();
 const posting = { journalLines: { include: { account: { select: { name: true, type: true } } } } };
 const detail = {
@@ -34,6 +36,7 @@ async function getBill(tx, where) {
 
 router.get('/', async (req, res) => {
   try {
+    if (isPaged(req.query)) return res.json(await documentPage(prisma, req.workspace.id, 'bill', req.query));
     const { status, vendorId, startDate, endDate } = req.query;
     const where = { workspaceId: req.workspace.id };
     if (status) where.status = status;

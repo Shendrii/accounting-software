@@ -122,6 +122,9 @@ test('receipt review separates paid purchases, draft bills, evidence, and duplic
   await api(paidPath, 'PUT', { vendorId: null }, 409);
   assert.equal((await api(paidPath + '/approve', 'POST', paidInput)).journalEntry.id, first.journalEntry.id);
   assert.equal((await api('/accounts/' + bank.id)).balance, '-70.1');
+  const page = await api('/receipts?page=1&pageSize=1&status=APPROVED&q=vendor-01');
+  assert.equal(page.total, 1); assert.equal(page.items[0].id, receipt.id); assert.equal(page.items[0].journalEntry, undefined); assert.equal(page.items[0].image, undefined);
+  await api('/receipts?page=1&status=INVALID', 'GET', undefined, 400);
   await api('/bills', 'POST', { vendorId: vendor.id, vendorInvoiceNo: 'PAID-02', date: '2026-02-03', dueDate: '2026-03-01',
     lines: [{ description: 'Already paid', quantity: '1', unitPrice: '20.10', accountId: expense.id }] }, 409);
 });

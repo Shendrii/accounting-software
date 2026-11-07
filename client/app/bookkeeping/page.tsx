@@ -174,7 +174,7 @@ export function BookkeepingPage() {
     <div className="workspace-page">
       <div className="workspace-content">
         <div className="mb-5 space-y-4">
-          <WorkspaceHeading section="Books and reporting" title="Ledger and close" description="Work through open items and review the posted ledger."
+          <WorkspaceHeading section="Books and reporting" title="Accounting" description="Work through open items and review the posted ledger."
             actions={<button type="button" className="workspace-primary" onClick={() => {
               setShowCreateJournalForm(true);
               router.push('/ledger?tab=journal', { scroll: false });

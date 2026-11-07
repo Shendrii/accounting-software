@@ -22,11 +22,11 @@ export function WorkspaceNavigation({ pathname, inboxCount, onNavigate, sample =
   return (
     <nav aria-label="Workspace" className="min-h-0 flex-1 space-y-5 overflow-y-auto px-3 py-4">
       <Link href="/" onClick={onNavigate} aria-current={pathname === '/' ? 'page' : undefined} className="workspace-nav-link">
-        <LayoutDashboard className="size-4 shrink-0" aria-hidden="true" />Overview
+        <LayoutDashboard className="size-4 shrink-0" aria-hidden="true" />Dashboard
       </Link>
       {navigationClusters.map(cluster => (
         <div key={cluster.label} className="space-y-0.5">
-          <p className="px-3 pb-1 text-[11px] font-semibold tracking-[0.12em] text-blue-100/80 uppercase">{cluster.label}</p>
+          <p className="px-3 pb-1 text-xs font-semibold text-slate-600">{cluster.label}</p>
           {cluster.items.map(item => {
             const active = section === item.href;
             const label = <>

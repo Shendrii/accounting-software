@@ -3,7 +3,8 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Loader2 } from 'lucide-react';
+import BackToWorklist from '@/app/components/BackToWorklist';
+import { Loader2 } from 'lucide-react';
 import {
   getBill, receiveBill, payBill, voidBill, updateBill, getAccounts,
   type Bill, type Account,
@@ -147,7 +148,7 @@ export function BillDetailPage() {
         <div className="mb-5">
           <WorkspaceHeading section="Purchases / Bills" title={bill.billNo}
             description={<>{bill.vendor?.name ?? 'Vendor'} · Due {formatDate(bill.dueDate)}{bill.vendorInvoiceNo ? ' · Supplier invoice ' + bill.vendorInvoiceNo : ''}</>}
-            actions={<><WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus><Link href="/purchases/bills" className="workspace-button"><ArrowLeft className="size-4" aria-hidden="true" />Bills</Link></>} />
+            actions={<><WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus><BackToWorklist fallback="/purchases/bills" label="Bills" /></>} />
         </div>
 
         {error && (

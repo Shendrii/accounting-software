@@ -3,7 +3,8 @@
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
-import { ArrowLeft, Download, Loader2, Mail } from 'lucide-react';
+import BackToWorklist from '@/app/components/BackToWorklist';
+import { Download, Loader2, Mail } from 'lucide-react';
 import {
   downloadInvoicePdf, getAccounts, getInvoice, postInvoice, recordInvoicePayment,
   sendInvoiceEmail, voidInvoice, type Account, type Invoice, type JournalEntry,
@@ -225,7 +226,7 @@ export function InvoiceDetailPage() {
             {!isVoid && (posted || invoice.status !== 'DRAFT') && (
               <button type="button" onClick={() => open({ kind: 'email' })} className={button}><Mail className="size-4" aria-hidden="true" /> Send email</button>
             )}
-            <Link className={button} href="/sales/invoices"><ArrowLeft className="size-4" aria-hidden="true" />Invoices</Link>
+            <BackToWorklist fallback="/sales/invoices" label="Invoices" className={button} />
           </>} />
         {error && <p role="alert" className="rounded-lg bg-red-50 p-3 text-sm text-red-800">{error}</p>}
         {!posted && invoice.status === 'SENT' && <p className="rounded-lg bg-amber-50 p-3 text-sm text-amber-900">Review this older invoice against the ledger before posting or recording a payment.</p>}

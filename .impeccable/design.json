@@ -1,0 +1,436 @@
+{
+  "schemaVersion": 2,
+  "generatedAt": "2026-11-07T20:37:29.144541Z",
+  "title": "Design System: Accountrix Prism Workspace",
+  "extensions": {
+    "colorMeta": {
+      "primary": {
+        "role": "primary",
+        "displayName": "Cobalt",
+        "canonical": "#1546ce",
+        "tonalRamp": [
+          "oklch(15.0% 0.0323 264.100)",
+          "oklch(26.0% 0.0968 264.100)",
+          "oklch(38.0% 0.1721 264.100)",
+          "oklch(49.0% 0.2152 264.100)",
+          "oklch(61.0% 0.2152 264.100)",
+          "oklch(73.0% 0.1829 264.100)",
+          "oklch(85.0% 0.1076 264.100)",
+          "oklch(95.0% 0.0323 264.100)"
+        ]
+      },
+      "paper": {
+        "role": "neutral",
+        "displayName": "Paper",
+        "canonical": "#fafaf7",
+        "tonalRamp": [
+          "oklch(15.0% 0.0006 106.472)",
+          "oklch(26.0% 0.0018 106.472)",
+          "oklch(38.0% 0.0032 106.472)",
+          "oklch(49.0% 0.0040 106.472)",
+          "oklch(61.0% 0.0040 106.472)",
+          "oklch(73.0% 0.0034 106.472)",
+          "oklch(85.0% 0.0020 106.472)",
+          "oklch(95.0% 0.0006 106.472)"
+        ]
+      },
+      "surface": {
+        "role": "neutral",
+        "displayName": "White surface",
+        "canonical": "#ffffff",
+        "tonalRamp": [
+          "oklch(15.0% 0.0000 89.876)",
+          "oklch(26.0% 0.0000 89.876)",
+          "oklch(38.0% 0.0000 89.876)",
+          "oklch(49.0% 0.0000 89.876)",
+          "oklch(61.0% 0.0000 89.876)",
+          "oklch(73.0% 0.0000 89.876)",
+          "oklch(85.0% 0.0000 89.876)",
+          "oklch(95.0% 0.0000 89.876)"
+        ]
+      },
+      "ink": {
+        "role": "neutral",
+        "displayName": "Ink",
+        "canonical": "#181b25",
+        "tonalRamp": [
+          "oklch(15.0% 0.0030 271.699)",
+          "oklch(26.0% 0.0090 271.699)",
+          "oklch(38.0% 0.0161 271.699)",
+          "oklch(49.0% 0.0201 271.699)",
+          "oklch(61.0% 0.0201 271.699)",
+          "oklch(73.0% 0.0171 271.699)",
+          "oklch(85.0% 0.0100 271.699)",
+          "oklch(95.0% 0.0030 271.699)"
+        ]
+      },
+      "rule": {
+        "role": "neutral",
+        "displayName": "Graphite rule",
+        "canonical": "#343942",
+        "tonalRamp": [
+          "oklch(15.0% 0.0026 262.267)",
+          "oklch(26.0% 0.0077 262.267)",
+          "oklch(38.0% 0.0137 262.267)",
+          "oklch(49.0% 0.0172 262.267)",
+          "oklch(61.0% 0.0172 262.267)",
+          "oklch(73.0% 0.0146 262.267)",
+          "oklch(85.0% 0.0086 262.267)",
+          "oklch(95.0% 0.0026 262.267)"
+        ]
+      },
+      "line": {
+        "role": "neutral",
+        "displayName": "Register line",
+        "canonical": "#d7dbe2",
+        "tonalRamp": [
+          "oklch(15.0% 0.0016 261.788)",
+          "oklch(26.0% 0.0047 261.788)",
+          "oklch(38.0% 0.0084 261.788)",
+          "oklch(49.0% 0.0105 261.788)",
+          "oklch(61.0% 0.0105 261.788)",
+          "oklch(73.0% 0.0089 261.788)",
+          "oklch(85.0% 0.0053 261.788)",
+          "oklch(95.0% 0.0016 261.788)"
+        ]
+      },
+      "soft": {
+        "role": "primary",
+        "displayName": "Cobalt wash",
+        "canonical": "#e7edfc",
+        "tonalRamp": [
+          "oklch(15.0% 0.0032 268.431)",
+          "oklch(26.0% 0.0096 268.431)",
+          "oklch(38.0% 0.0170 268.431)",
+          "oklch(49.0% 0.0212 268.431)",
+          "oklch(61.0% 0.0212 268.431)",
+          "oklch(73.0% 0.0180 268.431)",
+          "oklch(85.0% 0.0106 268.431)",
+          "oklch(95.0% 0.0032 268.431)"
+        ]
+      },
+      "row-hover": {
+        "role": "primary",
+        "displayName": "Register hover",
+        "canonical": "#f3f5fc",
+        "tonalRamp": [
+          "oklch(15.0% 0.0014 273.357)",
+          "oklch(26.0% 0.0043 273.357)",
+          "oklch(38.0% 0.0077 273.357)",
+          "oklch(49.0% 0.0096 273.357)",
+          "oklch(61.0% 0.0096 273.357)",
+          "oklch(73.0% 0.0081 273.357)",
+          "oklch(85.0% 0.0048 273.357)",
+          "oklch(95.0% 0.0014 273.357)"
+        ]
+      },
+      "muted": {
+        "role": "neutral",
+        "displayName": "Muted graphite",
+        "canonical": "#565d69",
+        "tonalRamp": [
+          "oklch(15.0% 0.0032 261.283)",
+          "oklch(26.0% 0.0096 261.283)",
+          "oklch(38.0% 0.0170 261.283)",
+          "oklch(49.0% 0.0213 261.283)",
+          "oklch(61.0% 0.0213 261.283)",
+          "oklch(73.0% 0.0181 261.283)",
+          "oklch(85.0% 0.0106 261.283)",
+          "oklch(95.0% 0.0032 261.283)"
+        ]
+      },
+      "source": {
+        "role": "neutral",
+        "displayName": "Source paper",
+        "canonical": "#f0f1ed",
+        "tonalRamp": [
+          "oklch(15.0% 0.0008 117.925)",
+          "oklch(26.0% 0.0024 117.925)",
+          "oklch(38.0% 0.0043 117.925)",
+          "oklch(49.0% 0.0054 117.925)",
+          "oklch(61.0% 0.0054 117.925)",
+          "oklch(73.0% 0.0046 117.925)",
+          "oklch(85.0% 0.0027 117.925)",
+          "oklch(95.0% 0.0008 117.925)"
+        ]
+      },
+      "field-line": {
+        "role": "neutral",
+        "displayName": "Field line",
+        "canonical": "oklch(86.9% 0.022 252.894)",
+        "tonalRamp": [
+          "oklch(12.9% 0.042 264.695)",
+          "oklch(20.8% 0.042 265.755)",
+          "oklch(27.9% 0.041 260.031)",
+          "oklch(44.6% 0.043 257.281)",
+          "oklch(70.4% 0.04 256.788)",
+          "oklch(92.9% 0.013 255.508)",
+          "oklch(96.8% 0.007 247.896)",
+          "oklch(98.4% 0.003 247.858)"
+        ]
+      },
+      "review-background": {
+        "role": "semantic",
+        "displayName": "Amber evidence background",
+        "canonical": "oklch(98.7% 0.022 95.277)",
+        "tonalRamp": [
+          "oklch(27.9% 0.077 45.635)",
+          "oklch(41.4% 0.112 45.904)",
+          "oklch(47.3% 0.137 46.201)",
+          "oklch(66.6% 0.179 58.318)",
+          "oklch(82.8% 0.189 84.429)",
+          "oklch(92.4% 0.12 95.746)",
+          "oklch(96.2% 0.059 95.617)",
+          "oklch(98.7% 0.022 95.277)"
+        ]
+      },
+      "review-ink": {
+        "role": "semantic",
+        "displayName": "Amber evidence ink",
+        "canonical": "oklch(41.4% 0.112 45.904)",
+        "tonalRamp": [
+          "oklch(27.9% 0.077 45.635)",
+          "oklch(41.4% 0.112 45.904)",
+          "oklch(47.3% 0.137 46.201)",
+          "oklch(66.6% 0.179 58.318)",
+          "oklch(82.8% 0.189 84.429)",
+          "oklch(92.4% 0.12 95.746)",
+          "oklch(96.2% 0.059 95.617)",
+          "oklch(98.7% 0.022 95.277)"
+        ]
+      },
+      "complete-background": {
+        "role": "semantic",
+        "displayName": "Verified green background",
+        "canonical": "oklch(97.9% 0.021 166.113)",
+        "tonalRamp": [
+          "oklch(26.2% 0.051 172.552)",
+          "oklch(37.8% 0.077 168.94)",
+          "oklch(43.2% 0.095 166.913)",
+          "oklch(59.6% 0.145 163.225)",
+          "oklch(76.5% 0.177 163.223)",
+          "oklch(90.5% 0.093 164.15)",
+          "oklch(95% 0.052 163.051)",
+          "oklch(97.9% 0.021 166.113)"
+        ]
+      },
+      "complete-ink": {
+        "role": "semantic",
+        "displayName": "Verified green ink",
+        "canonical": "oklch(43.2% 0.095 166.913)",
+        "tonalRamp": [
+          "oklch(26.2% 0.051 172.552)",
+          "oklch(37.8% 0.077 168.94)",
+          "oklch(43.2% 0.095 166.913)",
+          "oklch(59.6% 0.145 163.225)",
+          "oklch(76.5% 0.177 163.223)",
+          "oklch(90.5% 0.093 164.15)",
+          "oklch(95% 0.052 163.051)",
+          "oklch(97.9% 0.021 166.113)"
+        ]
+      },
+      "exception-background": {
+        "role": "semantic",
+        "displayName": "Exception rose background",
+        "canonical": "oklch(96.9% 0.015 12.422)",
+        "tonalRamp": [
+          "oklch(27.1% 0.105 12.094)",
+          "oklch(41% 0.159 10.272)",
+          "oklch(45.5% 0.188 13.697)",
+          "oklch(58.6% 0.253 17.585)",
+          "oklch(71.2% 0.194 13.428)",
+          "oklch(89.2% 0.058 10.001)",
+          "oklch(94.1% 0.03 12.58)",
+          "oklch(96.9% 0.015 12.422)"
+        ]
+      },
+      "exception-ink": {
+        "role": "semantic",
+        "displayName": "Exception rose ink",
+        "canonical": "oklch(45.5% 0.188 13.697)",
+        "tonalRamp": [
+          "oklch(27.1% 0.105 12.094)",
+          "oklch(41% 0.159 10.272)",
+          "oklch(45.5% 0.188 13.697)",
+          "oklch(58.6% 0.253 17.585)",
+          "oklch(71.2% 0.194 13.428)",
+          "oklch(89.2% 0.058 10.001)",
+          "oklch(94.1% 0.03 12.58)",
+          "oklch(96.9% 0.015 12.422)"
+        ]
+      }
+    },
+    "typographyMeta": {
+      "heading": {
+        "displayName": "Page heading",
+        "purpose": "Fluid workspace title: clamp(1.65rem, 2.5vw, 2rem)."
+      },
+      "title": {
+        "displayName": "Drawer title",
+        "purpose": "Financial record and activity drawer headings."
+      },
+      "body": {
+        "displayName": "Working copy",
+        "purpose": "Register rows and supporting workspace copy."
+      },
+      "label": {
+        "displayName": "Supporting label",
+        "purpose": "Filter labels, state chips, and metadata."
+      },
+      "button": {
+        "displayName": "Action label",
+        "purpose": "Shared primary, secondary, and navigation labels."
+      }
+    },
+    "shadows": [
+      {
+        "name": "financial-drawer",
+        "value": "-12px 0 36px #181b2524",
+        "purpose": "Separates the right-edge modal financial drawer from the underlying register."
+      }
+    ],
+    "motion": [
+      {
+        "name": "color-transition-duration",
+        "value": "150ms",
+        "purpose": "Inherited Tailwind color transition duration on workspace controls."
+      },
+      {
+        "name": "color-transition-easing",
+        "value": "cubic-bezier(0.4, 0, 0.2, 1)",
+        "purpose": "Inherited Tailwind easing for existing control transitions."
+      },
+      {
+        "name": "reduced-motion",
+        "value": "@media (prefers-reduced-motion: reduce) { .workspace-page *, .workbench-drawer * { scroll-behavior: auto; transition: none; } }",
+        "purpose": "Actual reduced-motion override for workspace pages and financial drawers."
+      }
+    ],
+    "breakpoints": [
+      {
+        "name": "sm",
+        "value": "640px"
+      },
+      {
+        "name": "lg",
+        "value": "1024px"
+      }
+    ]
+  },
+  "components": [
+    {
+      "name": "Primary action",
+      "kind": "button",
+      "refersTo": "button-primary",
+      "description": "Square cobalt action used for creating and confirming workspace work.",
+      "html": "<button type=\"button\" class=\"ds-primary\">New invoice</button>",
+      "css": ".ds-primary{font-family:var(--font-workspace,Manrope),sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:8px 12px;border:1px solid var(--prism-blue,#1546ce);border-radius:0;background:var(--prism-blue,#1546ce);color:#fff;font-size:14px;line-height:20px;font-weight:600;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1);}.ds-primary:hover{background:var(--prism-blue,#1546ce)}.ds-primary:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}.ds-primary:disabled{opacity:.6;cursor:not-allowed}@media(prefers-reduced-motion:reduce){.ds-primary,.ds-secondary,.ds-nav a{transition:none}}"
+    },
+    {
+      "name": "Secondary action",
+      "kind": "button",
+      "refersTo": "button-secondary",
+      "description": "White framed action for filtering, paging, and secondary commands.",
+      "html": "<button type=\"button\" class=\"ds-secondary\">Reset filters</button>",
+      "css": ".ds-secondary{font-family:var(--font-workspace,Manrope),sans-serif;display:inline-flex;align-items:center;justify-content:center;gap:8px;min-height:42px;padding:8px 12px;border:1px solid oklch(86.9% .022 252.894);border-radius:0;background:#fff;color:oklch(27.9% .041 260.031);font-size:14px;line-height:20px;font-weight:600;cursor:pointer;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1);}.ds-secondary:hover{border-color:oklch(80.9% .105 251.813);background:oklch(97% .014 254.604)}.ds-secondary:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}.ds-secondary:disabled{opacity:.6;cursor:not-allowed}@media(prefers-reduced-motion:reduce){.ds-primary,.ds-secondary,.ds-nav a{transition:none}}"
+    },
+    {
+      "name": "Labeled field",
+      "kind": "input",
+      "refersTo": "field",
+      "description": "Square field with a persistent visible label and cobalt keyboard focus.",
+      "html": "<label class=\"ds-field-label\" for=\"ds-search\">Search<input id=\"ds-search\" class=\"ds-field\" type=\"search\" placeholder=\"Number, contact, or supplier reference…\"></label>",
+      "css": ".ds-field-label{font-family:var(--font-workspace,Manrope),sans-serif;display:grid;gap:4px;max-width:360px;color:var(--prism-ink,#181b25);font-size:12px;line-height:16px;font-weight:600}.ds-field{font-family:var(--font-workspace,Manrope),sans-serif;min-width:0;min-height:42px;padding:8px 12px;border:1px solid oklch(86.9% .022 252.894);border-radius:0;background:#fff;color:oklch(12.9% .042 264.695);font-size:16px;line-height:24px;font-weight:400}.ds-field::placeholder{color:#606775;opacity:1}.ds-field:hover{cursor:text}.ds-field:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}@media(min-width:640px){.ds-field{font-size:14px;line-height:20px}}"
+    },
+    {
+      "name": "Workspace navigation",
+      "kind": "nav",
+      "refersTo": "navigation-selected",
+      "description": "Paper navigation spine with explicit destinations and a cobalt current selection.",
+      "html": "<nav class=\"ds-nav\" aria-label=\"Sample workspace navigation\"><a href=\"#ds-dashboard\">Dashboard</a><a href=\"#ds-invoices\" aria-current=\"page\">Sales</a><a href=\"#ds-bills\">Purchases</a></nav>",
+      "css": ".ds-nav{font-family:var(--font-workspace,Manrope),sans-serif;width:230px;max-width:100%;padding:12px;background:var(--prism-paper,#fafaf7);border-right:1px solid var(--prism-rule,#343942)}.ds-nav a{display:flex;align-items:center;gap:12px;min-height:46px;padding:0 12px;border:1px solid transparent;border-radius:0;color:var(--prism-rule,#343942);font-size:14px;line-height:20px;font-weight:500;text-decoration:none;transition:background-color 150ms cubic-bezier(.4,0,.2,1),color 150ms cubic-bezier(.4,0,.2,1),border-color 150ms cubic-bezier(.4,0,.2,1);}.ds-nav a:hover{background:var(--prism-soft,#e7edfc);color:var(--prism-ink,#181b25)}.ds-nav a[aria-current=\"page\"]{border-color:var(--prism-blue,#1546ce);background:var(--prism-blue,#1546ce);color:#fff;font-weight:600}.ds-nav a:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}@media(prefers-reduced-motion:reduce){.ds-primary,.ds-secondary,.ds-nav a{transition:none}}"
+    },
+    {
+      "name": "Evidence review status",
+      "kind": "chip",
+      "refersTo": "status-review",
+      "description": "A labeled amber state marker for evidence or accounting work that needs attention.",
+      "html": "<span class=\"ds-status\"><span class=\"ds-status-dot\" aria-hidden=\"true\"></span>Needs review</span>",
+      "css": ".ds-status{font-family:var(--font-workspace,Manrope),sans-serif;display:inline-flex;align-items:center;gap:6px;padding:4px 8px;border-radius:9999px;background:oklch(98.7% .022 95.277);color:oklch(41.4% .112 45.904);font-size:12px;line-height:16px;font-weight:600;white-space:nowrap}.ds-status-dot{width:6px;height:6px;border-radius:9999px;background:currentColor}"
+    },
+    {
+      "name": "Ruled work panel",
+      "kind": "card",
+      "refersTo": "panel",
+      "description": "Flat white container that gives related work a thin boundary.",
+      "html": "<section class=\"ds-panel\" aria-labelledby=\"ds-panel-title\"><header class=\"ds-panel-header\"><h2 id=\"ds-panel-title\">Document inbox</h2></header><p class=\"ds-panel-copy\">Review source evidence before recording it.</p></section>",
+      "css": ".ds-panel{font-family:var(--font-workspace,Manrope),sans-serif;max-width:480px;border:1px solid var(--prism-line,#d7dbe2);border-radius:0;background:#fff;color:var(--prism-ink,#181b25);box-shadow:none}.ds-panel-header{padding:14px 16px;border-bottom:1px solid oklch(92.9% .013 255.508)}.ds-panel-header h2{margin:0;font-size:16px;line-height:24px;font-weight:600;letter-spacing:-.025em}.ds-panel-copy{margin:0;padding:16px;font-size:14px;line-height:20px}"
+    },
+    {
+      "name": "Balance register",
+      "kind": "custom",
+      "refersTo": "balance-register",
+      "description": "Paper financial strip with labeled tabular amounts; these figures are sample values.",
+      "html": "<dl class=\"ds-balances\"><div><dt>Opening balance · Sample</dt><dd>$1,000.00</dd></div><div><dt>Period debits</dt><dd>$250.00</dd></div><div><dt>Closing balance</dt><dd>$1,250.00</dd></div></dl>",
+      "css": ".ds-balances{font-family:var(--font-workspace,Manrope),sans-serif;display:grid;grid-template-columns:repeat(auto-fit,minmax(125px,1fr));max-width:650px;margin:0;border-top:1px solid var(--prism-rule,#343942);border-bottom:1px solid var(--prism-rule,#343942);background:var(--prism-paper,#fafaf7);color:var(--prism-ink,#181b25)}.ds-balances>div{padding:14px 12px}.ds-balances dt{font-size:12px;line-height:18px;color:#565d69}.ds-balances dd{margin:7px 0 0;font-size:18px;line-height:27px;font-weight:700;font-variant-numeric:tabular-nums}"
+    },
+    {
+      "name": "Responsive record register",
+      "kind": "custom",
+      "description": "Thin ruled financial rows become labeled records on narrow screens; this row is sample data.",
+      "html": "<div class=\"ds-register-wrap\"><table class=\"ds-register\"><caption>Sample invoice record · USD</caption><thead><tr><th scope=\"col\">Invoice</th><th scope=\"col\">Customer</th><th scope=\"col\" class=\"ds-amount\">Balance due</th></tr></thead><tbody><tr><td data-label=\"Invoice\"><button class=\"ds-record-link\" type=\"button\">INV-SAMPLE</button></td><td data-label=\"Customer\">Sample client</td><td class=\"ds-amount\" data-label=\"Balance due\">$1,250.00</td></tr></tbody></table></div>",
+      "css": ".ds-register-wrap{max-width:100%;overflow-x:auto}.ds-register{font-family:var(--font-workspace,Manrope),sans-serif;width:100%;border-collapse:collapse;background:#fff;color:var(--prism-ink,#181b25);font-size:14px;line-height:20px;text-align:left;font-variant-numeric:tabular-nums}.ds-register caption{padding:8px;text-align:left;color:#565d69;font-size:12px}.ds-register th,.ds-register td{padding:14px 12px;border-bottom:1px solid oklch(92.9% .013 255.508);vertical-align:top}.ds-register th{background:var(--prism-paper,#fafaf7);color:#565d69;font-weight:600}.ds-register tbody tr:hover{background:#f3f5fc}.ds-register tbody tr:has(button:focus-visible){background:#e7edfc}.ds-amount{text-align:right;white-space:nowrap}.ds-record-link{font-family:var(--font-workspace,Manrope),sans-serif;min-height:44px;border:0;border-radius:0;background:transparent;color:var(--prism-blue,#1546ce);font-size:14px;font-weight:600;text-align:left;cursor:pointer}.ds-record-link:hover{background:oklch(97% .014 254.604)}.ds-record-link:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}@media(max-width:640px){.ds-register,.ds-register tbody{display:block}.ds-register thead{position:absolute;width:1px;height:1px;overflow:hidden;clip-path:inset(50%)}.ds-register tr{display:grid;grid-template-columns:repeat(2,minmax(0,1fr));border-bottom:1px solid var(--prism-rule,#343942);padding:10px 4px}.ds-register td{display:block;padding:8px;min-width:0;border:0;overflow-wrap:anywhere}.ds-register td:before{content:attr(data-label);display:block;color:#565d69;font-size:12px;font-weight:600;margin-bottom:5px}.ds-register td:first-child{grid-column:1/-1}.ds-amount{text-align:left;white-space:normal}}"
+    },
+    {
+      "name": "Financial preview context header",
+      "kind": "custom",
+      "description": "Sticky paper drawer header repeats the active workspace; the displayed client is a sample.",
+      "html": "<header class=\"ds-drawer-header\"><div><h2>Invoice preview</h2><p>Sample client workspace</p></div><button class=\"ds-drawer-close\" type=\"button\" aria-label=\"Close preview\"><svg width=\"16\" height=\"16\" viewBox=\"0 0 24 24\" fill=\"none\" stroke=\"currentColor\" stroke-width=\"2\" stroke-linecap=\"round\" aria-hidden=\"true\"><path d=\"M18 6 6 18M6 6l12 12\"/></svg></button></header>",
+      "css": ".ds-drawer-header{font-family:var(--font-workspace,Manrope),sans-serif;position:sticky;top:0;z-index:2;display:flex;align-items:center;justify-content:space-between;gap:16px;padding:16px 24px;background:var(--prism-paper,#fafaf7);border-bottom:1px solid var(--prism-rule,#343942);color:var(--prism-ink,#181b25)}.ds-drawer-header>div{min-width:0}.ds-drawer-header h2{margin:0;font-size:18px;line-height:27px;font-weight:700}.ds-drawer-header p{margin:4px 0 0;font-size:12px;line-height:16px;color:oklch(44.6% .043 257.281);overflow-wrap:anywhere}.ds-drawer-close{display:inline-flex;align-items:center;justify-content:center;min-height:42px;padding:8px 12px;border:1px solid oklch(86.9% .022 252.894);border-radius:0;background:#fff;color:oklch(27.9% .041 260.031);cursor:pointer}.ds-drawer-close:hover{border-color:oklch(80.9% .105 251.813);background:oklch(97% .014 254.604)}.ds-drawer-close:focus-visible{outline:2px solid var(--prism-blue,#1546ce);outline-offset:3px;}@media(max-width:640px){.ds-drawer-header{padding:14px 16px}}"
+    }
+  ],
+  "narrative": {
+    "northStar": "Prism",
+    "overview": "Separate workspaces, a clear accounting picture. Pale paper, white working surfaces, graphite rules, and cobalt selection give each task a defined place. Manrope supplies a consistent working voice; aligned figures and restrained labels make dense financial information readable.\n\nThis system governs the signed-in Operate workspace, including its navigation, worklists, and financial drawers. Marketing and authentication keep their incumbent surfaces. The selected preview establishes the visual direction; the implemented components determine the tokens captured here. Prism uses structural panes and flush boundaries without decorative glass blur.",
+    "keyCharacteristics": [
+      "Paper and white surfaces separated by thin rules.",
+      "Cobalt actions and selection with explicit text labels.",
+      "Square primary controls and flat work panels.",
+      "Visible workspace identity beside financial work.",
+      "Tabular figures and labeled mobile records."
+    ],
+    "rules": [
+      {
+        "name": "The State Meaning Rule",
+        "body": "Use status colors with their visible state labels. Cobalt indicates interaction or selection; it does not establish that money has been posted, paid, or reconciled.",
+        "section": "colors"
+      },
+      {
+        "name": "The Aligned Figures Rule",
+        "body": "Use tabular numerals for financial values, align desktop amount columns to the right, and preserve currency and precision supplied by the money formatter. Calculation and posting semantics belong to the accounting implementation, not visual tokens.",
+        "section": "typography"
+      },
+      {
+        "name": "The Ruled Surface Rule",
+        "body": "Use borders, alignment, and tonal separation for ordinary work. Preserve overlay shadows for drawers and pickers rather than spreading them across register panels.",
+        "section": "elevation"
+      }
+    ],
+    "dos": [
+      "**Do** apply Prism to Operate workspace surfaces and financial drawers, using the scoped workspace font.",
+      "**Do** keep the active workspace name visible in narrow headers and financial drawers.",
+      "**Do** preserve visible status labels, field labels, mobile record labels, and keyboard focus.",
+      "**Do** use tabular money values and existing exact-money formatting without altering accounting semantics.",
+      "**Do** keep source evidence, recorded bills, and payments visibly distinct.",
+      "**Do** extend the existing navigation, state components, and role-aware controls."
+    ],
+    "donts": [
+      "**Don't** introduce decorative glass blur into the selected pane-and-rule system.",
+      "**Don't** enable OS dark mode from this light-only workspace contract.",
+      "**Don't** spread Prism typography or workspace styling into marketing and authentication without a separate approved change.",
+      "**Don't** infer posting, payment, or reconciliation success from cobalt selection or a balanced visual layout.",
+      "**Don't** add repeated summary surfaces where a register, source record, or existing dashboard already owns that information.",
+      "**Don't** erase retained status, switcher, or popover behavior to make every element square."
+    ]
+  }
+}

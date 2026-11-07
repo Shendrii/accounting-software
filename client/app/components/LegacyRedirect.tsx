@@ -9,7 +9,7 @@ export function LegacyRedirect({ to, preserveLastSegment = false }: { to: string
   const target = preserveLastSegment ? `${to}/${pathname.split('/').filter(Boolean).at(-1)}` : to;
 
   useEffect(() => {
-    router.replace(target);
+    router.replace(target + window.location.search + window.location.hash);
   }, [router, target]);
 
   return null;

@@ -25,10 +25,10 @@ function Dashboard() {
   return (
     <div className="workspace-page">
       <div className="workspace-content space-y-5">
-        <WorkspaceHeading section="Workspace" title="Accounting overview" description="See what needs your attention and pick up the next task."
+        <WorkspaceHeading section="Workspace" title="Dashboard" description="See what needs your attention and pick up the next task."
           actions={<>
             <Link href="/sales/invoices/new" className="workspace-primary"><Plus className="size-4" aria-hidden="true" />New invoice</Link>
-            <Link href="/inbox#upload-receipt" className="workspace-button"><Inbox className="size-4" aria-hidden="true" />Upload receipt</Link>
+            <Link href="/purchases/documents#upload-receipt" className="workspace-button"><Inbox className="size-4" aria-hidden="true" />Upload receipt</Link>
           </>} />
 
         {summary.error && <WorkspaceNotice title="Some totals could not load" onRetry={summary.retry}>
@@ -41,7 +41,7 @@ function Dashboard() {
             detail={summary.data ? formatCount(summary.data.outstandingInvoicesCount, 'open invoice') : summary.loading ? 'Loading…' : 'Unavailable'} />
           <WorkspaceMetric label="Bills to pay" icon={ShoppingCart} href="/purchases" value={purchases ? formatUsd(purchases.openBalance) : '—'}
             detail={purchases ? formatCount(purchases.openCount, 'unpaid bill') : summary.loading ? 'Loading…' : 'Unavailable'} />
-          <WorkspaceMetric label="Items to review" icon={Inbox} href="/inbox" value={reviewCount === undefined ? '—' : String(reviewCount)}
+          <WorkspaceMetric label="Items to review" icon={Inbox} href="/purchases/documents?status=PENDING" value={reviewCount === undefined ? '—' : String(reviewCount)}
             detail={reviewCount !== undefined ? 'Receipts in your inbox' : summary.loading ? 'Loading…' : 'Unavailable'} />
         </div>
 
@@ -57,7 +57,7 @@ function Dashboard() {
             <WorkspacePanel title="Needs attention" description="Go straight to the work that needs a decision.">
               <div className="divide-y divide-slate-200">
                 <WorkspaceRow icon={Inbox} title={reviewCount === undefined ? 'Receipt review' : formatCount(reviewCount, 'receipt') + ' to review'}
-                  detail={summary.error ? 'The inbox count is unavailable.' : 'Check extracted details before posting.'} href="/inbox" action="Review" />
+                  detail={summary.error ? 'The inbox count is unavailable.' : 'Check extracted details before posting.'} href="/purchases/documents?status=PENDING" action="Review" />
                 <WorkspaceRow icon={ShoppingCart} title={purchases ? formatCount(purchases.overdueCount, 'overdue bill') : 'Overdue bills'}
                   detail={summary.error ? 'The bills count is unavailable.' : 'Review vendor due dates.'} href="/purchases/bills" action="View" />
                 <WorkspaceRow icon={Landmark} title={close ? formatCount(close.unmatchedBankTransactions, 'unmatched bank line') : 'Bank matching'}

@@ -73,7 +73,7 @@ export default function WorkspaceSwitcher({ mobile = false }: { mobile?: boolean
   }
 
   return (
-    <div ref={container} className={mobile ? 'relative min-w-0 max-w-[58%] lg:hidden' : 'relative shrink-0 px-3 max-lg:hidden'}
+    <div ref={container} className={mobile ? 'relative min-w-0 max-sm:order-last max-sm:w-full sm:max-w-[58%] lg:hidden' : 'relative shrink-0 px-3 max-lg:hidden'}
       onKeyDown={onKeyDown} onBlur={event => {
         if (open && event.relatedTarget && !event.currentTarget.contains(event.relatedTarget)) close(false);
       }}>
@@ -81,11 +81,11 @@ export default function WorkspaceSwitcher({ mobile = false }: { mobile?: boolean
         title={name} onClick={() => { if (open) close(); else { setSearch(''); setOpen(true); } }}
         className={'flex min-h-11 w-full cursor-pointer items-center gap-2 rounded-xl border text-left transition-colors ' +
           (mobile ? 'border-slate-200 bg-white p-1.5 text-slate-900 hover:bg-blue-50'
-            : 'border-blue-100/20 bg-white/5 p-2.5 text-white hover:border-blue-300/60 hover:bg-blue-300/10')}>
+            : 'border-slate-300 bg-white p-2.5 text-slate-950 hover:border-blue-700 hover:bg-blue-50')}>
         <WorkspaceAvatar name={active?.name ?? ''} type={active?.type} />
         <span className="min-w-0 flex-1">
-          <span className={'block text-[10px] font-semibold tracking-wider uppercase ' + (mobile ? 'text-slate-600' : 'text-blue-100/80')}>Active workspace</span>
-          <span className="block truncate text-xs font-semibold">{name}</span>
+          <span className={'block text-[10px] font-semibold tracking-wider uppercase ' + (mobile ? 'text-slate-600' : 'text-slate-600')}>Active workspace</span>
+          <span className="block text-xs font-semibold break-words sm:truncate">{name}</span>
         </span>
         <ChevronsUpDown className="size-4 shrink-0" aria-hidden="true" />
       </button>
@@ -94,7 +94,7 @@ export default function WorkspaceSwitcher({ mobile = false }: { mobile?: boolean
         className={'absolute z-[60] w-88 max-w-[calc(100vw-1.5rem)] rounded-2xl border border-slate-200 bg-white text-slate-950 shadow-xl ' +
           (mobile ? 'right-0 top-full mt-2' : 'left-[calc(100%-0.75rem)] top-0')}>
         <header className="flex items-start justify-between gap-3 px-4 pt-3 pb-2">
-          <div><p className="workspace-eyebrow">Workspace switcher</p><h2 id={titleId} className="mt-1 font-semibold tracking-tight">Your workspaces</h2></div>
+          <div><h2 id={titleId} className="mt-1 font-semibold tracking-tight">Your workspaces</h2></div>
           <button type="button" aria-label="Close workspace switcher" className="workspace-button min-w-10 px-2" onClick={() => close()}><X className="size-4" aria-hidden="true" /></button>
         </header>
         <div className="px-4">

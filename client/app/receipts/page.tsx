@@ -1,17 +1,32 @@
 'use client';
 
-import { useCallback, useState, type FormEvent } from 'react';
+import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Check, Loader2, Search, Upload, X } from 'lucide-react';
-import { approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBills, getReceipts, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
+import { Check, Loader2, Upload, X } from 'lucide-react';
+import { approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBillPage, getReceipt, getReceiptPage, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
 import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
 import { decimalUnits, formatUsd } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import AccountingDialog from '@/app/components/AccountingDialog';
+import BackToWorklist from '@/app/components/BackToWorklist';
 import ReceiptImage from '@/app/components/ReceiptImage';
 import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
-import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { useWorklist, WorklistControls, WorklistPagination } from '@/app/components/WorklistControls';
+import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
+function editableReceipt(receipt: Receipt) { return receipt.status === 'PENDING'; }
+function receiptIssues(data: { invoiceDate: string; total: string; amountPaid: string; balanceDue: string; tax: string; tip: string; items: { amount: string }[] }) {
+  const issues: Record<string, string> = {};
+  if (!validDate(data.invoiceDate)) issues.invoiceDate = 'Confirm a valid date from the source.';
+  for (const key of ['total', 'amountPaid', 'balanceDue', 'tax', 'tip'] as const) if (!/^\d{1,13}(\.\d{1,2})?$/.test(data[key])) issues[key] = 'Enter a nonnegative amount with up to two decimals.';
+  const total = decimalUnits(data.total), paid = decimalUnits(data.amountPaid), due = decimalUnits(data.balanceDue), tax = decimalUnits(data.tax), tip = decimalUnits(data.tip);
+  if (total <= BigInt(0)) issues.total = 'Confirm a positive document total.';
+  if (paid > total || due > total || paid > BigInt(0) && due > BigInt(0) && paid + due !== total) { issues.amountPaid = 'Paid plus outstanding amounts must agree with the total.'; issues.balanceDue = issues.amountPaid; }
+  if (tax + tip > total) issues.tax = 'Tax plus tip cannot exceed the total.';
+  if (data.items.some(item => !/^\d{1,13}(\.\d{1,2})?$/.test(item.amount)) || data.items.length && data.items.reduce((sum, item) => sum + decimalUnits(item.amount), BigInt(0)) + tax + tip !== total) issues.items = 'Line items plus tax and tip must equal the total.';
+  return issues;
+}
 function validDate(value: string) {
   const date = new Date(value + 'T00:00:00Z');
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
@@ -22,40 +37,55 @@ function status(receipt: Receipt) {
   return validDate(receipt.extractedData.invoiceDate || receipt.extractedData.date || '') ? 'Needs review' : 'Check date';
 }
 async function loadLookups() {
-  const [accounts, vendors, bills] = await Promise.all([getAccounts(), getVendors({ isActive: true }), getBills()]);
-  return { accounts: accounts.filter(account => account.isActive), vendors, bills: bills.filter(bill => bill.status !== 'VOID') };
+  const [accounts, vendors, bills] = await Promise.all([getAccounts(), getVendors({ isActive: true }), getBillPage({ page: 1, pageSize: 50, view: 'non-void' })]);
+  return { accounts: accounts.filter(account => account.isActive), vendors, bills: bills.items };
 }
 
-export function ReceiptsPage() {
-  const [view, setView] = useState<'PENDING' | 'all'>('PENDING');
-  const [search, setSearch] = useState('');
-  const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [opened, setOpened] = useState(false);
+function DocumentsContent() {
+  const state = useWorklist(); const { params, update } = state;
+  const selectedId = params.receipt || null;
+  const guard = useRef({ dirty: false, busy: false });
+  const [pending, setPending] = useState<(() => void) | null>(null);
   const [uploading, setUploading] = useState(false);
   const [error, setError] = useState('');
   const [notice, setNotice] = useState<{ text: string; billId?: string | null } | null>(null);
-  const loadQueue = useCallback(() => getReceipts(view === 'all' ? undefined : view), [view]);
+  const filters = JSON.stringify(Object.fromEntries(['page', 'pageSize', 'q', 'status', 'startDate', 'endDate', 'sort', 'direction'].flatMap(key => params[key] ? [[key, params[key]]] : [])));
+  const loadQueue = useCallback(() => getReceiptPage(JSON.parse(filters)), [filters]);
   const queue = useWorkspaceData(loadQueue);
-  const loadReview = useCallback(() => opened ? loadLookups() : Promise.resolve(null), [opened]);
+  const loadReview = useCallback(() => selectedId ? loadLookups() : Promise.resolve(null), [selectedId]);
   const lookups = useWorkspaceData(loadReview);
-  const receipts = (queue.data ?? []).filter(receipt => [receipt.extractedData.vendor, receipt.extractedData.invoiceNumber, receipt.category]
-    .some(value => (value ?? '').toLowerCase().includes(search.toLowerCase())));
-  const selected = queue.data?.find(receipt => receipt.id === selectedId);
+  const loadDocument = useCallback(() => selectedId ? getReceipt(selectedId) : Promise.resolve(null), [selectedId]);
+  const review = useWorkspaceData(loadDocument);
+  const receipts = queue.data?.items ?? [];
+  const selected = review.data;
+  useEffect(() => { if (selected?.id) document.getElementById('document-review')?.scrollIntoView({ block: 'start' }); }, [selected?.id]);
+  const selectedIndex = receipts.findIndex(receipt => receipt.id === selectedId);
+  function leave(action: () => void) { if (guard.current.busy) return; if (guard.current.dirty) setPending(() => action); else action(); }
+  function choose(id: string) { leave(() => { guard.current = { dirty: false, busy: false }; update({ receipt: id }, false); }); }
+  useEffect(() => {
+    function beforeUnload(event: BeforeUnloadEvent) { if (guard.current.dirty || guard.current.busy) event.preventDefault(); }
+    function navigation(event: MouseEvent) {
+      const anchor = (event.target as Element).closest('a[href]');
+      if (anchor && !anchor.getAttribute('href')?.startsWith('blob:') && (guard.current.dirty || guard.current.busy)) { event.preventDefault(); event.stopPropagation(); if (!guard.current.busy) setPending(() => () => { guard.current = { dirty: false, busy: false }; window.location.assign((anchor as HTMLAnchorElement).href); }); }
+    }
+    window.addEventListener('beforeunload', beforeUnload); document.addEventListener('click', navigation, true);
+    return () => { window.removeEventListener('beforeunload', beforeUnload); document.removeEventListener('click', navigation, true); };
+  }, []);
   async function upload(file: File) {
     setUploading(true); setError(''); setNotice(null);
-    try { await uploadReceipt(file); await queue.retry(); }
+    try { await uploadReceipt(file); window.dispatchEvent(new Event('accountrix:documents-changed')); queue.retry(); }
     catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not upload receipt.'); }
     finally { setUploading(false); }
   }
   function completed(receipt: Receipt, text: string) {
-    setNotice({ text, billId: receipt.billId }); setSelectedId(null); void queue.retry(); void lookups.retry();
+    window.dispatchEvent(new Event('accountrix:documents-changed')); setNotice({ text, billId: receipt.billId }); guard.current = { dirty: false, busy: false }; const next = receipts[selectedIndex + 1]; update({ receipt: next?.id || '' }, false); queue.retry();
   }
   return <div className="workspace-page"><div className="workspace-content space-y-5">
-    <WorkspaceHeading section="Daily work" title="Receipts" description="Review the document, then choose how it should be recorded."
-      actions={<a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>} />
+    <WorkspaceHeading section="Daily work" title="Document inbox" description="Review source evidence, confirm the amounts, then choose paid purchase, draft bill, or attachment."
+      actions={!selectedId ? <a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a> : undefined} />
     {error && <WorkspaceNotice title="Upload could not finish">{error}</WorkspaceNotice>}
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">{notice.text} {notice.billId && <Link href={'/purchases/bills/' + notice.billId} className="font-semibold underline">Open bill</Link>}</div>}
-    <section id="upload-receipt" className="workspace-panel scroll-mt-4 p-4 sm:p-5">
+    {!selectedId && <section id="upload-receipt" className="workspace-panel scroll-mt-4 p-4 sm:p-5">
       <label className="flex cursor-pointer flex-wrap items-center gap-3">
         <span className="workspace-icon">{uploading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}</span>
         <span className="min-w-32 flex-1"><span className="block text-sm font-semibold">{uploading ? 'Processing receipt…' : 'Add a receipt image'}</span><span className="text-xs text-slate-600">JPEG, PNG, or WebP · Duplicate images are checked.</span></span>
@@ -63,32 +93,35 @@ export function ReceiptsPage() {
           onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }}
           className="max-w-full text-sm file:mr-2 file:min-h-11 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:font-semibold file:text-blue-900" />
       </label>
-    </section>
-    <nav className="workspace-tabs" aria-label="Receipt views">{(['PENDING', 'all'] as const).map(value => <button key={value} type="button" className="workspace-tab" aria-current={view === value ? 'page' : undefined}
-      onClick={() => { setView(value); setSelectedId(null); }}>{value === 'PENDING' ? 'Needs review' : 'All receipts'}</button>)}</nav>
-    <label className="relative block"><Search className="absolute left-3 top-3 size-4 text-slate-500" aria-hidden="true" /><span className="sr-only">Search receipts</span>
-      <input className="workspace-field pl-9" placeholder="Search vendor, supplier reference, or category…" value={search} onChange={event => setSearch(event.target.value)} /></label>
+    </section>}
+    <WorkflowTabs area="purchases" active="documents" />
+    {!selectedId && <WorklistControls state={state} kind="documents" statuses={[["PENDING", "Needs review"], ["APPROVED", "Reviewed"], ["REJECTED", "Rejected"]]} />}
     {queue.error && <WorkspaceNotice title="Receipts could not load" onRetry={queue.retry} />}
-    <WorkspacePanel title="Receipt queue" description={queue.loading ? 'Loading…' : receipts.length + ' receipts'}>
+    {!selectedId && <WorkspacePanel title="Document queue" description={queue.loading ? 'Loading…' : (queue.data?.total ?? 0) + ' documents'}>
       {queue.loading || !receipts.length ? <p className="p-4 text-sm text-slate-600" role="status">{queue.loading ? 'Loading receipts…' : 'No receipts in this view.'}</p> :
-        <div className="workspace-table-wrap"><table className="workspace-table">
-          <thead><tr><th scope="col">Document</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Total (USD)</th></tr></thead>
+        <div className="workspace-table-wrap"><table className={'workspace-table workbench-table ' + (params.density === 'compact' ? 'workbench-compact' : '')}>
+          <thead><tr><th scope="col">Document</th><th scope="col">Document date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Total (USD)</th></tr></thead>
           <tbody>{receipts.map(receipt => <tr key={receipt.id}>
-            <td><button type="button" className="min-h-11 text-left font-semibold text-blue-800 hover:underline" aria-expanded={selectedId === receipt.id} onClick={() => { setSelectedId(receipt.id); setOpened(true); }}>{receipt.extractedData.vendor || 'Unnamed receipt'}</button><p className="text-xs text-slate-600">{receipt.extractedData.invoiceNumber}</p></td>
-            <td>{receipt.extractedData.invoiceDate || receipt.extractedData.date || 'Confirm date'}</td><td><WorkspaceStatus>{status(receipt)}</WorkspaceStatus></td>
-            <td className="workspace-number">{formatUsd(receipt.extractedData.total ?? receipt.extractedData.amount ?? 0)}</td>
+            <td data-label="Document"><button type="button" className="min-h-11 text-left font-semibold text-blue-800 hover:underline" aria-expanded={selectedId === receipt.id} onClick={() => choose(receipt.id)}>{receipt.extractedData.vendor || 'Unnamed receipt'}</button><p className="text-xs text-slate-600">{receipt.extractedData.invoiceNumber}</p></td>
+            <td data-label="Document date">{validDate(receipt.extractedData.invoiceDate || receipt.extractedData.date || '') ? receipt.extractedData.invoiceDate || receipt.extractedData.date : 'Confirm date'}</td><td data-label="Status"><WorkspaceStatus>{status(receipt)}</WorkspaceStatus></td>
+            <td data-label="Total" className="workspace-number">{formatUsd(receipt.extractedData.total ?? receipt.extractedData.amount ?? 0)}</td>
           </tr>)}</tbody>
         </table></div>}
-    </WorkspacePanel>
-    {selected && <section aria-label="Receipt review" className="space-y-3">
-      <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Review document</h2><button className="workspace-button" onClick={() => setSelectedId(null)} type="button"><X className="size-4" aria-hidden="true" />Close review</button></div>
+      <WorklistPagination data={queue.data} loading={queue.loading} onPage={page => leave(() => update({ page: String(page), receipt: '' }, false))} onPageSize={pageSize => leave(() => update({ pageSize, receipt: '' }))} />
+    </WorkspacePanel>}
+    {selectedId && review.error && <WorkspaceNotice title="Document could not load" onRetry={review.retry} />}
+    {selectedId && review.loading && <p role="status">Loading document…</p>}
+    {params.returnTo && <BackToWorklist fallback="/purchases/documents" label="Return to report" />}
+    {selected && <section id="document-review" aria-label="Receipt review" className="space-y-3">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Review document</h2><div className="flex flex-wrap gap-2"><button type="button" className="workspace-button" disabled={selectedIndex <= 0} onClick={() => choose(receipts[selectedIndex - 1].id)}>Previous</button><button type="button" className="workspace-button" disabled={selectedIndex < 0 || selectedIndex >= receipts.length - 1} onClick={() => choose(receipts[selectedIndex + 1].id)}>Next</button><button className="workspace-button" onClick={() => choose('')} type="button"><X className="size-4" aria-hidden="true" />Close review</button></div></div>
       {lookups.error && <WorkspaceNotice title="Review accounts and vendors could not load" onRetry={lookups.retry} />}
-      {lookups.data ? <ReceiptReview key={selected.id + selected.updatedAt} receipt={selected} {...lookups.data} onComplete={completed} /> : <p role="status" className="p-4 text-sm text-slate-600">Loading review details…</p>}
+      {lookups.data ? <ReceiptReview key={selected.id + selected.updatedAt} receipt={selected} {...lookups.data} onComplete={completed} onReviewState={(dirty, busy) => { guard.current = { dirty, busy }; }} /> : <p role="status" className="p-4 text-sm text-slate-600">Loading review details…</p>}
     </section>}
+    {pending && <AccountingDialog title="Unsaved review changes" onDismiss={() => setPending(null)}><p className="mb-4 text-sm">Discard your changes and leave this document?</p><div className="flex flex-wrap gap-2"><button type="button" className="workspace-primary" onClick={() => setPending(null)}>Continue editing</button><button type="button" className="workspace-button" onClick={() => { const action = pending; setPending(null); guard.current = { dirty: false, busy: false }; action(); }}>Discard changes</button></div></AccountingDialog>}
   </div></div>;
 }
 
-function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { receipt: Receipt; accounts: Account[]; vendors: Vendor[]; bills: Bill[]; onComplete: (receipt: Receipt, text: string) => void }) {
+function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReviewState }: { receipt: Receipt; accounts: Account[]; vendors: Vendor[]; bills: Bill[]; onComplete: (receipt: Receipt, text: string) => void; onReviewState: (dirty: boolean, busy: boolean) => void }) {
   const original = receipt.extractedData;
   const [data, setData] = useState(() => ({
     vendor: original.vendor ?? '', invoiceNumber: original.invoiceNumber ?? '',
@@ -107,19 +140,29 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { rece
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
+  const snapshot = JSON.stringify({ data, vendorId });
+  const savedSnapshot = useRef(snapshot);
+  const dirty = editableReceipt(receipt) && (snapshot !== savedSnapshot.current || Boolean(accountId || paymentId || billId !== (receipt.billId || '') || dueDate !== (original.dueDate || '') || paidInFull));
+  const stateCallback = useRef(onReviewState); stateCallback.current = onReviewState;
+  useEffect(() => { stateCallback.current(dirty, busy); }, [dirty, busy]);
+  const [billSearch, setBillSearch] = useState('');
+  const billLoad = useCallback(() => getBillPage({ pageSize: 50, view: 'non-void', vendorId, q: billSearch }), [vendorId, billSearch]);
+  const matchingBills = useWorkspaceData(billLoad);
+  const availableBills = matchingBills.data?.items ?? bills;
+  const issues = receiptIssues(data);
   const total = decimalUnits(data.total);
   const partial = decimalUnits(data.balanceDue) > BigInt(0) || decimalUnits(data.amountPaid) > BigInt(0) && decimalUnits(data.amountPaid) < total;
-  const duplicate = bills.find(bill => bill.vendorId === vendorId && data.invoiceNumber.trim() && bill.vendorInvoiceNo === data.invoiceNumber.trim().toUpperCase());
+  const duplicate = availableBills.find(bill => bill.vendorId === vendorId && data.invoiceNumber.trim() && bill.vendorInvoiceNo === data.invoiceNumber.trim().toUpperCase());
   const editable = receipt.status === 'PENDING';
   function field(name: keyof Omit<typeof data, 'items'>, label: string, type = 'text', required = false) {
-    return <label className="grid gap-1 text-sm font-medium">{label}<input className="workspace-field" type={type} required={required} disabled={busy || !editable}
+    return <label className="grid gap-1 text-sm font-medium">{label}<input className="workspace-field" type={type} required={required} aria-invalid={Boolean(issues[name])} aria-describedby={issues[name] ? 'receipt-' + name + '-error' : undefined} disabled={busy || !editable}
       {...(type === 'number' ? { min: name === 'total' ? '0.01' : '0', step: '0.01' } : {})} value={data[name]}
-      onChange={event => { setData(current => ({ ...current, [name]: event.target.value })); setSaved(false); setPaidInFull(false); }} /></label>;
+      onChange={event => { setData(current => ({ ...current, [name]: event.target.value })); setSaved(false); setPaidInFull(false); }} />{issues[name] && <span id={'receipt-' + name + '-error'} className="text-xs text-red-800">{issues[name]}</span>}</label>;
   }
   async function save() {
-    if (!validDate(data.invoiceDate)) throw new Error('Confirm the receipt date from the source image.');
+    if (Object.keys(issues).length) throw new Error(Object.values(issues)[0]);
     const extractedData: ReceiptExtractedData = { ...original, ...data, date: data.invoiceDate, amount: data.total };
-    return updateReceipt(receipt.id, { extractedData, vendorId: vendorId || null });
+    const result = await updateReceipt(receipt.id, { extractedData, vendorId: vendorId || null }); savedSnapshot.current = snapshot; return result;
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError('');
@@ -139,7 +182,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { rece
     finally { setBusy(false); }
   }
   return <div className="workspace-panel grid items-start overflow-hidden lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
-    <ReceiptImage receiptId={receipt.id} />
+    <div className="document-source"><ReceiptImage receiptId={receipt.id} /><p className="p-3 text-xs text-slate-600">Open the source image to inspect it at full size. Confirm each extracted amount before posting.</p></div>
     <form onSubmit={submit} className="min-w-0 space-y-5 p-4 sm:p-5" aria-busy={busy}>
       <div className="flex flex-wrap items-center justify-between gap-2"><WorkspaceStatus>{status(receipt)}</WorkspaceStatus>
         {receipt.billId && <Link className="workspace-text-action" href={'/purchases/bills/' + receipt.billId}>Open bill</Link>}
@@ -148,6 +191,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { rece
       <div className="grid gap-3 sm:grid-cols-2">{field('vendor', 'Vendor shown on document')}{field('invoiceNumber', 'Supplier invoice / receipt number')}
         {field('invoiceDate', 'Confirmed document date', 'date', true)}{field('total', 'Document total (USD)', 'number', action !== 'attach')}
         {field('amountPaid', 'Paid amount shown on document', 'number')}{field('balanceDue', 'Outstanding amount shown on document', 'number')}</div>
+      {issues.items && <p role="alert" className="text-sm text-red-800">{issues.items}</p>}
       <details className="rounded-lg border border-slate-200 p-3"><summary className="min-h-8 cursor-pointer text-sm font-semibold">Check line items, tax, and tip</summary>
         <p className="mb-3 text-xs text-slate-600">When items are present, their amounts plus tax and tip must equal the document total.</p>
         <div className="space-y-2">{data.items.map((item, index) => <div key={index} className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2">
@@ -180,11 +224,11 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { rece
           <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-950">Creates a draft for the full {formatUsd(data.total)}. Cash and the ledger are unchanged until you post the bill and record its actual payments.</p>
           {duplicate && <WorkspaceNotice title="This supplier reference already exists">Choose Attach to an existing bill. <Link className="font-semibold underline" href={'/purchases/bills/' + duplicate.id}>Open {duplicate.billNo}</Link></WorkspaceNotice>}
         </>}
-        {action === 'attach' && <label className="grid gap-1 text-sm font-medium">Existing bill<select className="workspace-field" value={billId} required disabled={busy} onChange={event => setBillId(event.target.value)}><option value="">Select existing bill…</option>{bills.filter(bill => !vendorId || bill.vendorId === vendorId).map(bill => <option key={bill.id} value={bill.id}>{bill.billNo} · {bill.vendor?.name} · {formatUsd(bill.total)}</option>)}</select></label>}
+        {action === 'attach' && <><label className="grid gap-1 text-sm font-medium">Find a bill<input className="workspace-field" value={billSearch} onChange={event => setBillSearch(event.target.value)} placeholder="Bill number, supplier reference, or vendor…" /></label>{matchingBills.error && <WorkspaceNotice title="Bills could not load" onRetry={matchingBills.retry} />}<p className="text-xs text-slate-600">{matchingBills.loading ? 'Finding bills…' : (matchingBills.data?.total ?? bills.length) + ' matching bills. Showing up to 50; refine your search if needed.'}</p><label className="grid gap-1 text-sm font-medium">Existing bill<select className="workspace-field" value={billId} required disabled={busy} onChange={event => setBillId(event.target.value)}><option value="">Select existing bill…</option>{availableBills.filter(bill => !vendorId || bill.vendorId === vendorId).map(bill => <option key={bill.id} value={bill.id}>{bill.billNo} · {bill.vendor?.name} · {formatUsd(bill.total)}</option>)}</select></label></>}
         <p className="text-xs text-slate-600">Configure account roles in <Link href="/ledger?tab=accounts" className="font-semibold text-blue-800 underline">Chart of accounts</Link>. Need a vendor? <Link href="/purchases/vendors" className="font-semibold text-blue-800 underline">Manage vendors</Link>.</p>
         {error && <WorkspaceNotice title="Review could not finish">{error}</WorkspaceNotice>}
         {saved && <p role="status" className="text-sm text-emerald-800">Details saved. Nothing has been posted.</p>}
-        <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
+        <div className="document-actions flex flex-wrap gap-2 border-t border-slate-200 pt-4">
           <button type="submit" className="workspace-primary" disabled={busy || action === 'expense' && partial || action === 'bill' && Boolean(duplicate)}><Check className="size-4" aria-hidden="true" />{busy ? 'Saving…' : action === 'expense' ? 'Post paid purchase' : action === 'bill' ? 'Create draft bill' : 'Attach document'}</button>
           <button type="button" className="workspace-button" disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await save(); setSaved(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save.'); } finally { setBusy(false); } }}>Save details only</button>
           <button type="button" className="workspace-button text-red-800" disabled={busy} onClick={async () => { setBusy(true); try { onComplete(await rejectReceipt(receipt.id), 'Receipt rejected. Nothing was posted.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not reject.'); } finally { setBusy(false); } }}>Reject</button>
@@ -195,4 +239,5 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { rece
   </div>;
 }
 
-export default function LegacyReceiptsPage() { return <LegacyRedirect to="/inbox" />; }
+export function ReceiptsPage() { return <Suspense fallback={<p className="p-6" role="status">Loading documents…</p>}><DocumentsContent /></Suspense>; }
+export default function LegacyReceiptsPage() { return <LegacyRedirect to="/purchases/documents" />; }

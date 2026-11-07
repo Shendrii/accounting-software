@@ -3,7 +3,7 @@ import Link from 'next/link';
 import { ArrowUpRight, CircleAlert, type LucideIcon } from 'lucide-react';
 import { cn } from '@/lib/utils';
 
-export function WorkspaceHeading({ section, title, description, actions }: {
+export function WorkspaceHeading({ title, description, actions }: {
   section: string;
   title: string;
   description?: ReactNode;
@@ -12,7 +12,6 @@ export function WorkspaceHeading({ section, title, description, actions }: {
   return (
     <header className="workspace-heading">
       <div className="min-w-0">
-        <p className="workspace-eyebrow">{section}</p>
         <h1>{title}</h1>
         {description && <p className="mt-2 text-sm leading-relaxed text-slate-600">{description}</p>}
       </div>
@@ -104,11 +103,11 @@ export function WorkspaceRow({ icon: Icon, title, detail, href, action }: {
 
 export function WorkflowTabs({ area, active }: {
   area: 'sales' | 'purchases';
-  active: 'summary' | 'invoices' | 'customers' | 'bills' | 'vendors';
+  active: 'summary' | 'invoices' | 'customers' | 'bills' | 'vendors' | 'documents';
 }) {
   const tabs = area === 'sales'
-    ? [['summary', 'Summary', '/sales'], ['invoices', 'Invoices', '/sales/invoices'], ['customers', 'Customers', '/sales/customers']]
-    : [['summary', 'Summary', '/purchases'], ['bills', 'Bills', '/purchases/bills'], ['vendors', 'Vendors', '/purchases/vendors']];
+    ? [['invoices', 'Invoices', '/sales/invoices'], ['customers', 'Customers', '/sales/customers']]
+    : [['documents', 'Document inbox', '/purchases/documents'], ['bills', 'Bills', '/purchases/bills'], ['vendors', 'Vendors', '/purchases/vendors']];
   return (
     <nav aria-label={area === 'sales' ? 'Sales views' : 'Purchases views'} className="workspace-tabs">
       {tabs.map(([key, label, href]) => <Link key={key} href={href} aria-current={active === key ? 'page' : undefined} className="workspace-tab">{label}</Link>)}

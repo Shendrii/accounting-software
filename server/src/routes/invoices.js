@@ -10,6 +10,8 @@ import { invoiceAmounts } from '../lib/invoiceLedger.js';
 import { salesSummary, summaryDay } from '../lib/workflowSummaries.js';
 import { requireAccountRole } from '../lib/accountRoles.js';
 
+import { isPaged, documentPage } from '../lib/workbenchQueries.js';
+
 const router = express.Router();
 const accountFields = { id: true, name: true, code: true };
 const journalDetails = { journalLines: { include: { account: { select: accountFields } } } };
@@ -78,6 +80,7 @@ function totals(subtotal, tax) {
 
 router.get('/', async (req, res) => {
   try {
+    if (isPaged(req.query)) return res.json(await documentPage(prisma, req.workspace.id, 'invoice', req.query));
     const { status, customerId, startDate, endDate } = req.query;
     const where = { workspaceId: req.workspace.id };
     if (status) where.status = status;

@@ -837,6 +837,7 @@ export interface Bill {
   amountPaid?: string;
   balanceDue?: string;
   postingEntryId?: string | null;
+  postingEntry?: JournalEntry | null;
   payments?: { id: string; amount: string; journalEntry: { id: string; date: string } }[];
   receipts?: { id: string; createdAt: string }[];
   notes?: string | null;
@@ -1283,4 +1284,29 @@ export async function acceptWorkspaceInvite(token: string): Promise<{ success: b
     body: JSON.stringify({ token }),
   });
   return handleResponse<{ success: boolean }>(response);
+}
+
+// Bounded worklists. Existing array helpers remain available for older callers.
+export interface PageResult<T> { items: T[]; page: number; pageSize: number; total: number; totalPages: number }
+export type WorklistQuery = Record<string, string | number | undefined>;
+async function worklist<T>(path: string, params: WorklistQuery): Promise<PageResult<T>> {
+  const query = new URLSearchParams({ page: '1', pageSize: '25' });
+  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') query.set(key, String(value));
+  return handleResponse<PageResult<T>>(await fetch(`${API_URL}/api/${path}?${query}`));
+}
+export const getInvoicePage = (params: WorklistQuery) => worklist<Invoice>('invoices', params);
+export const getBillPage = (params: WorklistQuery) => worklist<Bill>('bills', params);
+export const getReceiptPage = (params: WorklistQuery) => worklist<Receipt>('receipts', params);
+export interface AccountActivityLine {
+  id: string; entryId: string; date: string; description: string; referenceNo?: string; reversalOfId?: string;
+  debit: string; credit: string; balance: string; sources: { id: string; label: string; href: string }[];
+}
+export interface AccountActivity extends PageResult<AccountActivityLine> {
+  account: Pick<Account, 'id' | 'code' | 'name' | 'type'>; startDate: string | null; endDate: string | null;
+  currency: string; basis: string; opening: string; debit: string; credit: string; closing: string;
+}
+export async function getAccountActivity(params: WorklistQuery): Promise<AccountActivity> {
+  const query = new URLSearchParams();
+  for (const [key, value] of Object.entries(params)) if (value !== undefined && value !== '') query.set(key, String(value));
+  return handleResponse<AccountActivity>(await fetch(`${API_URL}/api/reports/account-activity?${query}`));
 }

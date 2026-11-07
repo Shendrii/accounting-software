@@ -2,12 +2,20 @@ import express from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
 import {
-  Decimal, accountBalance, decimalSum, ledgerDate, nextDay, sendLedgerError,
+  Decimal, LedgerError, accountBalance, decimalSum, ledgerDate, nextDay, sendLedgerError,
 } from '../lib/ledger.js';
+
+import { accountActivity } from '../lib/accountActivity.js';
 
 const router = express.Router();
 
+router.get('/account-activity', async (req, res) => {
+  try { res.json(await accountActivity(prisma, req.workspace.id, req.query)); }
+  catch (error) { sendLedgerError(res, error, 'Failed to load account activity.'); }
+});
+
 function dateRange(startDate, endDate) {
+  if (startDate && endDate && ledgerDate(startDate) > ledgerDate(endDate)) throw new LedgerError('The end date cannot precede the start date.');
   return {
     ...(startDate && { gte: ledgerDate(startDate) }),
     ...(endDate && { lt: nextDay(endDate) }),

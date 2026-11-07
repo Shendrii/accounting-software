@@ -2,7 +2,7 @@
 
 import Link from 'next/link';
 import { usePathname } from 'next/navigation';
-import { ChevronRight, LogOut, Menu, X } from 'lucide-react';
+import { ChevronRight, LogOut, Menu, MessageSquare, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getPendingReceiptCount } from '@/lib/api';
 import { clearSession, getCurrentUser, useActiveWorkspaceId, useIsAuthenticated } from '@/lib/auth';
@@ -26,10 +26,12 @@ export default function SideNav() {
   useEffect(() => {
     if (!visible || !signedIn) return;
     let current = true;
-    getPendingReceiptCount().then(count => {
+    function refreshCount() { getPendingReceiptCount().then(count => {
       if (current) setInboxCount(count);
-    }).catch(() => {});
-    return () => { current = false; };
+    }).catch(() => {}); }
+    refreshCount();
+    window.addEventListener('accountrix:documents-changed', refreshCount);
+    return () => { current = false; window.removeEventListener('accountrix:documents-changed', refreshCount); };
   }, [pathname, visible, signedIn, workspaceId]);
 
   useEffect(() => {
@@ -57,38 +59,38 @@ export default function SideNav() {
 
   return (
     <>
-      <header className="workspace-topbar">
-        <div className="flex min-w-0 items-center gap-2.5 text-sm">
+      <header className="workspace-topbar max-sm:flex-wrap max-sm:py-2">
+        <div className="flex min-w-0 items-center gap-2.5 text-sm max-sm:flex-1">
           <button ref={menuButton} type="button" className="workspace-button min-h-11 min-w-11 px-2 lg:hidden" aria-label="Open workspace navigation"
             aria-expanded={menuOpen} aria-controls="workspace-sidebar" onClick={() => setMenuOpen(true)}>
             <Menu className="size-5" aria-hidden="true" />
           </button>
           <Link href="/" className="hidden rounded text-slate-600 hover:text-blue-800 sm:inline">Workspace</Link>
           <ChevronRight className="hidden size-3.5 shrink-0 text-slate-400 sm:inline" aria-hidden="true" />
-          <span className="truncate font-semibold text-slate-950">{section?.name ?? 'Overview'}</span>
+          <span className="truncate font-semibold text-slate-950">{section?.name ?? 'Dashboard'}</span>
         </div>
-        <WorkspaceSwitcher mobile />
+        <div className="flex min-w-0 items-center justify-end gap-2 max-sm:contents"><button type="button" className="workspace-button max-sm:ml-auto" onClick={() => window.dispatchEvent(new Event('accountrix:open-ai'))}><MessageSquare className="size-4" aria-hidden="true" /><span className="hidden sm:inline">Ask AI</span><span className="sr-only sm:hidden">Ask AI</span></button><WorkspaceSwitcher mobile /></div>
       </header>
 
       {menuOpen && <div onClick={closeMenu} className="fixed inset-0 z-40 bg-slate-950/55 lg:hidden" aria-hidden="true" />}
       <aside id="workspace-sidebar" className={`workspace-sidebar motion-safe:transition-transform lg:visible lg:translate-x-0 ${menuOpen ? 'visible translate-x-0' : 'invisible -translate-x-full'}`}>
         <div className="flex shrink-0 items-center justify-between gap-2 px-4 pt-5 pb-4">
           <WorkspaceBrand onClick={() => setMenuOpen(false)} />
-          <button ref={closeButton} type="button" className="grid size-11 place-items-center rounded-lg text-blue-100 hover:bg-blue-400/15 lg:hidden" aria-label="Close workspace navigation" onClick={closeMenu}>
+          <button ref={closeButton} type="button" className="grid size-11 place-items-center rounded-lg text-slate-700 hover:bg-slate-100 lg:hidden" aria-label="Close workspace navigation" onClick={closeMenu}>
             <X className="size-5" aria-hidden="true" />
           </button>
         </div>
         <WorkspaceSwitcher />
         <WorkspaceNavigation pathname={pathname} inboxCount={inboxCount} onNavigate={() => setMenuOpen(false)} />
 
-        <div className="flex shrink-0 items-center gap-2.5 border-t border-blue-100/15 px-4 py-3.5">
-          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-blue-400/20 text-xs font-semibold text-blue-50" aria-hidden="true">{initials}</span>
+        <div className="flex shrink-0 items-center gap-2.5 border-t border-slate-300 px-4 py-3.5">
+          <span className="grid size-9 shrink-0 place-items-center rounded-lg bg-slate-200 text-xs font-semibold text-slate-900" aria-hidden="true">{initials}</span>
           <div className="min-w-0 flex-1">
             <p className="truncate text-sm font-semibold" title={name}>{name}</p>
-            <p className="truncate text-xs text-blue-100/80 capitalize">{selected ? selected.role.toLowerCase() : 'Workspace'}</p>
+            <p className="truncate text-xs text-slate-600 capitalize">{selected ? selected.role.toLowerCase() : 'Workspace'}</p>
           </div>
           <button type="button" onClick={() => { clearSession(); window.location.href = '/login'; }}
-            aria-label="Log out" className="grid size-10 shrink-0 place-items-center rounded-lg text-blue-100 hover:bg-blue-400/15 hover:text-white">
+            aria-label="Log out" className="grid size-10 shrink-0 place-items-center rounded-lg text-slate-700 hover:bg-slate-100 hover:text-slate-950">
             <LogOut className="size-4" aria-hidden="true" />
           </button>
         </div>

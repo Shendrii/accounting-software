@@ -1,6 +1,5 @@
 import type { LucideIcon } from 'lucide-react';
 import {
-  BellDot,
   BookOpenCheck,
   Landmark,
   ReceiptText,
@@ -20,16 +19,15 @@ export const navigationClusters: Array<{ label: string; items: NavigationItem[] 
   {
     label: 'Daily work',
     items: [
-      { name: 'Receipts', href: '/inbox', icon: BellDot, badge: 'inbox' },
       { name: 'Sales', href: '/sales', icon: ReceiptText },
-      { name: 'Purchases', href: '/purchases', icon: ShoppingCart },
+      { name: 'Purchases', href: '/purchases', icon: ShoppingCart, badge: 'inbox' },
       { name: 'Bank reconciliation', href: '/banking', icon: Landmark },
     ],
   },
   {
     label: 'Books and reporting',
     items: [
-      { name: 'Ledger and close', href: '/ledger', icon: BookOpenCheck },
+      { name: 'Accounting', href: '/ledger', icon: BookOpenCheck },
       { name: 'Reports', href: '/reports', icon: BarChart3 },
     ],
   },
@@ -40,7 +38,7 @@ export const navigationClusters: Array<{ label: string; items: NavigationItem[] 
 ];
 
 const legacySections: Record<string, string> = {
-  receipts: '/inbox', invoices: '/sales', customers: '/sales',
+  inbox: '/purchases', receipts: '/purchases', invoices: '/sales', customers: '/sales',
   bills: '/purchases', vendors: '/purchases', reconciliation: '/banking', bookkeeping: '/ledger',
 };
 

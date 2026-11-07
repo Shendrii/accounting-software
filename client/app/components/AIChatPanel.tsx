@@ -39,6 +39,12 @@ export function AIChatPanel() {
   const inputRef = useRef<HTMLInputElement>(null);
 
   useEffect(() => {
+    const show = () => setOpen(true);
+    window.addEventListener('accountrix:open-ai', show);
+    return () => window.removeEventListener('accountrix:open-ai', show);
+  }, []);
+
+  useEffect(() => {
     const next = portfolioAiThread(pathname);
     setOpen(Boolean(next));
     setMessages(next?.messages ?? []);
@@ -90,14 +96,14 @@ export function AIChatPanel() {
   return (
     <>
       {/* Floating trigger button */}
-      <button
+      {demo && <button
         onClick={() => setOpen((o) => !o)}
         className="fixed bottom-6 right-6 z-40 flex items-center gap-2 px-4 py-3 rounded-full bg-blue-600 hover:bg-blue-700 text-white shadow-lg transition-all duration-200 hover:shadow-xl"
         aria-label="Open AI assistant"
       >
         <Sparkles className="h-5 w-5" />
         <span className="text-sm font-medium">Ask AI</span>
-      </button>
+      </button>}
 
       {/* Panel */}
       {open && (
