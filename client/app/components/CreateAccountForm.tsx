@@ -2,6 +2,7 @@
 
 import { useState } from 'react';
 import { createAccount, type CreateAccountInput } from '@/lib/api';
+import AccountRoleField from './AccountRoleField';
 
 interface CreateAccountFormProps {
   onSuccess?: () => void;
@@ -16,6 +17,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
     code: '',
     name: '',
     type: 'ASSET',
+    role: 'GENERAL',
     description: '',
     isActive: true,
   });
@@ -37,6 +39,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
         code: '',
         name: '',
         type: 'ASSET',
+        role: 'GENERAL',
         description: '',
         isActive: true,
       });
@@ -106,7 +109,7 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
             id="type"
             required
             value={formData.type}
-            onChange={(e) => setFormData({ ...formData, type: e.target.value as CreateAccountInput['type'], isBankAccount: e.target.value === 'ASSET' && formData.isBankAccount })}
+            onChange={(e) => setFormData({ ...formData, type: e.target.value as CreateAccountInput['type'], role: 'GENERAL', isBankAccount: false })}
             className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500"
           >
             <option value="ASSET">Asset</option>
@@ -118,7 +121,9 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
         </div>
 
         <div>
-          <label htmlFor="description" className="block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">
+          <AccountRoleField type={formData.type} value={formData.role ?? 'GENERAL'}
+            onChange={role => setFormData({ ...formData, role, isBankAccount: role === 'BANK' })} />
+          <label htmlFor="description" className="mt-4 block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">
             Description
           </label>
           <textarea
@@ -132,11 +137,6 @@ export default function CreateAccountForm({ onSuccess, onCancel }: CreateAccount
         </div>
 
         <div>
-          {formData.type === 'ASSET' && <label className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" checked={formData.isBankAccount ?? false}
-                onChange={event => setFormData({ ...formData, isBankAccount: event.target.checked })} />
-              Bank account for reconciliation
-            </label>}
             <label className="flex items-center">
             <input
               type="checkbox"

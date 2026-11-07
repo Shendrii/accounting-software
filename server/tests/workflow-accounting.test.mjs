@@ -30,7 +30,7 @@ async function fixture() {
   };
 }
 
-const account = (api, code, name, type, isBankAccount = false) => api('/accounts', 'POST', { code, name, type, isBankAccount }, 201);
+const account = (api, code, name, type, isBankAccount = false) => api('/accounts', 'POST', { code, name, type, isBankAccount, role: isBankAccount ? 'BANK' : code === '1000' ? 'CASH' : code === '2000' ? 'ACCOUNTS_PAYABLE' : 'GENERAL' }, 201);
 const line = (accountId, debit, credit) => ({ accountId, debit, credit });
 
 test('reconciliation requires verified matches, the statement control totals, and a saved zero-difference proof', options, async () => {

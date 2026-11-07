@@ -1,6 +1,7 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
 import { LedgerError, accountBalance, ledgerBalances, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
+import { accountRole } from '../lib/accountRoles.js';
 
 const router = express.Router();
 
@@ -50,14 +51,12 @@ router.get('/:id', async (req, res) => {
 // Create new account
 router.post('/', async (req, res) => {
   try {
-    const { code, name, type, description, isActive, isBankAccount = false } = req.body;
+    const { code, name, type, description, isActive, isBankAccount, role } = req.body;
 
     if (!code || !name || !type) {
       return res.status(400).json({ error: 'Code, name, and type are required' });
     }
-    if (typeof isBankAccount !== 'boolean' || isBankAccount && type !== 'ASSET') {
-      return res.status(400).json({ error: 'Bank accounts must be asset accounts.' });
-    }
+    const usage = accountRole(role, type, isBankAccount);
 
     const account = await prisma.account.create({
       data: {
@@ -65,7 +64,7 @@ router.post('/', async (req, res) => {
         name,
         type,
         description,
-        isBankAccount,
+        role: usage, isBankAccount: usage === 'BANK',
         isActive: isActive !== undefined ? isActive : true,
       },
     });
@@ -75,24 +74,21 @@ router.post('/', async (req, res) => {
     if (error.code === 'P2002') {
       return res.status(409).json({ error: 'Account code already exists' });
     }
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to create the account.');
   }
 });
 
 // Update account
 router.put('/:id', async (req, res) => {
   try {
-    const { code, name, type, description, isActive, isBankAccount } = req.body;
+    const { code, name, type, description, isActive, isBankAccount, role } = req.body;
 
     const where = { id: req.params.id, workspaceId: req.workspace.id };
     const account = await ledgerTransaction(async tx => {
       const existing = await tx.account.findFirst({ where });
       if (!existing) throw new LedgerError('Account not found.', 404);
-      if (isBankAccount !== undefined && typeof isBankAccount !== 'boolean' ||
-          (isBankAccount ?? existing.isBankAccount) && (type ?? existing.type) !== 'ASSET') {
-        throw new LedgerError('Bank accounts must be asset accounts.');
-      }
-      if (isBankAccount === false && existing.isBankAccount && await tx.reconciliation.findFirst({
+      const usage = accountRole(role ?? (isBankAccount === undefined ? existing.role : isBankAccount ? 'BANK' : 'GENERAL'), type ?? existing.type, isBankAccount);
+      if (usage !== 'BANK' && existing.isBankAccount && await tx.reconciliation.findFirst({
         where: { accountId: existing.id, workspaceId: where.workspaceId }, select: { id: true },
       })) throw new LedgerError('Keep the bank account designation for accounts with reconciliation history.', 409);
       if (type && type !== existing.type && await tx.journalLine.findFirst({
@@ -101,6 +97,9 @@ router.put('/:id', async (req, res) => {
       })) {
         throw new LedgerError('The type of an account with posted activity cannot be changed.', 409);
       }
+      if (usage !== existing.role && existing.role !== 'GENERAL' && await tx.journalLine.findFirst({
+        where: { accountId: existing.id, journalEntry: { workspaceId: where.workspaceId, status: 'POSTED' } }, select: { id: true },
+      })) throw new LedgerError('The role of an account with posted activity cannot be changed. Create a separate account.', 409);
       return tx.account.update({
         where,
         data: {
@@ -109,7 +108,7 @@ router.put('/:id', async (req, res) => {
           ...(type && { type }),
           ...(description !== undefined && { description }),
           ...(isActive !== undefined && { isActive }),
-          ...(isBankAccount !== undefined && { isBankAccount }),
+          role: usage, isBankAccount: usage === 'BANK',
         },
       });
     });

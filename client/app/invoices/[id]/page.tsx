@@ -9,6 +9,7 @@ import {
   sendInvoiceEmail, voidInvoice, type Account, type Invoice, type JournalEntry,
 } from '@/lib/api';
 import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { isPaymentAccount } from '@/lib/account-roles';
 import { toast } from '@/lib/toast';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { PostingTable, postedLines, type PostingLine } from '@/app/components/PostingTable';
@@ -145,7 +146,9 @@ export function InvoiceDetailPage() {
   const hasTax = decimalUnits(invoice.tax) > BigInt(0);
   const missingRevenue = invoice.lines?.some(line => !line.accountId && decimalUnits(line.amount) > BigInt(0));
   const receivableId = posted?.journalLines.find(line => decimalUnits(line.debit) > BigInt(0))?.accountId;
-  const assetAccounts = accounts.filter(account => account.type === 'ASSET');
+  const receivableAccounts = accounts.filter(account => account.type === 'ASSET' && account.role === 'ACCOUNTS_RECEIVABLE');
+  const depositAccounts = accounts.filter(account => isPaymentAccount(account));
+  const taxAccounts = accounts.filter(account => account.type === 'LIABILITY' && account.role === 'SALES_TAX');
   const status = isVoid ? 'Void' : invoice.status === 'PAID' ? 'Paid' : invoice.status === 'DRAFT' ? 'Draft'
     : !posted ? 'Awaiting posting' : decimalUnits(invoice.amountPaid) ? 'Partially paid' : 'Open';
   const statusClass = status === 'Paid' ? 'bg-emerald-50 text-emerald-800' : status === 'Partially paid' || status === 'Awaiting posting'
@@ -172,16 +175,17 @@ export function InvoiceDetailPage() {
   if (modal?.kind === 'post') {
     fields = <>
       <p className="text-sm text-slate-600">Post {invoice.invoiceNo} on {formatDate(invoice.date)} for {formatUsd(invoice.total)}.</p>
-      <AccountSelect name="receivable" label="Accounts receivable" accounts={assetAccounts} />
+      <AccountSelect name="receivable" label="Accounts receivable" accounts={receivableAccounts} />
+      <p className="text-xs text-slate-600">Posting records money owed by the customer. It does not increase cash.</p>
       {missingRevenue && <AccountSelect name="revenue" label="Revenue account for uncategorized lines" accounts={accounts.filter(account => account.type === 'REVENUE')} />}
-      {hasTax && <AccountSelect name="tax" label="Sales tax liability account" accounts={accounts.filter(account => account.type === 'LIABILITY')} />}
+      {hasTax && <AccountSelect name="tax" label="Sales tax liability account" accounts={taxAccounts} />}
       {invoice.status === 'SENT' && <label className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
         <input className="mt-1" type="checkbox" name="reviewed" required />
         I checked the ledger and confirmed that this sale has no existing posting.
       </label>}
-      {(!assetAccounts.length || (missingRevenue && !accounts.some(account => account.type === 'REVENUE')) ||
-        (hasTax && !accounts.some(account => account.type === 'LIABILITY'))) && <p className="text-sm text-slate-600">
-          Add the required accounts in the <Link className={textLink} href="/ledger">chart of accounts</Link>.
+      {(!receivableAccounts.length || (missingRevenue && !accounts.some(account => account.type === 'REVENUE')) ||
+        (hasTax && !taxAccounts.length)) && <p className="text-sm text-amber-900" role="status">
+          Set the required account roles in <Link className={textLink} href="/ledger?tab=accounts">Chart of accounts</Link> before posting.
         </p>}
     </>;
   } else if (modal?.kind === 'payment') {
@@ -193,7 +197,8 @@ export function InvoiceDetailPage() {
       <label className="block text-sm font-medium">Payment date
         <input className={field} name="date" type="date" required min={minPaymentDay} defaultValue={localDay() < minPaymentDay ? minPaymentDay : localDay()} />
       </label>
-      <AccountSelect name="deposit" label="Deposit to" accounts={assetAccounts.filter(account => account.id !== receivableId)} />
+      <AccountSelect name="deposit" label="Deposit to cash or bank" accounts={depositAccounts.filter(account => account.id !== receivableId)} />
+      {!depositAccounts.length && <p className="text-sm text-amber-900">Designate a cash or bank account in <Link className={textLink} href="/ledger?tab=accounts">Chart of accounts</Link>.</p>}
     </>;
   } else if (modal?.kind === 'email') {
     fields = <label className="block text-sm font-medium">Recipient email

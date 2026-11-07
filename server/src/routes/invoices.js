@@ -8,6 +8,7 @@ import {
 } from '../lib/ledger.js';
 import { invoiceAmounts } from '../lib/invoiceLedger.js';
 import { salesSummary, summaryDay } from '../lib/workflowSummaries.js';
+import { requireAccountRole } from '../lib/accountRoles.js';
 
 const router = express.Router();
 const accountFields = { id: true, name: true, code: true };
@@ -209,10 +210,10 @@ router.post('/:id/post', async (req, res) => {
       const accounts = await ledgerAccounts(tx, where.workspaceId, [
         receivableAccountId, ...credits.map(line => line.accountId), ...(existing.tax.gt(0) ? [taxAccountId] : []),
       ]);
-      if (accounts.get(receivableAccountId).type !== 'ASSET' ||
-          credits.some(line => accounts.get(line.accountId).type !== 'REVENUE') ||
-          (existing.tax.gt(0) && accounts.get(taxAccountId).type !== 'LIABILITY')) {
-        throw new LedgerError('Choose an asset account for receivables, revenue accounts for sales, and a liability account for tax.');
+      requireAccountRole(accounts.get(receivableAccountId), ['ACCOUNTS_RECEIVABLE'], 'Receivables account');
+      if (existing.tax.gt(0)) requireAccountRole(accounts.get(taxAccountId), ['SALES_TAX'], 'Sales tax account');
+      if (credits.some(line => accounts.get(line.accountId).type !== 'REVENUE')) {
+        throw new LedgerError('Choose revenue accounts for sales.');
       }
       const lines = [{ accountId: receivableAccountId, debit: existing.total, credit: 0 }, ...credits];
       if (existing.tax.gt(0)) lines.push({ accountId: taxAccountId, debit: 0, credit: existing.tax, description: 'Sales tax' });
@@ -289,7 +290,7 @@ router.post('/:id/record-payment', async (req, res) => {
       if (!receivable || receivable.accountId === paymentAccountId) throw new LedgerError('Choose a deposit account other than receivables.');
 
       const accounts = await ledgerAccounts(tx, where.workspaceId, [paymentAccountId]);
-      if (accounts.get(paymentAccountId).type !== 'ASSET') throw new LedgerError('Choose an asset account for the deposit.');
+      requireAccountRole(accounts.get(paymentAccountId), ['CASH', 'BANK'], 'Deposit account');
       const remaining = new Decimal(invoiceAmounts(invoice).balanceDue);
       const received = requested ?? remaining;
       if (received.lte(0) || received.gt(remaining)) throw new LedgerError('Payment must be positive and cannot exceed the balance due.');

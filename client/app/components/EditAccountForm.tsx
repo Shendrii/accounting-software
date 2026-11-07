@@ -3,6 +3,7 @@
 import { useState } from 'react';
 import { updateAccount, deleteAccount, type Account, type UpdateAccountInput } from '@/lib/api';
 import { X, Trash2 } from 'lucide-react';
+import AccountRoleField from './AccountRoleField';
 
 interface EditAccountFormProps {
   account: Account;
@@ -18,6 +19,7 @@ export default function EditAccountForm({ account, onSuccess, onCancel }: EditAc
     description: account.description || '',
     isActive: account.isActive,
     isBankAccount: account.isBankAccount ?? false,
+    role: account.role ?? 'GENERAL',
   });
   const [loading, setLoading] = useState(false);
   const [deleting, setDeleting] = useState(false);
@@ -134,7 +136,7 @@ export default function EditAccountForm({ account, onSuccess, onCancel }: EditAc
               id="edit-type"
               required
               value={formData.type}
-              onChange={(e) => setFormData({ ...formData, type: e.target.value as UpdateAccountInput['type'], isBankAccount: e.target.value === 'ASSET' && formData.isBankAccount })}
+              onChange={(e) => setFormData({ ...formData, type: e.target.value as UpdateAccountInput['type'], role: 'GENERAL', isBankAccount: false })}
               className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500"
             >
               <option value="ASSET">Asset</option>
@@ -146,7 +148,9 @@ export default function EditAccountForm({ account, onSuccess, onCancel }: EditAc
           </div>
 
           <div>
-            <label htmlFor="edit-description" className="block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">
+            <AccountRoleField type={formData.type ?? account.type} value={formData.role ?? 'GENERAL'}
+              onChange={role => setFormData({ ...formData, role, isBankAccount: role === 'BANK' })} />
+            <label htmlFor="edit-description" className="mt-4 block text-sm font-medium mb-1 text-zinc-700 dark:text-zinc-300">
               Description
             </label>
             <textarea
@@ -159,11 +163,6 @@ export default function EditAccountForm({ account, onSuccess, onCancel }: EditAc
           </div>
 
           <div>
-            {formData.type === 'ASSET' && <label className="mb-2 flex items-center gap-2 text-sm font-medium">
-              <input type="checkbox" checked={formData.isBankAccount ?? false}
-                onChange={event => setFormData({ ...formData, isBankAccount: event.target.checked })} />
-              Bank account for reconciliation
-            </label>}
             <label className="flex items-center">
               <input
                 type="checkbox"

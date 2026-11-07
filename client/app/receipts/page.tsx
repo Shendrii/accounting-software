@@ -1,705 +1,198 @@
 'use client';
 
-import React, { useState, useCallback } from 'react';
-import {
-  getReceipts,
-  getAccounts,
-  uploadReceipt,
-  updateReceipt,
-  approveReceipt,
-  attachReceiptToBill,
-  rejectReceipt,
-  getVendors,
-  getBills,
-  type Receipt,
-  type ReceiptExtractedData,
-  type Vendor,
-  type Bill,
-} from '@/lib/api';
+import { useCallback, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { Search, Upload, Check, X, FileText, Loader2 } from 'lucide-react';
-import { toast } from '@/lib/toast';
-import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
-import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
-import { formatUsd } from '@/lib/money';
+import { Check, Loader2, Search, Upload, X } from 'lucide-react';
+import { approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBills, getReceipts, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
+import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
+import { decimalUnits, formatUsd } from '@/lib/money';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import ReceiptImage from '@/app/components/ReceiptImage';
-import { useWorkspaceData } from '@/lib/use-workspace-data';
+import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
-function validReceiptDate(value: string) {
-  if (!/^\d{4}-\d{2}-\d{2}$/.test(value)) return false;
+function validDate(value: string) {
   const date = new Date(value + 'T00:00:00Z');
-  return !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
+  return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
-
-function receiptStatus(receipt: Receipt) {
+function status(receipt: Receipt) {
   if (receipt.status === 'REJECTED') return 'Rejected';
-  if (receipt.status === 'APPROVED') return receipt.billId ? 'Attached to bill' : receipt.journalEntryId ? 'Posted expense' : 'Reviewed';
-  return validReceiptDate(receipt.extractedData?.invoiceDate || receipt.extractedData?.date || '') ? 'Needs review' : 'Check date';
+  if (receipt.status === 'APPROVED') return receipt.billId ? 'Attached to bill' : 'Posted expense';
+  return validDate(receipt.extractedData.invoiceDate || receipt.extractedData.date || '') ? 'Needs review' : 'Check date';
 }
-
-async function loadReceiptLookups() {
+async function loadLookups() {
   const [accounts, vendors, bills] = await Promise.all([getAccounts(), getVendors({ isActive: true }), getBills()]);
-  return {
-    accounts: accounts.filter(account => account.isActive), vendors,
-    bills: bills.filter(bill => bill.status === 'PAID' || bill.status === 'RECEIVED' && bill.postingEntryId),
-  };
+  return { accounts: accounts.filter(account => account.isActive), vendors, bills: bills.filter(bill => bill.status !== 'VOID') };
 }
 
-export function ReceiptsPage({
-  title = 'Receipts',
-  subtitle = 'Review extracted details, post expenses, and attach supporting documents to bills.',
-}: {
-  title?: string;
-  subtitle?: string;
-}) {
-  const [uploading, setUploading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-  const [statusFilter, setStatusFilter] = useState<'PENDING' | 'all'>('PENDING');
+export function ReceiptsPage() {
+  const [view, setView] = useState<'PENDING' | 'all'>('PENDING');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
-  const [reviewOpened, setReviewOpened] = useState(false);
-  const [editingId, setEditingId] = useState<string | null>(null);
-  const [approveModal, setApproveModal] = useState<{ receipt: Receipt } | null>(null);
-  const [approveExpenseId, setApproveExpenseId] = useState('');
-  const [approvePaymentId, setApprovePaymentId] = useState('');
-  const [approving, setApproving] = useState(false);
-
-  const loadReceipts = useCallback(() => getReceipts(statusFilter === 'all' ? undefined : statusFilter), [statusFilter]);
-  const queue = useWorkspaceData(loadReceipts);
-  const loadLookups = useCallback(() => reviewOpened ? loadReceiptLookups() : Promise.resolve(null), [reviewOpened]);
-  const lookups = useWorkspaceData(loadLookups);
-  const receipts = queue.data ?? [];
-  const { loading } = queue;
-  const accounts = lookups.data?.accounts ?? [];
-  const vendors = lookups.data?.vendors ?? [];
-  const bills = lookups.data?.bills ?? [];
-
-  const handleFileSelect = async (e: React.ChangeEvent<HTMLInputElement>) => {
-    const file = e.target.files?.[0];
-    if (!file || !file.type.startsWith('image/')) {
-      setError('Please select a JPEG, PNG, or WebP image');
-      return;
-    }
-    setUploading(true);
-    setError(null);
-    try {
-      await uploadReceipt(file);
-      queue.retry();
-      e.target.value = '';
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Upload failed');
-    } finally {
-      setUploading(false);
-    }
-  };
-
-  const handleUpdateExtracted = async (id: string, extractedData: ReceiptExtractedData) => {
-    try {
-      const date = extractedData.invoiceDate || extractedData.date || '';
-      if (!validReceiptDate(date)) throw new Error('Confirm a valid receipt date before saving.');
-      const payload: ReceiptExtractedData = {
-        ...extractedData,
-        amount: extractedData.amount ?? extractedData.total ?? extractedData.balanceDue ?? extractedData.amountPaid ?? 0,
-        date, invoiceDate: date,
-      };
-      await updateReceipt(id, { extractedData: payload });
-      setEditingId(null);
-      queue.retry();
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Update failed');
-    }
-  };
-
-  const handleApprove = async () => {
-    if (!approveModal || !approveExpenseId || !approvePaymentId) return;
-    if (approveExpenseId === approvePaymentId) {
-      setError('Expense and payment accounts must be different');
-      return;
-    }
-    setApproving(true);
-    setError(null);
-    try {
-      await approveReceipt(approveModal.receipt.id, approveExpenseId, approvePaymentId);
-      setApproveModal(null);
-      setApproveExpenseId('');
-      setApprovePaymentId('');
-      queue.retry();
-      toast.success('Receipt expense posted.');
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Approve failed');
-    } finally {
-      setApproving(false);
-    }
-  };
-
-  const handleReject = async (id: string) => {
-    try {
-      await rejectReceipt(id);
-      queue.retry();
-      toast.success('Receipt rejected');
-    } catch (err) {
-      toast.error(err instanceof Error ? err.message : 'Reject failed');
-    }
-  };
-
-  const expenseAccounts = accounts.filter((a) => a.type === 'EXPENSE');
-  const paymentAccounts = accounts.filter(
-    (a) => a.type === 'ASSET' || a.type === 'LIABILITY'
-  );
-
-  const displayAmount = (d: Receipt['extractedData']) => {
-    if (d == null) return null;
-    const n = d.amount ?? d.total ?? d.balanceDue ?? d.amountPaid;
-    return typeof n === 'number' ? n : null;
-  };
-
-  const filteredReceipts = receipts.filter((r) => {
-    const d = r.extractedData;
-    const vendor = (d?.vendor || '').toLowerCase();
-    const cat = (d?.category || '').toLowerCase();
-    const invNo = (d?.invoiceNumber || '').toLowerCase();
-    const q = search.toLowerCase();
-    const match = search === '' || vendor.includes(q) || cat.includes(q) || invNo.includes(q);
-    return match;
-  });
-
-  const selected = filteredReceipts.find(receipt => receipt.id === selectedId);
-
-  return (
-    <div className="workspace-page">
-      <div className="workspace-content">
-        <div className="mb-5">
-          <WorkspaceHeading section="Daily work" title={title} description={subtitle}
-            actions={<a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>} />
-        </div>
-
-        {queue.error && <div className="mb-5"><WorkspaceNotice title="Receipts could not load" onRetry={queue.retry} /></div>}
-        {error && <div className="mb-5"><WorkspaceNotice title="Receipt action could not finish">{error}</WorkspaceNotice></div>}
-
-        <section id="upload-receipt" className="workspace-panel mb-5 scroll-mt-4 px-4 py-3 sm:px-5">
-          <label className="flex cursor-pointer flex-wrap items-center gap-3">
-            <span className="workspace-icon">
-              {uploading ? <Loader2 className="size-4 motion-safe:animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}
-            </span>
-            <span className="min-w-32 flex-1">
-              <span className="block text-sm font-semibold">{uploading ? 'Processing receipt…' : 'Add a receipt image'}</span>
-              <span className="block text-xs text-slate-600">JPEG, PNG, or WebP</span>
-            </span>
-            <input type="file" aria-label="Choose receipt image" accept="image/jpeg,image/png,image/webp" onChange={handleFileSelect}
-              disabled={uploading} className="max-w-full text-sm text-slate-700 file:mr-2 file:min-h-10 file:cursor-pointer file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:font-semibold file:text-blue-900" />
-          </label>
-        </section>
-
-        <nav className="workspace-tabs mb-4" aria-label="Receipt views">
-          <button type="button" className="workspace-tab" aria-current={statusFilter === 'PENDING' ? 'page' : undefined}
-            onClick={() => { setStatusFilter('PENDING'); setSelectedId(null); }}>Needs review</button>
-          <button type="button" className="workspace-tab" aria-current={statusFilter === 'all' ? 'page' : undefined}
-            onClick={() => { setStatusFilter('all'); setSelectedId(null); }}>All receipts</button>
-        </nav>
-        {/* Filters */}
-        <div className="mb-6 flex flex-wrap gap-4 items-center">
-          <div className="relative flex-1 min-w-[200px]">
-            <Search className="absolute left-3 top-1/2 -translate-y-1/2 h-4 w-4 text-zinc-400" />
-            <input
-              type="text"
-              aria-label="Search receipts" placeholder="Search by vendor or category…"
-              value={search}
-              onChange={(e) => setSearch(e.target.value)}
-              className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-            />
-          </div>
-        </div>
-
-        <WorkspacePanel title="Receipt queue" description={loading ? 'Loading receipts…' : filteredReceipts.length + (filteredReceipts.length === 1 ? ' receipt' : ' receipts')}>
-          {loading ? <p role="status" className="p-4 text-sm text-slate-600">Loading receipts…</p> : filteredReceipts.length === 0 ? (
-            <p className="p-4 text-sm text-slate-600">{queue.error ? 'Receipt data is unavailable.' : 'No receipts match this view.'}</p>
-          ) : (
-            <div className="workspace-table-wrap">
-              <table className="workspace-table">
-                <thead><tr><th scope="col">Receipt</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Amount</th></tr></thead>
-                <tbody>{filteredReceipts.map(receipt => {
-                  const details = receipt.extractedData;
-                  const amount = displayAmount(details);
-                  return <tr key={receipt.id} className={selected?.id === receipt.id ? 'bg-blue-50' : undefined}>
-                    <td><button type="button" aria-expanded={selected?.id === receipt.id}
-                      aria-controls={selected?.id === receipt.id ? 'receipt-review' : undefined}
-                      className="workspace-text-action min-h-10 px-0 text-left"
-                      onClick={() => { setReviewOpened(true); setSelectedId(selected?.id === receipt.id ? null : receipt.id); setEditingId(null); }}>
-                      {details?.vendor || details?.invoiceNumber || 'Uploaded receipt'}
-                    </button></td>
-                    <td className="whitespace-nowrap">{details?.invoiceDate || details?.date || '—'}</td>
-                    <td><WorkspaceStatus>{receiptStatus(receipt)}</WorkspaceStatus></td>
-                    <td className="workspace-number">{amount === null ? '—' : formatUsd(amount)}</td>
-                  </tr>;
-                })}</tbody>
-              </table>
-            </div>
-          )}
-        </WorkspacePanel>
-        {selected && (
-          <section className="mt-5 space-y-2" id="receipt-review" aria-label="Receipt review">
-            {lookups.error && <WorkspaceNotice title="Receipt accounts, vendors, and bills could not load" onRetry={lookups.retry} />}
-            <h2 className="font-semibold text-slate-950">Receipt review</h2>
-            <ReceiptCard key={selected.id} receipt={selected}
-              isEditing={editingId === selected.id} onStartEdit={() => setEditingId(selected.id)} onCancelEdit={() => setEditingId(null)}
-              onSave={data => handleUpdateExtracted(selected.id, data)} onApprove={() => setApproveModal({ receipt: selected })}
-              onReject={() => handleReject(selected.id)} canApprove={selected.status === 'PENDING'} vendors={vendors} bills={bills}
-              onUpdateMeta={async (vendorId, category, removeLegacyBill) => {
-                await updateReceipt(selected.id, { vendorId, category, ...(removeLegacyBill && { billId: null }) });
-                queue.retry();
-              }}
-              onAttach={async (billId, vendorId, category) => {
-                await attachReceiptToBill(selected.id, { billId, vendorId, category });
-                queue.retry();
-                toast.success('Receipt attached. The bill balance is unchanged.');
-              }} />
-          </section>
-        )}
-
-        {/* Approve modal */}
-        {approveModal && (
-          <div className="fixed inset-0 z-50 flex items-center justify-center p-4 bg-black/50">
-            <div className="bg-white dark:bg-zinc-900 rounded-xl shadow-xl max-w-md w-full p-6 border border-zinc-200 dark:border-zinc-800">
-              <h3 className="text-lg font-semibold text-zinc-900 dark:text-zinc-50 mb-4">
-                Create journal entry
-              </h3>
-              <p className="text-sm text-zinc-600 dark:text-zinc-400 mb-4">
-                Debit expense, credit payment method. Amount:{' '}
-                <strong>
-                  {(() => {
-                    const n = displayAmount(approveModal.receipt.extractedData);
-                    return n != null ? n.toFixed(2) : '—';
-                  })()}
-                </strong>
-              </p>
-              <div className="space-y-4">
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Expense account (debit)
-                  </label>
-                  <select
-                    value={approveExpenseId}
-                    onChange={(e) => setApproveExpenseId(e.target.value)}
-                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-                  >
-                    <option value="">Select account</option>
-                    {expenseAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} – {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-                <div>
-                  <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">
-                    Payment account (credit)
-                  </label>
-                  <select
-                    value={approvePaymentId}
-                    onChange={(e) => setApprovePaymentId(e.target.value)}
-                    className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-                  >
-                    <option value="">Select account</option>
-                    {paymentAccounts.map((a) => (
-                      <option key={a.id} value={a.id}>
-                        {a.code} – {a.name}
-                      </option>
-                    ))}
-                  </select>
-                </div>
-              </div>
-              <div className="flex gap-3 mt-6">
-                <button
-                  onClick={() => {
-                    setApproveModal(null);
-                    setApproveExpenseId('');
-                    setApprovePaymentId('');
-                  }}
-                  className="flex-1 px-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg text-zinc-700 dark:text-zinc-300 text-sm font-medium hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-                <button
-                  onClick={handleApprove}
-                  disabled={approving || !approveExpenseId || !approvePaymentId}
-                  className="flex-1 px-4 py-2 bg-blue-700 text-white rounded-lg text-sm font-medium hover:bg-blue-800 disabled:opacity-50 flex items-center justify-center gap-2"
-                >
-                  {approving ? <Loader2 className="h-4 w-4 animate-spin" /> : <Check className="h-4 w-4" />}
-                  Approve & create entry
-                </button>
-              </div>
-            </div>
-          </div>
-        )}
-      </div>
-    </div>
-  );
-}
-
-export default function LegacyReceiptsPage() {
-  return <LegacyRedirect to="/inbox" />;
-}
-
-const CATEGORY_SUGGESTIONS = ['Office Supplies', 'Travel', 'Meals', 'Utilities', 'Software', 'Other'];
-
-function ReceiptCard({
-  receipt,
-  isEditing,
-  onStartEdit,
-  onCancelEdit,
-  onSave,
-  onApprove,
-  onReject,
-  canApprove,
-  vendors,
-  bills,
-  onUpdateMeta,
-  onAttach,
-}: {
-  receipt: Receipt;
-  isEditing: boolean;
-  onStartEdit: () => void;
-  onCancelEdit: () => void;
-  onSave: (data: ReceiptExtractedData) => void;
-  onApprove: () => void;
-  onReject: () => void;
-  canApprove: boolean;
-  vendors: Vendor[];
-  bills: Bill[];
-  onUpdateMeta: (vendorId: string | null, category: string | null, removeLegacyBill: boolean) => Promise<void>;
-  onAttach: (billId: string, vendorId: string | null, category: string | null) => Promise<void>;
-}) {
-  // Normalize so old receipts (date, amount) show in new fields (invoiceDate, total)
-  const normalizeForEdit = (raw: Receipt['extractedData']): ReceiptExtractedData => {
-    if (!raw) return {};
-    return {
-      ...raw,
-      invoiceDate: raw.invoiceDate || raw.date || '',
-      dueDate: raw.dueDate ?? '',
-      invoiceNumber: raw.invoiceNumber ?? '',
-      total: raw.total ?? raw.amount ?? 0,
-      amountPaid: raw.amountPaid ?? 0,
-      balanceDue: raw.balanceDue ?? 0,
-      items: Array.isArray(raw.items) ? raw.items : [],
-      date: raw.invoiceDate || raw.date || '',
-      amount: raw.amount ?? raw.total ?? raw.balanceDue ?? raw.amountPaid ?? 0,
-    };
-  };
-
-  const [editData, setEditData] = useState<ReceiptExtractedData>(() => normalizeForEdit(receipt.extractedData));
-  const [metaVendorId, setMetaVendorId] = useState(receipt.vendorId ?? '');
-  const [metaCategory, setMetaCategory] = useState(receipt.category ?? '');
-  const [metaBillId, setMetaBillId] = useState(receipt.billId ?? '');
-  const [metaSaving, setMetaSaving] = useState(false);
-  const [metaError, setMetaError] = useState('');
-  const d = receipt.extractedData || {};
-  const rawDate = d.invoiceDate || d.date || '';
-  const dateConfirmed = validReceiptDate(rawDate);
-  const vendorBills = bills.filter(bill => !metaVendorId || bill.vendorId === metaVendorId);
-
-  async function saveMeta(attach = false) {
-    setMetaSaving(true);
-    setMetaError('');
-    try {
-      if (attach) await onAttach(metaBillId, metaVendorId || null, metaCategory || null);
-      else await onUpdateMeta(metaVendorId || null, metaCategory || null, Boolean(receipt.billId && !metaBillId));
-    } catch (cause) {
-      setMetaError(cause instanceof Error ? cause.message : 'Could not save receipt details.');
-    } finally {
-      setMetaSaving(false);
-    }
+  const [opened, setOpened] = useState(false);
+  const [uploading, setUploading] = useState(false);
+  const [error, setError] = useState('');
+  const [notice, setNotice] = useState<{ text: string; billId?: string | null } | null>(null);
+  const loadQueue = useCallback(() => getReceipts(view === 'all' ? undefined : view), [view]);
+  const queue = useWorkspaceData(loadQueue);
+  const loadReview = useCallback(() => opened ? loadLookups() : Promise.resolve(null), [opened]);
+  const lookups = useWorkspaceData(loadReview);
+  const receipts = (queue.data ?? []).filter(receipt => [receipt.extractedData.vendor, receipt.extractedData.invoiceNumber, receipt.category]
+    .some(value => (value ?? '').toLowerCase().includes(search.toLowerCase())));
+  const selected = queue.data?.find(receipt => receipt.id === selectedId);
+  async function upload(file: File) {
+    setUploading(true); setError(''); setNotice(null);
+    try { await uploadReceipt(file); await queue.retry(); }
+    catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not upload receipt.'); }
+    finally { setUploading(false); }
   }
-
-  const items = d.items ?? [];
-  const fmt = (n: number | undefined) => (n != null && typeof n === 'number' ? n.toFixed(2) : '—');
-
-  return (
-    <div className="workspace-panel overflow-hidden">
-      <div className="flex flex-col md:flex-row">
-        <ReceiptImage key={receipt.id} receiptId={receipt.id} />
-        <div className="min-w-0 flex-1 p-4 sm:p-5">
-          <div className="flex items-center gap-2 mb-3">
-            <WorkspaceStatus>{receiptStatus(receipt)}</WorkspaceStatus>
-            {receipt.bill && <Link href={`/purchases/bills/${receipt.bill.id}`} className="text-sm font-semibold text-blue-800 underline">{receipt.bill.billNo}</Link>}
-            {receipt.journalEntryId && (
-              <span className="text-xs text-zinc-500 dark:text-zinc-400 flex items-center gap-1">
-                <FileText className="h-3 w-3" />
-                Linked to journal entry
-              </span>
-            )}
-          </div>
-          {receipt.status === 'PENDING' && !dateConfirmed && <div className="mb-3"><WorkspaceNotice title="Check receipt date">
-            {rawDate ? 'The extracted date ' + rawDate + ' is invalid. Confirm the date from the original receipt.' : 'Enter the date shown on the original receipt.'}
-          </WorkspaceNotice></div>}
-          {!isEditing ? (
-            <div className="text-sm">
-              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-2">Receipt details</div>
-              <div className="grid grid-cols-2 gap-x-4 gap-y-1.5">
-                <div><span className="text-zinc-500 dark:text-zinc-400">Invoice #</span> {d.invoiceNumber || '—'}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Total</span> {fmt(d.total ?? d.amount)}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Receipt date</span> {d.invoiceDate || d.date || '—'}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Due Date</span> {d.dueDate || '—'}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Amount Paid</span> {fmt(d.amountPaid)}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Balance Due</span> {fmt(d.balanceDue)}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Vendor</span> {d.vendor || '—'}</div>
-                <div><span className="text-zinc-500 dark:text-zinc-400">Category</span> {d.category || '—'}</div>
-                {d.confidence != null && d.confidence > 0 && (
-                  <div><span className="text-zinc-500 dark:text-zinc-400">Confidence</span> {(Number(d.confidence) * 100).toFixed(0)}%</div>
-                )}
-              </div>
-              {items.length > 0 && (
-                <div className="mt-3 pt-2 border-t border-zinc-200 dark:border-zinc-700">
-                  <span className="text-zinc-500 dark:text-zinc-400 block mb-1">Items</span>
-                  <ul className="text-sm space-y-0.5">
-                    {items.map((it, i) => (
-                      <li key={i} className="flex justify-between gap-2">
-                        <span>{it.description || '—'}</span>
-                        <span>{typeof it.amount === 'number' ? it.amount.toFixed(2) : '—'}</span>
-                      </li>
-                    ))}
-                  </ul>
-                </div>
-              )}
-            </div>
-          ) : (
-            <div className="space-y-2 text-sm">
-              <div className="text-xs font-medium text-zinc-500 dark:text-zinc-400 uppercase tracking-wide mb-1">Edit receipt details</div>
-              <div>
-                <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Vendor</label>
-                <input
-                  type="text"
-                  value={editData.vendor ?? ''}
-                  onChange={(e) => setEditData((p) => ({ ...p, vendor: e.target.value }))}
-                  className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                />
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Invoice Number</label>
-                  <input
-                    type="text"
-                    value={editData.invoiceNumber ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, invoiceNumber: e.target.value }))}
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Category</label>
-                  <input
-                    type="text"
-                    value={editData.category ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, category: e.target.value }))}
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-2 gap-2">
-                <div>
-                  <label htmlFor="receipt-confirmed-date" className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Confirmed receipt date</label>
-                  <input
-                    id="receipt-confirmed-date" type="date"
-                    value={validReceiptDate(editData.invoiceDate || editData.date || '') ? (editData.invoiceDate || editData.date) : ''}
-                    onChange={e => setEditData(current => ({ ...current, invoiceDate: e.target.value, date: e.target.value }))}
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Due Date</label>
-                  <input
-                    type="text"
-                    value={editData.dueDate ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, dueDate: e.target.value }))}
-                    placeholder="YYYY-MM-DD"
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-              </div>
-              <div className="grid grid-cols-3 gap-2">
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Total</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editData.total ?? editData.amount ?? ''}
-                    onChange={(e) => {
-                      const v = e.target.value ? parseFloat(e.target.value) : 0;
-                      setEditData((p) => ({ ...p, total: v, amount: v }));
-                    }}
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Amount Paid</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editData.amountPaid ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, amountPaid: e.target.value ? parseFloat(e.target.value) : 0 }))}
-                    placeholder="0"
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-                <div>
-                  <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Balance Due</label>
-                  <input
-                    type="number"
-                    step="0.01"
-                    value={editData.balanceDue ?? ''}
-                    onChange={(e) => setEditData((p) => ({ ...p, balanceDue: e.target.value ? parseFloat(e.target.value) : 0 }))}
-                    placeholder="0"
-                    className="w-full px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50"
-                  />
-                </div>
-              </div>
-              <div>
-                <label className="block text-zinc-500 dark:text-zinc-400 mb-0.5">Items</label>
-                <div className="space-y-1">
-                  {(editData.items ?? []).map((it, i) => (
-                    <div key={i} className="flex gap-2 items-center">
-                      <input
-                        type="text"
-                        placeholder="Description"
-                        value={it.description}
-                        onChange={(e) => {
-                          const next = [...(editData.items ?? [])];
-                          next[i] = { ...next[i], description: e.target.value };
-                          setEditData((p) => ({ ...p, items: next }));
-                        }}
-                        className="flex-1 min-w-0 px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-                      />
-                      <input
-                        type="number"
-                        step="0.01"
-                        placeholder="Amount"
-                        value={it.amount || ''}
-                        onChange={(e) => {
-                          const next = [...(editData.items ?? [])];
-                          next[i] = { ...next[i], amount: e.target.value ? parseFloat(e.target.value) : 0 };
-                          setEditData((p) => ({ ...p, items: next }));
-                        }}
-                        className="w-24 px-2 py-1 border border-zinc-300 dark:border-zinc-700 rounded bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 text-sm"
-                      />
-                      <button
-                        type="button"
-                        onClick={() => setEditData((p) => ({ ...p, items: (p.items ?? []).filter((_, j) => j !== i) }))}
-                        className="p-1 text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 rounded"
-                        aria-label="Remove item"
-                      >
-                        <X className="h-4 w-4" />
-                      </button>
-                    </div>
-                  ))}
-                  <button
-                    type="button"
-                    onClick={() => setEditData((p) => ({ ...p, items: [...(p.items ?? []), { description: '', amount: 0 }] }))}
-                    className="mt-1 px-2 py-1 text-sm text-zinc-600 dark:text-zinc-400 border border-dashed border-zinc-300 dark:border-zinc-700 rounded hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  >
-                    + Add item
-                  </button>
-                </div>
-              </div>
-            </div>
-          )}
-          {/* Vendor / Category / Bill metadata */}
-          {receipt.status === 'PENDING' && !isEditing && <div className="mt-4 pt-4 border-t border-zinc-100 dark:border-zinc-800">
-            <p className="text-xs font-semibold text-zinc-500 uppercase tracking-wider mb-3">Expense Details</p>
-            <div className="grid grid-cols-1 sm:grid-cols-3 gap-3">
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Vendor</label>
-                <select
-                  value={metaVendorId}
-                  onChange={(e) => { setMetaVendorId(e.target.value); setMetaBillId(''); }}
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">None</option>
-                  {vendors.map((v) => <option key={v.id} value={v.id}>{v.name}</option>)}
-                </select>
-              </div>
-              <div>
-                <label className="block text-xs text-zinc-500 mb-1">Category</label>
-                <input
-                  list={`cat-list-${receipt.id}`}
-                  value={metaCategory}
-                  onChange={(e) => setMetaCategory(e.target.value)}
-                  placeholder="e.g. Travel"
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                />
-                <datalist id={`cat-list-${receipt.id}`}>
-                  {CATEGORY_SUGGESTIONS.map((s) => <option key={s} value={s} />)}
-                </datalist>
-              </div>
-              <div>
-                <label htmlFor="receipt-attach-bill" className="block text-xs text-zinc-500 mb-1">Attach to bill</label>
-                <select
-                  id="receipt-attach-bill" value={metaBillId}
-                  onChange={(e) => setMetaBillId(e.target.value)}
-                  className="w-full px-2 py-1.5 rounded border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-xs focus:outline-none focus:ring-1 focus:ring-blue-500"
-                >
-                  <option value="">None</option>
-                  {vendorBills.map((b) => <option key={b.id} value={b.id}>{b.billNo} ({b.vendor?.name ?? ''})</option>)}
-                </select>
-              </div>
-            </div>
-            <div className="mt-3 flex flex-wrap items-center gap-2">
-              <button type="button" className="workspace-button" disabled={metaSaving} onClick={() => void saveMeta()}>Save details</button>
-              <button type="button" className="workspace-primary" disabled={metaSaving || !dateConfirmed || !metaBillId} onClick={() => void saveMeta(true)}>Attach receipt</button>
-            </div>
-            <p className="mt-2 text-xs text-slate-600">Attaching a receipt adds evidence. Record payments from the bill in Purchases.</p>
-            {metaError && <p role="alert" className="mt-2 text-sm text-red-700">{metaError}</p>}
-          </div>}
-
-          <div className="mt-4 flex flex-wrap gap-2">
-            {!isEditing ? (
-              <>
-                {receipt.status === 'PENDING' && (
-                  <button
-                    onClick={onStartEdit}
-                    className="px-3 py-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                  >
-                    {dateConfirmed ? 'Edit details' : 'Confirm date'}
-                  </button>
-                )}
-                {canApprove && (
-                  <>
-                    <button
-                      disabled={!dateConfirmed || Boolean(metaBillId)}
-                      onClick={onApprove}
-                      className="disabled:opacity-50 px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-green-600 rounded-lg hover:bg-green-700 flex items-center gap-1"
-                    >
-                      <Check className="h-4 w-4" />
-                      Post expense
-                    </button>
-                    <button
-                      onClick={onReject}
-                      className="px-3 py-1.5 text-sm font-medium text-red-700 dark:text-red-300 border border-red-300 dark:border-red-700 rounded-lg hover:bg-red-50 dark:hover:bg-red-900/20"
-                    >
-                      <X className="h-4 w-4" />
-                      Reject
-                    </button>
-                  </>
-                )}
-              </>
-            ) : (
-              <>
-                <button
-                  onClick={() => onSave(editData)}
-                  disabled={!validReceiptDate(editData.invoiceDate || editData.date || '')}
-                  className="disabled:opacity-50 px-3 py-1.5 text-sm font-medium text-white dark:text-zinc-900 bg-zinc-900 dark:bg-zinc-50 rounded-lg hover:bg-blue-800"
-                >
-                  Save receipt details
-                </button>
-                <button
-                  onClick={onCancelEdit}
-                  className="px-3 py-1.5 text-sm font-medium text-zinc-700 dark:text-zinc-300 border border-zinc-300 dark:border-zinc-700 rounded-lg hover:bg-zinc-50 dark:hover:bg-zinc-800"
-                >
-                  Cancel
-                </button>
-              </>
-            )}
-          </div>
-        </div>
-      </div>
-    </div>
-  );
+  function completed(receipt: Receipt, text: string) {
+    setNotice({ text, billId: receipt.billId }); setSelectedId(null); void queue.retry(); void lookups.retry();
+  }
+  return <div className="workspace-page"><div className="workspace-content space-y-5">
+    <WorkspaceHeading section="Daily work" title="Receipts" description="Review the document, then choose how it should be recorded."
+      actions={<a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a>} />
+    {error && <WorkspaceNotice title="Upload could not finish">{error}</WorkspaceNotice>}
+    {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">{notice.text} {notice.billId && <Link href={'/purchases/bills/' + notice.billId} className="font-semibold underline">Open bill</Link>}</div>}
+    <section id="upload-receipt" className="workspace-panel scroll-mt-4 p-4 sm:p-5">
+      <label className="flex cursor-pointer flex-wrap items-center gap-3">
+        <span className="workspace-icon">{uploading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}</span>
+        <span className="min-w-32 flex-1"><span className="block text-sm font-semibold">{uploading ? 'Processing receipt…' : 'Add a receipt image'}</span><span className="text-xs text-slate-600">JPEG, PNG, or WebP · Duplicate images are checked.</span></span>
+        <input type="file" accept="image/jpeg,image/png,image/webp" aria-label="Choose receipt image" disabled={uploading}
+          onChange={event => { const file = event.target.files?.[0]; event.target.value = ''; if (file) void upload(file); }}
+          className="max-w-full text-sm file:mr-2 file:min-h-11 file:rounded-lg file:border-0 file:bg-blue-50 file:px-3 file:font-semibold file:text-blue-900" />
+      </label>
+    </section>
+    <nav className="workspace-tabs" aria-label="Receipt views">{(['PENDING', 'all'] as const).map(value => <button key={value} type="button" className="workspace-tab" aria-current={view === value ? 'page' : undefined}
+      onClick={() => { setView(value); setSelectedId(null); }}>{value === 'PENDING' ? 'Needs review' : 'All receipts'}</button>)}</nav>
+    <label className="relative block"><Search className="absolute left-3 top-3 size-4 text-slate-500" aria-hidden="true" /><span className="sr-only">Search receipts</span>
+      <input className="workspace-field pl-9" placeholder="Search vendor, supplier reference, or category…" value={search} onChange={event => setSearch(event.target.value)} /></label>
+    {queue.error && <WorkspaceNotice title="Receipts could not load" onRetry={queue.retry} />}
+    <WorkspacePanel title="Receipt queue" description={queue.loading ? 'Loading…' : receipts.length + ' receipts'}>
+      {queue.loading || !receipts.length ? <p className="p-4 text-sm text-slate-600" role="status">{queue.loading ? 'Loading receipts…' : 'No receipts in this view.'}</p> :
+        <div className="workspace-table-wrap"><table className="workspace-table">
+          <thead><tr><th scope="col">Document</th><th scope="col">Date</th><th scope="col">Status</th><th scope="col" className="workspace-number">Total (USD)</th></tr></thead>
+          <tbody>{receipts.map(receipt => <tr key={receipt.id}>
+            <td><button type="button" className="min-h-11 text-left font-semibold text-blue-800 hover:underline" aria-expanded={selectedId === receipt.id} onClick={() => { setSelectedId(receipt.id); setOpened(true); }}>{receipt.extractedData.vendor || 'Unnamed receipt'}</button><p className="text-xs text-slate-600">{receipt.extractedData.invoiceNumber}</p></td>
+            <td>{receipt.extractedData.invoiceDate || receipt.extractedData.date || 'Confirm date'}</td><td><WorkspaceStatus>{status(receipt)}</WorkspaceStatus></td>
+            <td className="workspace-number">{formatUsd(receipt.extractedData.total ?? receipt.extractedData.amount ?? 0)}</td>
+          </tr>)}</tbody>
+        </table></div>}
+    </WorkspacePanel>
+    {selected && <section aria-label="Receipt review" className="space-y-3">
+      <div className="flex items-center justify-between gap-3"><h2 className="text-xl font-semibold">Review document</h2><button className="workspace-button" onClick={() => setSelectedId(null)} type="button"><X className="size-4" aria-hidden="true" />Close review</button></div>
+      {lookups.error && <WorkspaceNotice title="Review accounts and vendors could not load" onRetry={lookups.retry} />}
+      {lookups.data ? <ReceiptReview key={selected.id + selected.updatedAt} receipt={selected} {...lookups.data} onComplete={completed} /> : <p role="status" className="p-4 text-sm text-slate-600">Loading review details…</p>}
+    </section>}
+  </div></div>;
 }
+
+function ReceiptReview({ receipt, accounts, vendors, bills, onComplete }: { receipt: Receipt; accounts: Account[]; vendors: Vendor[]; bills: Bill[]; onComplete: (receipt: Receipt, text: string) => void }) {
+  const original = receipt.extractedData;
+  const [data, setData] = useState(() => ({
+    vendor: original.vendor ?? '', invoiceNumber: original.invoiceNumber ?? '',
+    invoiceDate: validDate(original.invoiceDate || original.date || '') ? original.invoiceDate || original.date || '' : '',
+    total: String(original.total ?? original.amount ?? ''), amountPaid: String(original.amountPaid ?? '0'), balanceDue: String(original.balanceDue ?? '0'),
+    tax: String(original.tax ?? '0'), tip: String(original.tip ?? '0'),
+    items: (original.items ?? []).map(item => ({ description: item.description, amount: String(item.amount) })),
+  }));
+  const [action, setAction] = useState<'expense' | 'bill' | 'attach'>(() => receipt.billId ? 'attach' : decimalUnits(String(original.balanceDue ?? 0)) > BigInt(0) || decimalUnits(String(original.amountPaid ?? 0)) > BigInt(0) && decimalUnits(String(original.amountPaid ?? 0)) < decimalUnits(String(original.total ?? original.amount ?? 0)) ? 'bill' : 'expense');
+  const [vendorId, setVendorId] = useState(receipt.vendorId ?? '');
+  const [accountId, setAccountId] = useState('');
+  const [paymentId, setPaymentId] = useState('');
+  const [billId, setBillId] = useState(receipt.billId ?? '');
+  const [dueDate, setDueDate] = useState(validDate(original.dueDate || '') ? original.dueDate || '' : '');
+  const [paidInFull, setPaidInFull] = useState(false);
+  const [busy, setBusy] = useState(false);
+  const [error, setError] = useState('');
+  const [saved, setSaved] = useState(false);
+  const total = decimalUnits(data.total);
+  const partial = decimalUnits(data.balanceDue) > BigInt(0) || decimalUnits(data.amountPaid) > BigInt(0) && decimalUnits(data.amountPaid) < total;
+  const duplicate = bills.find(bill => bill.vendorId === vendorId && data.invoiceNumber.trim() && bill.vendorInvoiceNo === data.invoiceNumber.trim().toUpperCase());
+  const editable = receipt.status === 'PENDING';
+  function field(name: keyof Omit<typeof data, 'items'>, label: string, type = 'text', required = false) {
+    return <label className="grid gap-1 text-sm font-medium">{label}<input className="workspace-field" type={type} required={required} disabled={busy || !editable}
+      {...(type === 'number' ? { min: name === 'total' ? '0.01' : '0', step: '0.01' } : {})} value={data[name]}
+      onChange={event => { setData(current => ({ ...current, [name]: event.target.value })); setSaved(false); setPaidInFull(false); }} /></label>;
+  }
+  async function save() {
+    if (!validDate(data.invoiceDate)) throw new Error('Confirm the receipt date from the source image.');
+    const extractedData: ReceiptExtractedData = { ...original, ...data, date: data.invoiceDate, amount: data.total };
+    return updateReceipt(receipt.id, { extractedData, vendorId: vendorId || null });
+  }
+  async function submit(event: FormEvent<HTMLFormElement>) {
+    event.preventDefault(); setBusy(true); setError('');
+    try {
+      await save();
+      if (action === 'expense') {
+        const result = await approveReceipt(receipt.id, accountId, paymentId, { paidInFull, confirmedTotal: data.total });
+        onComplete(result.receipt, 'Paid purchase posted once to the ledger.');
+      } else if (action === 'bill') {
+        const result = await createBillFromReceipt(receipt.id, { vendorId, accountId, dueDate, confirmedTotal: data.total });
+        onComplete(result, 'Draft bill created with this document attached. Review and post it before recording any payment.');
+      } else {
+        const result = await attachReceiptToBill(receipt.id, { billId, vendorId: vendorId || null, category: receipt.category ?? null });
+        onComplete(result, 'Document attached as evidence. No expense or payment was posted.');
+      }
+    } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not finish review.'); }
+    finally { setBusy(false); }
+  }
+  return <div className="workspace-panel grid items-start overflow-hidden lg:grid-cols-[minmax(0,0.85fr)_minmax(0,1.4fr)]">
+    <ReceiptImage receiptId={receipt.id} />
+    <form onSubmit={submit} className="min-w-0 space-y-5 p-4 sm:p-5" aria-busy={busy}>
+      <div className="flex flex-wrap items-center justify-between gap-2"><WorkspaceStatus>{status(receipt)}</WorkspaceStatus>
+        {receipt.billId && <Link className="workspace-text-action" href={'/purchases/bills/' + receipt.billId}>Open bill</Link>}
+        {receipt.journalEntryId && <Link className="workspace-text-action" href="/ledger?tab=journal">View journal entries</Link>}</div>
+      <div><h3 className="font-semibold">Check the source details</h3><p className="mt-1 text-xs text-slate-600">Amounts are in USD. Extracted payment details are evidence, not a recorded payment.</p></div>
+      <div className="grid gap-3 sm:grid-cols-2">{field('vendor', 'Vendor shown on document')}{field('invoiceNumber', 'Supplier invoice / receipt number')}
+        {field('invoiceDate', 'Confirmed document date', 'date', true)}{field('total', 'Document total (USD)', 'number', action !== 'attach')}
+        {field('amountPaid', 'Paid amount shown on document', 'number')}{field('balanceDue', 'Outstanding amount shown on document', 'number')}</div>
+      <details className="rounded-lg border border-slate-200 p-3"><summary className="min-h-8 cursor-pointer text-sm font-semibold">Check line items, tax, and tip</summary>
+        <p className="mb-3 text-xs text-slate-600">When items are present, their amounts plus tax and tip must equal the document total.</p>
+        <div className="space-y-2">{data.items.map((item, index) => <div key={index} className="grid grid-cols-[minmax(0,1fr)_6rem_auto] items-end gap-2">
+          <label className="grid gap-1 text-xs">Description<input className="workspace-field" value={item.description} disabled={!editable || busy} onChange={event => setData(current => ({ ...current, items: current.items.map((line, i) => i === index ? { ...line, description: event.target.value } : line) }))} /></label>
+          <label className="grid gap-1 text-xs">Amount<input className="workspace-field" type="number" min="0" step="0.01" value={item.amount} disabled={!editable || busy} onChange={event => setData(current => ({ ...current, items: current.items.map((line, i) => i === index ? { ...line, amount: event.target.value } : line) }))} /></label>
+          {editable && <button type="button" className="workspace-button min-h-11" disabled={busy} aria-label={'Remove receipt item ' + (index + 1)} onClick={() => setData(current => ({ ...current, items: current.items.filter((_, i) => i !== index) }))}><X className="size-4" aria-hidden="true" /></button>}
+        </div>)}</div>
+        {editable && <button type="button" className="workspace-button my-3" disabled={busy} onClick={() => setData(current => ({ ...current, items: [...current.items, { description: '', amount: '' }] }))}>Add item</button>}
+        <div className="grid gap-3 sm:grid-cols-2">{field('tax', 'Tax shown on document', 'number')}{field('tip', 'Tip shown on document', 'number')}</div>
+      </details>
+      {editable && <>
+        <fieldset className="space-y-2"><legend className="mb-2 font-semibold">How should this be recorded?</legend>
+          {([['expense', 'Paid expense or asset', 'Post a purchase that was paid in full.'], ['bill', 'Unpaid or partly paid bill', 'Create a draft bill. Record any payment from the bill after posting.'], ['attach', 'Attach to an existing bill', 'Add evidence without posting another expense or payment.']] as const).map(([value, label, help]) =>
+            <label key={value} className={'flex min-h-16 cursor-pointer items-start gap-3 rounded-xl border p-3 ' + (action === value ? 'border-blue-600 bg-blue-50' : 'border-slate-200')}>
+              <input type="radio" className="mt-1 size-4" name="recording-action" value={value} checked={action === value} disabled={busy} onChange={() => { setAction(value); setError(''); setPaidInFull(false); }} />
+              <span><span className="block text-sm font-semibold">{label}</span><span className="mt-0.5 block text-xs text-slate-600">{help}</span></span>
+            </label>)}
+        </fieldset>
+        <label className="grid gap-1 text-sm font-medium">Vendor record {action === 'bill' ? '(required)' : '(optional)'}
+          <select className="workspace-field" required={action === 'bill'} value={vendorId} disabled={busy} onChange={event => { setVendorId(event.target.value); setBillId(''); }}><option value="">Select vendor…</option>{vendors.map(vendor => <option key={vendor.id} value={vendor.id}>{vendor.name}</option>)}</select></label>
+        {action !== 'attach' && <label className="grid gap-1 text-sm font-medium">Expense or asset account
+          <select className="workspace-field" required value={accountId} disabled={busy} onChange={event => setAccountId(event.target.value)}><option value="">Select purchase account…</option>{accounts.filter(isPurchaseAccount).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>}
+        {action === 'expense' && <>
+          {partial && <WorkspaceNotice title="This document has an unpaid balance">Choose the bill workflow, or correct the extracted payment details using the source document.</WorkspaceNotice>}
+          <label className="grid gap-1 text-sm font-medium">Paid from<select className="workspace-field" required value={paymentId} disabled={busy} onChange={event => { setPaymentId(event.target.value); setPaidInFull(false); }}><option value="">Select cash, bank, or credit card…</option>{accounts.filter(account => isPaymentAccount(account, true)).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}</select></label>
+          <label className="flex min-h-11 items-center gap-3 rounded-lg bg-slate-50 p-3 text-sm"><input type="checkbox" required checked={paidInFull} disabled={busy || partial} onChange={event => setPaidInFull(event.target.checked)} />I confirm {formatUsd(data.total)} was paid in full from this account.</label>
+        </>}
+        {action === 'bill' && <>
+          <label className="grid gap-1 text-sm font-medium">Bill due date<input className="workspace-field" type="date" min={data.invoiceDate} value={dueDate} required disabled={busy} onChange={event => setDueDate(event.target.value)} /></label>
+          <p className="rounded-lg bg-blue-50 p-3 text-sm text-blue-950">Creates a draft for the full {formatUsd(data.total)}. Cash and the ledger are unchanged until you post the bill and record its actual payments.</p>
+          {duplicate && <WorkspaceNotice title="This supplier reference already exists">Choose Attach to an existing bill. <Link className="font-semibold underline" href={'/purchases/bills/' + duplicate.id}>Open {duplicate.billNo}</Link></WorkspaceNotice>}
+        </>}
+        {action === 'attach' && <label className="grid gap-1 text-sm font-medium">Existing bill<select className="workspace-field" value={billId} required disabled={busy} onChange={event => setBillId(event.target.value)}><option value="">Select existing bill…</option>{bills.filter(bill => !vendorId || bill.vendorId === vendorId).map(bill => <option key={bill.id} value={bill.id}>{bill.billNo} · {bill.vendor?.name} · {formatUsd(bill.total)}</option>)}</select></label>}
+        <p className="text-xs text-slate-600">Configure account roles in <Link href="/ledger?tab=accounts" className="font-semibold text-blue-800 underline">Chart of accounts</Link>. Need a vendor? <Link href="/purchases/vendors" className="font-semibold text-blue-800 underline">Manage vendors</Link>.</p>
+        {error && <WorkspaceNotice title="Review could not finish">{error}</WorkspaceNotice>}
+        {saved && <p role="status" className="text-sm text-emerald-800">Details saved. Nothing has been posted.</p>}
+        <div className="flex flex-wrap gap-2 border-t border-slate-200 pt-4">
+          <button type="submit" className="workspace-primary" disabled={busy || action === 'expense' && partial || action === 'bill' && Boolean(duplicate)}><Check className="size-4" aria-hidden="true" />{busy ? 'Saving…' : action === 'expense' ? 'Post paid purchase' : action === 'bill' ? 'Create draft bill' : 'Attach document'}</button>
+          <button type="button" className="workspace-button" disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await save(); setSaved(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save.'); } finally { setBusy(false); } }}>Save details only</button>
+          <button type="button" className="workspace-button text-red-800" disabled={busy} onClick={async () => { setBusy(true); try { onComplete(await rejectReceipt(receipt.id), 'Receipt rejected. Nothing was posted.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not reject.'); } finally { setBusy(false); } }}>Reject</button>
+        </div>
+      </>}
+      {!editable && <p className="text-sm text-slate-600">Reviewed documents are read-only.</p>}
+    </form>
+  </div>;
+}
+
+export default function LegacyReceiptsPage() { return <LegacyRedirect to="/inbox" />; }

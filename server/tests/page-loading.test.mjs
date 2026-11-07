@@ -31,7 +31,7 @@ test('bounded summaries agree with full document lists and remain isolated by wo
     };
   }
   const [api, outsider] = await Promise.all([signup(), signup()]);
-  const account = (code, name, type) => api('/accounts', 'POST', { code, name, type }, 201);
+  const account = (code, name, type) => api('/accounts', 'POST', { code, name, type, role: code === '1000' ? 'CASH' : code === '1100' ? 'ACCOUNTS_RECEIVABLE' : code === '2000' ? 'ACCOUNTS_PAYABLE' : code === '2100' ? 'SALES_TAX' : 'GENERAL' }, 201);
   const cash = await account('1000', 'Cash', 'ASSET');
   const ar = await account('1100', 'Receivables', 'ASSET');
   const ap = await account('2000', 'Accounts Payable', 'LIABILITY');

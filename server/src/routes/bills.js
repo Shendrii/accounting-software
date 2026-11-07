@@ -1,6 +1,8 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
 import { purchaseSummary, summaryDay } from '../lib/workflowSummaries.js';
+import { checkDates, checkVendor, checkPaidReceiptReference, createDraftBill, draftLines, vendorReference } from '../lib/billDraft.js';
+import { purchaseAccount, requireAccountRole } from '../lib/accountRoles.js';
 import {
   Decimal, LedgerError, createPosting, decimalInput, decimalSum, ledgerAccounts, ledgerDate,
   ledgerTransaction, nextDay, reversePosting, sendLedgerError,
@@ -28,44 +30,6 @@ async function getBill(tx, where) {
   const bill = await tx.bill.findFirst({ where, include: detail });
   if (!bill) throw new LedgerError('Bill not found.', 404);
   return bill;
-}
-
-async function generateBillNo(tx, workspaceId) {
-  const now = new Date();
-  const prefix = 'BILL-' + now.getFullYear() + String(now.getMonth() + 1).padStart(2, '0') + '-';
-  const last = await tx.bill.findFirst({ where: { workspaceId, billNo: { startsWith: prefix } }, orderBy: { billNo: 'desc' } });
-  return prefix + String(last ? Number(last.billNo.split('-')[2]) + 1 : 1).padStart(4, '0');
-}
-
-async function draftLines(tx, workspaceId, input) {
-  if (!Array.isArray(input) || !input.length) throw new LedgerError('Enter at least one bill line.');
-  const lines = input.map(line => {
-    if (typeof line?.description !== 'string' || !line.description.trim()) throw new LedgerError('Enter a description for every bill line.');
-    const quantity = decimalInput(line.quantity, 'Quantity', 4);
-    const unitPrice = decimalInput(line.unitPrice, 'Unit price');
-    if (quantity.isZero()) throw new LedgerError('Quantity must be greater than zero.');
-    return {
-      description: line.description.trim(), quantity, unitPrice, accountId: line.accountId || null,
-      amount: decimalInput(quantity.times(unitPrice).toDecimalPlaces(2, Decimal.ROUND_HALF_UP), 'Line amount'),
-    };
-  });
-  const accounts = await ledgerAccounts(tx, workspaceId, lines.map(line => line.accountId).filter(Boolean));
-  if ([...accounts.values()].some(account => !['ASSET', 'EXPENSE'].includes(account.type))) {
-    throw new LedgerError('Choose an expense or asset account for bill lines.');
-  }
-  const total = decimalInput(decimalSum(lines.map(line => line.amount)), 'Bill total');
-  if (total.isZero()) throw new LedgerError('Bill total must be greater than zero.');
-  return { lines, total };
-}
-
-async function checkVendor(tx, workspaceId, id) {
-  if (typeof id !== 'string' || !await tx.vendor.findFirst({ where: { id, workspaceId }, select: { id: true } })) {
-    throw new LedgerError('Choose a vendor from this workspace.');
-  }
-}
-
-function checkDates(date, dueDate) {
-  if (dueDate < date) throw new LedgerError('The due date cannot precede the bill date.');
 }
 
 router.get('/', async (req, res) => {
@@ -104,25 +68,7 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const workspaceId = req.workspace.id;
-    const { vendorId, date, dueDate, lines, notes, isRecurring, recurrenceInterval, nextDueDate } = req.body;
-    const billDate = ledgerDate(date, 'Bill date');
-    const due = ledgerDate(dueDate, 'Due date');
-    checkDates(billDate, due);
-    const bill = await ledgerTransaction(async tx => {
-      await checkVendor(tx, workspaceId, vendorId);
-      const draft = await draftLines(tx, workspaceId, lines);
-      return tx.bill.create({
-        data: {
-          workspaceId, vendorId, billNo: await generateBillNo(tx, workspaceId), date: billDate, dueDate: due,
-          total: draft.total, notes, isRecurring: Boolean(isRecurring),
-          recurrenceInterval: isRecurring ? recurrenceInterval ?? 'monthly' : null,
-          nextDueDate: isRecurring && nextDueDate ? ledgerDate(nextDueDate, 'Next due date') : null,
-          lines: { create: draft.lines },
-        },
-        include: detail,
-      });
-    });
+    const bill = await ledgerTransaction(tx => createDraftBill(tx, req.workspace.id, req.body, detail));
     res.status(201).json(billAmounts(bill));
   } catch (error) {
     sendLedgerError(res, error, 'Failed to create the bill.');
@@ -132,11 +78,12 @@ router.post('/', async (req, res) => {
 router.put('/:id', async (req, res) => {
   try {
     const where = billWhere(req);
-    const { vendorId, date, dueDate, lines, notes } = req.body;
+    const { vendorId, date, dueDate, lines, notes, vendorInvoiceNo } = req.body;
     const bill = await ledgerTransaction(async tx => {
       const current = await getBill(tx, where);
       if (current.status !== 'DRAFT') throw new LedgerError('Only draft bills can be edited.', 409);
       if (vendorId !== undefined) await checkVendor(tx, where.workspaceId, vendorId);
+      await checkPaidReceiptReference(tx, where.workspaceId, vendorId ?? current.vendorId, vendorInvoiceNo === undefined ? current.vendorInvoiceNo : vendorReference(vendorInvoiceNo));
       const billDate = date === undefined ? current.date : ledgerDate(date, 'Bill date');
       const due = dueDate === undefined ? current.dueDate : ledgerDate(dueDate, 'Due date');
       checkDates(billDate, due);
@@ -144,6 +91,7 @@ router.put('/:id', async (req, res) => {
       return tx.bill.update({
         where, data: {
           vendorId, date: billDate, dueDate: due, notes,
+          ...(vendorInvoiceNo !== undefined && { vendorInvoiceNo: vendorReference(vendorInvoiceNo) }),
           ...(draft && { total: draft.total, lines: { deleteMany: {}, create: draft.lines } }),
         },
         include: detail,
@@ -157,11 +105,10 @@ router.put('/:id', async (req, res) => {
 
 async function payableAccount(tx, workspaceId) {
   const accounts = await tx.account.findMany({
-    where: { workspaceId, type: 'LIABILITY', isActive: true, name: { contains: 'payable', mode: 'insensitive' } },
+    where: { workspaceId, type: 'LIABILITY', isActive: true, role: 'ACCOUNTS_PAYABLE' },
   });
-  const named = accounts.filter(account => /^(accounts payable|trade payables)(?:\s*[-(].*)?$/i.test(account.name.trim()));
-  const account = named.length === 1 ? named[0] : accounts.length === 1 ? accounts[0] : null;
-  if (!account) throw new LedgerError('Set up one active Accounts Payable liability account.');
+  const account = accounts.length === 1 ? accounts[0] : null;
+  if (!account) throw new LedgerError('Designate one active Accounts Payable account in Chart of accounts.');
   return account.id;
 }
 
@@ -172,13 +119,14 @@ router.post('/:id/receive', async (req, res) => {
       const current = await getBill(tx, where);
       if (current.status === 'RECEIVED' && current.postingEntryId) return current;
       if (current.status !== 'DRAFT') throw new LedgerError('Only draft bills can be posted.', 409);
+      await checkPaidReceiptReference(tx, where.workspaceId, current.vendorId, current.vendorInvoiceNo);
       if (current.lines.some(line => !line.accountId)) throw new LedgerError('Assign an expense or asset account to every bill line before posting.');
       if (!current.total.gt(0) || !decimalSum(current.lines.map(line => line.amount)).eq(current.total)) {
         throw new LedgerError('The bill total does not agree with its lines. Edit the draft before posting.');
       }
       const accounts = await ledgerAccounts(tx, where.workspaceId, current.lines.map(line => line.accountId));
-      if ([...accounts.values()].some(account => !['ASSET', 'EXPENSE'].includes(account.type))) {
-        throw new LedgerError('Choose expense or asset accounts for all bill lines.');
+      if ([...accounts.values()].some(account => !purchaseAccount(account))) {
+        throw new LedgerError('Choose expense or general asset accounts for all bill lines.');
       }
       const ap = await payableAccount(tx, where.workspaceId);
       const entry = await createPosting(tx, where.workspaceId, {
@@ -228,7 +176,7 @@ router.post('/:id/pay', async (req, res) => {
         throw new LedgerError('The original Accounts Payable posting could not be verified.', 409);
       }
       const accounts = await ledgerAccounts(tx, where.workspaceId, [paymentAccountId]);
-      if (accounts.get(paymentAccountId).type !== 'ASSET' || paymentAccountId === payable[0].accountId) throw new LedgerError('Choose an asset payment account.');
+      requireAccountRole(accounts.get(paymentAccountId), ['CASH', 'BANK', 'CREDIT_CARD'], 'Payment account');
       const remaining = new Decimal(billAmounts(current).balanceDue);
       const paid = requested ?? remaining;
       if (paid.lte(0) || paid.gt(remaining)) throw new LedgerError('Payment must be positive and cannot exceed the balance due.');

@@ -2,7 +2,7 @@ import express from 'express';
 import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
 import {
-  accountBalance, decimalSum, ledgerDate, nextDay, sendLedgerError,
+  Decimal, accountBalance, decimalSum, ledgerDate, nextDay, sendLedgerError,
 } from '../lib/ledger.js';
 
 const router = express.Router();
@@ -82,18 +82,31 @@ router.get('/balance-sheet', async (req, res) => {
 
 router.get('/trial-balance', async (req, res) => {
   try {
-    const { startDate, endDate } = req.query;
-    const { sums, accounts } = await reportBalances(req.workspace.id, dateRange(startDate, endDate));
-    const rows = accounts.map(account => ({
-      accountId: account.id, accountName: account.name, accountCode: account.code, accountType: account.type,
-      debitTotal: sums.get(account.id).debit?.toFixed(2) ?? '0.00',
-      creditTotal: sums.get(account.id).credit?.toFixed(2) ?? '0.00',
-    }));
+    const asOf = ledgerDate(req.query.asOf ?? req.query.endDate ?? new Date().toISOString(), 'Trial balance date').toISOString().slice(0, 10);
+    const cutoff = nextDay(asOf).toISOString();
+    const accounts = await prisma.$queryRaw`
+      SELECT a."id", a."name", a."code", a."type",
+        COALESCE(SUM(CASE WHEN j."id" IS NOT NULL THEN l."debit" - l."credit" ELSE 0 END), 0) AS net
+      FROM "Account" a
+      LEFT JOIN "JournalLine" l ON l."accountId" = a."id"
+      LEFT JOIN "JournalEntry" j ON j."id" = l."journalEntryId" AND j."workspaceId" = ${req.workspace.id}
+        AND j."status" = 'POSTED' AND j."date" < ${cutoff}::timestamp
+      WHERE a."workspaceId" = ${req.workspace.id}
+      GROUP BY a."id", a."name", a."code", a."type" ORDER BY a."code"
+    `;
+    const rows = accounts.map(account => {
+      const net = new Decimal(account.net);
+      return {
+        accountId: account.id, accountName: account.name, accountCode: account.code, accountType: account.type,
+        debitTotal: net.gt(0) ? net.toFixed(2) : '0.00', creditTotal: net.lt(0) ? net.abs().toFixed(2) : '0.00',
+      };
+    });
     const totals = {
       debitTotal: decimalSum(rows.map(row => row.debitTotal)).toFixed(2),
       creditTotal: decimalSum(rows.map(row => row.creditTotal)).toFixed(2),
     };
-    res.json({ rows, totals });
+    res.json({ asOf, currency: 'USD', basis: 'Accrual', rows, totals,
+      difference: decimalSum(rows.map(row => row.debitTotal)).minus(decimalSum(rows.map(row => row.creditTotal))).toFixed(2) });
   } catch (error) {
     sendLedgerError(res, error, 'Failed to generate the trial balance.');
   }

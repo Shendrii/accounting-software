@@ -86,6 +86,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
 
 // ==================== ACCOUNTS API ====================
 
+export type AccountRole = 'GENERAL' | 'CASH' | 'BANK' | 'ACCOUNTS_RECEIVABLE' | 'ACCOUNTS_PAYABLE' | 'CREDIT_CARD' | 'SALES_TAX';
+
 export interface Account {
   id: string;
   code: string;
@@ -95,6 +97,7 @@ export interface Account {
   description?: string | null;
   isActive: boolean;
   isBankAccount?: boolean;
+  role: AccountRole;
   createdAt: string;
   updatedAt: string;
 }
@@ -106,6 +109,7 @@ export interface CreateAccountInput {
   description?: string;
   isActive?: boolean;
   isBankAccount?: boolean;
+  role?: AccountRole;
 }
 
 export interface UpdateAccountInput {
@@ -115,6 +119,7 @@ export interface UpdateAccountInput {
   description?: string;
   isActive?: boolean;
   isBankAccount?: boolean;
+  role?: AccountRole;
 }
 
 /**
@@ -335,19 +340,21 @@ export async function deleteJournalEntry(id: string): Promise<void> {
 
 export interface ReceiptLineItem {
   description: string;
-  amount: number;
+  amount: number | string;
 }
 
 export interface ReceiptExtractedData {
   vendor?: string;
   date?: string;
-  amount?: number;
+  amount?: number | string;
   invoiceDate?: string;
   dueDate?: string;
   invoiceNumber?: string;
-  total?: number;
-  amountPaid?: number;
-  balanceDue?: number;
+  total?: number | string;
+  amountPaid?: number | string;
+  balanceDue?: number | string;
+  tax?: number | string;
+  tip?: number | string;
   items?: ReceiptLineItem[];
   category?: string;
   confidence?: number;
@@ -363,7 +370,7 @@ export interface Receipt {
   vendorId?: string | null;
   category?: string | null;
   billId?: string | null;
-  bill?: { id: string; billNo: string } | null;
+  bill?: { id: string; billNo: string; status?: BillStatus } | null;
   createdAt: string;
   updatedAt: string;
   journalEntry?: JournalEntry | null;
@@ -426,18 +433,26 @@ export async function updateReceipt(
 export async function approveReceipt(
   id: string,
   expenseAccountId: string,
-  paymentAccountId: string
+  paymentAccountId: string,
+  confirmation: { paidInFull: boolean; confirmedTotal: string }
 ): Promise<{ receipt: Receipt; journalEntry: JournalEntry }> {
   const response = await fetch(`${API_URL}/api/receipts/${id}/approve`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ expenseAccountId, paymentAccountId }),
+    body: JSON.stringify({ expenseAccountId, paymentAccountId, ...confirmation }),
   });
   return handleResponse<{ receipt: Receipt; journalEntry: JournalEntry }>(response);
 }
 
 export async function attachReceiptToBill(id: string, data: { billId: string; vendorId: string | null; category: string | null }): Promise<Receipt> {
   const response = await fetch(`${API_URL}/api/receipts/${id}/attach-to-bill`, {
+    method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
+  });
+  return handleResponse<Receipt>(response);
+}
+
+export async function createBillFromReceipt(id: string, data: { vendorId: string; dueDate: string; accountId: string; confirmedTotal: string }): Promise<Receipt> {
+  const response = await fetch(`${API_URL}/api/receipts/${id}/create-bill`, {
     method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify(data),
   });
   return handleResponse<Receipt>(response);
@@ -812,6 +827,7 @@ export interface BillLine {
 export interface Bill {
   id: string;
   billNo: string;
+  vendorInvoiceNo?: string | null;
   vendorId: string;
   vendor?: Vendor;
   date: string;
@@ -843,6 +859,7 @@ export interface BillLineInput {
 
 export interface CreateBillInput {
   vendorId: string;
+  vendorInvoiceNo?: string;
   date: string;
   dueDate: string;
   lines: BillLineInput[];
@@ -1080,6 +1097,10 @@ export interface BalanceSheetReport {
 }
 
 export interface TrialBalanceReport {
+  asOf: string;
+  currency: string;
+  basis: string;
+  difference: string;
   rows: { accountId: string; accountCode: string; accountName: string; accountType: string; debitTotal: string; creditTotal: string }[];
   totals: { debitTotal: string; creditTotal: string };
 }
@@ -1099,9 +1120,9 @@ export async function getBalanceSheet(params?: { asOf?: string }): Promise<Balan
   return handleResponse<BalanceSheetReport>(response);
 }
 
-export async function getTrialBalance(params?: { startDate?: string; endDate?: string }): Promise<TrialBalanceReport> {
+export async function getTrialBalance(params?: { asOf?: string; endDate?: string }): Promise<TrialBalanceReport> {
   const q = new URLSearchParams();
-  if (params?.startDate) q.append('startDate', params.startDate);
+  if (params?.asOf) q.append('asOf', params.asOf);
   if (params?.endDate) q.append('endDate', params.endDate);
   const response = await fetch(`${API_URL}/api/reports/trial-balance${q.toString() ? `?${q}` : ''}`);
   return handleResponse<TrialBalanceReport>(response);

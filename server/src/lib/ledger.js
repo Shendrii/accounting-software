@@ -71,11 +71,7 @@ export async function cashLedgerAccounts(client, workspaceId, balances) {
       where: {
         workspaceId,
         type: 'ASSET',
-        OR: [
-          { isBankAccount: true },
-          ...['cash', 'bank', 'checking'].map(name => ({ name: { contains: name, mode: 'insensitive' } })),
-          { journalLines: { some: { debit: { gt: 0 }, journalEntry: { workspaceId, status: 'POSTED', invoicePayment: { isNot: null } } } } },
-        ],
+        role: { in: ['CASH', 'BANK'] },
       },
       select: { id: true, name: true, type: true },
     }),
@@ -104,7 +100,7 @@ export async function ledgerAccounts(tx, workspaceId, ids, allowInactive = false
   const unique = [...new Set(ids)];
   const accounts = await tx.account.findMany({
     where: { workspaceId, id: { in: unique }, ...(allowInactive ? {} : { isActive: true }) },
-    select: { id: true, name: true, code: true, type: true, isBankAccount: true },
+    select: { id: true, name: true, code: true, type: true, role: true, isActive: true, isBankAccount: true },
   });
   if (accounts.length !== unique.length) throw new LedgerError('Choose valid accounts from this workspace.');
   return new Map(accounts.map(account => [account.id, account]));
@@ -176,7 +172,13 @@ export function sendLedgerError(res, error, fallback) {
   if (error instanceof LedgerError) return res.status(error.status).json({ error: error.message });
   if (error.code === 'P2003') return res.status(400).json({ error: 'A selected record no longer exists.' });
   if (error.code === 'P2025') return res.status(409).json({ error: 'The record changed while saving. Refresh and try again.' });
-  if (error.code === 'P2002') return res.status(409).json({ error: 'Another request saved this record. Refresh and try again.' });
+  if (error.code === 'P2002') {
+    const target = String(error.meta?.target ?? '');
+    const message = target.includes('vendorInvoiceNo') ? 'This supplier invoice number already exists for this vendor. Open the existing bill instead.' :
+      target.includes('imageHash') ? 'This image has already been uploaded in this workspace. Open the existing receipt.' :
+      'Another request saved this record. Refresh and try again.';
+    return res.status(409).json({ error: message });
+  }
   console.error(fallback, error);
   return res.status(500).json({ error: fallback });
 }

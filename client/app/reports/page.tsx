@@ -4,11 +4,13 @@ import { useState, useEffect, useCallback, Suspense } from 'react';
 import Link from 'next/link';
 import { decimalText, decimalUnits } from '@/lib/money';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { WorkspaceHeading, WorkspaceMetric, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { WorkspaceHeading, WorkspaceMetric, WorkspacePanel, WorkspaceNotice } from '@/app/components/WorkspaceUI';
+import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { ChartColumn, Loader2, Download, ReceiptText, RefreshCw, TrendingUp } from 'lucide-react';
 import {
   getProfitLoss, getBalanceSheet, getTrialBalance,
-  type ProfitLossReport, type BalanceSheetReport, type TrialBalanceReport,
+  type ProfitLossReport, type BalanceSheetReport,
 } from '@/lib/api';
 
 type Tab = 'pl' | 'bs' | 'tb';
@@ -315,117 +317,45 @@ function BalanceSheetTab() {
 // ─── Trial Balance ────────────────────────────────────────────────────────────
 
 function TrialBalanceTab() {
-  const [startDate, setStartDate] = useState(daysAgo(30));
-  const [endDate, setEndDate] = useState(today());
-  const [report, setReport] = useState<TrialBalanceReport | null>(null);
-  const [loading, setLoading] = useState(false);
-  const [error, setError] = useState<string | null>(null);
-
-  const load = useCallback(async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      setReport(await getTrialBalance({ startDate, endDate }));
-    } catch (e: unknown) {
-      setError(e instanceof Error ? e.message : 'Failed to load report');
-    } finally {
-      setLoading(false);
-    }
-  }, [startDate, endDate]);
-
-  useEffect(() => { load(); }, [load]);
-
+  const [asOf, setAsOf] = useState(today());
+  const fetchReport = useCallback(() => getTrialBalance({ asOf }), [asOf]);
+  const { data: report, loading, error, retry } = useWorkspaceData(fetchReport);
   function exportCsv() {
     if (!report) return;
-    const rows: string[][] = [['Code', 'Account', 'Type', 'Debit', 'Credit']];
-    report.rows.forEach((r) => rows.push([r.accountCode, r.accountName, r.accountType, r.debitTotal, r.creditTotal]));
-    rows.push(['TOTALS', '', '', report.totals.debitTotal, report.totals.creditTotal]);
-    downloadCsv(rows, `trial-balance-${startDate}-${endDate}.csv`);
+    const rows = [['As of', 'Basis', 'Currency', 'Code', 'Account', 'Type', 'Debit balance', 'Credit balance']];
+    report.rows.forEach(row => rows.push([report.asOf, report.basis, report.currency, row.accountCode, row.accountName, row.accountType, row.debitTotal, row.creditTotal]));
+    rows.push([report.asOf, report.basis, report.currency, '', 'TOTALS', '', report.totals.debitTotal, report.totals.creditTotal]);
+    downloadCsv(rows, 'trial-balance-' + report.asOf + '.csv');
   }
-
-  return (
-    <div>
-      <DateRangeFilter
-        startDate={startDate}
-        endDate={endDate}
-        loading={loading}
-        onStartChange={setStartDate}
-        onEndChange={setEndDate}
-      />
-
-      {error && (
-        <div className="p-4 rounded-lg bg-red-50 border border-red-200 text-red-700 text-sm mb-4 flex items-center justify-between">
-          <span>{error}</span>
-          <button onClick={load} className="flex items-center gap-1 text-xs underline">
-            <RefreshCw className="h-3 w-3" /> Retry
-          </button>
-        </div>
-      )}
-
-      {loading && !report && (
-        <div className="flex items-center justify-center py-20 gap-2 text-zinc-400">
-          <Loader2 className="h-5 w-5 animate-spin" />
-          <span className="text-sm">Loading…</span>
-        </div>
-      )}
-
-      {report && (
-        <>
-          <div className="flex justify-end mb-3">
-            <button
-              onClick={exportCsv}
-              className="flex items-center gap-2 px-3 py-1.5 rounded-lg border border-zinc-200 dark:border-zinc-700 text-sm font-medium text-zinc-700 dark:text-zinc-300 hover:bg-zinc-50 dark:hover:bg-zinc-800"
-            >
-              <Download className="h-4 w-4" />
-              Export CSV
-            </button>
-          </div>
-          <div className={`workspace-panel workspace-table-wrap transition-opacity ${loading ? 'opacity-50' : 'opacity-100'}`}>
-            <table className="w-full text-sm">
-              <thead>
-                <tr className="border-b border-zinc-200 dark:border-zinc-800">
-                  {['Code', 'Account', 'Type', 'Debit', 'Credit'].map((h) => (
-                    <th
-                      key={h}
-                      className={`px-4 py-3 text-xs font-semibold text-zinc-500 uppercase tracking-wider ${
-                        h === 'Debit' || h === 'Credit' ? 'text-right' : 'text-left'
-                      }`}
-                    >
-                      {h}
-                    </th>
-                  ))}
-                </tr>
-              </thead>
-              <tbody>
-                {report.rows.length === 0 ? (
-                  <tr>
-                    <td colSpan={5} className="px-4 py-8 text-center text-sm text-zinc-400">
-                      No activity in this period.
-                    </td>
-                  </tr>
-                ) : (
-                  report.rows.map((row) => (
-                    <tr key={row.accountId} className="border-b border-zinc-100 dark:border-zinc-800 hover:bg-zinc-50 dark:hover:bg-zinc-800/50">
-                      <td className="px-4 py-2.5 text-zinc-500 font-mono text-xs">{row.accountCode}</td>
-                      <td className="px-4 py-2.5 text-zinc-800 dark:text-zinc-200">{row.accountName}</td>
-                      <td className="px-4 py-2.5 text-zinc-500 text-xs">{row.accountType}</td>
-                      <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(row.debitTotal)}</td>
-                      <td className="px-4 py-2.5 text-right font-medium">{formatCurrency(row.creditTotal)}</td>
-                    </tr>
-                  ))
-                )}
-                <tr className="bg-zinc-50 dark:bg-zinc-800/50 font-bold">
-                  <td className="px-4 py-3" colSpan={3}>Totals</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(report.totals.debitTotal)}</td>
-                  <td className="px-4 py-3 text-right">{formatCurrency(report.totals.creditTotal)}</td>
-                </tr>
-              </tbody>
-            </table>
-          </div>
-        </>
-      )}
+  return <div className="space-y-4">
+    <div className="flex flex-wrap items-end justify-between gap-3">
+      <label className="grid gap-1 text-sm font-semibold">As of date
+        <input className="workspace-field" type="date" required value={asOf} onChange={event => { if (event.target.value) setAsOf(event.target.value); }} />
+      </label>
+      <button type="button" className="workspace-button" onClick={exportCsv} disabled={!report || loading}><Download className="size-4" aria-hidden="true" />Export CSV</button>
     </div>
-  );
+    <p className="text-sm text-slate-600">Closing account balances from all posted entries through the selected date. Drafts and future entries are excluded.</p>
+    {error && <WorkspaceNotice title="Trial balance could not load" onRetry={retry} />}
+    {loading && !report && <p role="status" className="p-5 text-sm text-slate-600">Loading trial balance…</p>}
+    {report && <div className="space-y-4" aria-busy={loading}>
+      <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-slate-50 p-3 text-sm">
+        <p>As of <strong>{report.asOf}</strong> · {report.basis} basis · {report.currency}</p>
+        <WorkspaceStatus>{decimalUnits(report.difference) === BigInt(0) ? 'Balanced' : 'Needs review'}</WorkspaceStatus>
+      </div>
+      <div className="workspace-panel workspace-table-wrap">
+        <table className="workspace-table">
+          <caption className="sr-only">Trial balance as of {report.asOf}, {report.basis} basis, {report.currency}</caption>
+          <thead><tr><th scope="col">Code</th><th scope="col">Account</th><th scope="col">Type</th><th scope="col" className="workspace-number">Debit balance</th><th scope="col" className="workspace-number">Credit balance</th></tr></thead>
+          <tbody>{report.rows.length ? report.rows.map(row => <tr key={row.accountId}>
+            <td className="font-mono">{row.accountCode}</td><td>{row.accountName}</td><td>{row.accountType}</td>
+            <td className="workspace-number">{formatCurrency(row.debitTotal)}</td><td className="workspace-number">{formatCurrency(row.creditTotal)}</td>
+          </tr>) : <tr><td colSpan={5}>No accounts have been set up in this workspace.</td></tr>}</tbody>
+          <tfoot><tr className="border-t border-slate-200 font-semibold"><th scope="row" colSpan={3} className="text-left">Totals</th><td className="workspace-number">{formatCurrency(report.totals.debitTotal)}</td><td className="workspace-number">{formatCurrency(report.totals.creditTotal)}</td></tr></tfoot>
+        </table>
+      </div>
+      <p className={'text-sm ' + (decimalUnits(report.difference) === BigInt(0) ? 'text-slate-600' : 'font-semibold text-red-800')}>Debit less credit · {formatCurrency(report.difference)}</p>
+    </div>}
+  </div>;
 }
 
 // ─── Main Page ────────────────────────────────────────────────────────────────

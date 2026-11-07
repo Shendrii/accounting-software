@@ -1,10 +1,14 @@
 import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
+import { createHash } from 'node:crypto';
 import prisma from '../db/prisma.js';
 import { parseReceiptWithGPT } from '../lib/parseReceipt.js';
 import { isAllowedReceiptImage, receiptImageToJpeg } from '../lib/receiptImage.js';
 import { LedgerError, createPosting, decimalInput, ledgerAccounts, ledgerDate, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
+import { purchaseAccount, requireAccountRole } from '../lib/accountRoles.js';
+import { checkPaidReceiptReference, createDraftBill, vendorReference } from '../lib/billDraft.js';
+import { confirmReceiptTotal, receiptAmounts } from '../lib/receiptReview.js';
 
 const upload = multer({
   storage: multer.memoryStorage(),
@@ -63,6 +67,9 @@ router.post('/upload', uploadImage, async (req, res) => {
   try {
     const jpeg = await receiptImageToJpeg(req.file.buffer).catch(() => null);
     if (!jpeg) return res.status(400).json({ error: 'Could not read this image. Try a JPEG, PNG, or WebP file.' });
+    const imageHash = createHash('sha256').update(jpeg).digest('hex');
+    const duplicate = await prisma.receipt.findFirst({ where: { workspaceId: req.workspace.id, imageHash }, select: { id: true } });
+    if (duplicate) return res.status(409).json({ error: 'This image is already in this workspace. Open the existing receipt instead.', receiptId: duplicate.id });
 
     let ocrText = '';
     try {
@@ -102,7 +109,7 @@ router.post('/upload', uploadImage, async (req, res) => {
 
     const receipt = await prisma.receipt.create({
       data: {
-        imageUrl: '',
+        imageUrl: '', imageHash,
         workspaceId: req.workspace.id,
         extractedData,
         status: 'PENDING',
@@ -112,7 +119,7 @@ router.post('/upload', uploadImage, async (req, res) => {
     res.status(201).json(receipt);
   } catch (error) {
     console.error(error);
-    res.status(500).json({ error: error.message });
+    sendLedgerError(res, error, 'Failed to upload the receipt.');
   }
 });
 
@@ -173,10 +180,14 @@ router.post('/:id/image', uploadImage, async (req, res) => {
     if (receipt.image || await legacyImage(receipt.imageUrl)) return res.status(409).json({ error: 'This receipt already has an image' });
     const jpeg = await receiptImageToJpeg(req.file.buffer).catch(() => null);
     if (!jpeg) return res.status(400).json({ error: 'Could not read this image. Try a JPEG, PNG, or WebP file.' });
-    await prisma.receiptImage.create({ data: { receiptId: receipt.id, jpeg } });
+    const imageHash = createHash('sha256').update(jpeg).digest('hex');
+    await ledgerTransaction(async tx => {
+      await tx.receipt.update({ where: { id: receipt.id, workspaceId: req.workspace.id }, data: { imageHash } });
+      await tx.receiptImage.create({ data: { receiptId: receipt.id, jpeg } });
+    });
     res.status(204).end();
   } catch (error) {
-    if (error.code === 'P2002') return res.status(409).json({ error: 'This receipt already has an image' });
+    if (error.code === 'P2002') return res.status(409).json({ error: 'This image is already attached to a receipt in this workspace.' });
     console.error('[attach receipt image]', error);
     res.status(500).json({ error: 'Could not attach receipt image' });
   }
@@ -203,7 +214,7 @@ router.get('/:id', async (req, res) => {
 const receiptDetail = {
   journalEntry: { include: { journalLines: { include: { account: true } } } },
   vendor: { select: { id: true, name: true } },
-  bill: { select: { id: true, billNo: true } },
+  bill: { select: { id: true, billNo: true, status: true } },
 };
 
 const receiptWhere = req => ({ id: req.params.id, workspaceId: req.workspace.id });
@@ -226,8 +237,8 @@ router.put('/:id', async (req, res) => {
     const receipt = await ledgerTransaction(async tx => {
       const current = await getReceipt(tx, where);
       if (status !== undefined) throw new LedgerError('Use the receipt review actions to change status.');
-      if (current.status !== 'PENDING' && (extractedData !== undefined || billId !== undefined)) {
-        throw new LedgerError('Reviewed receipt amounts, dates, and bill links are read-only.', 409);
+      if (current.status !== 'PENDING' && (extractedData !== undefined || billId !== undefined || vendorId !== undefined)) {
+        throw new LedgerError('Reviewed receipt details, vendor, and bill links are read-only.', 409);
       }
       if (vendorId && (typeof vendorId !== 'string' || !await tx.vendor.findFirst({
         where: { id: vendorId, workspaceId: where.workspaceId }, select: { id: true },
@@ -240,6 +251,7 @@ router.put('/:id', async (req, res) => {
         const date = receiptDate(extractedData).toISOString().slice(0, 10);
         extractedData.invoiceDate = date;
         extractedData.date = date;
+        if (extractedData.invoiceNumber != null) extractedData.invoiceNumber = vendorReference(extractedData.invoiceNumber) ?? '';
       }
       return tx.receipt.update({
         where, include: receiptDetail,
@@ -266,13 +278,13 @@ router.post('/:id/attach-to-bill', async (req, res) => {
       if (current.status === 'APPROVED' && current.billId && current.billId === billId && !current.journalEntryId) return current;
       if (current.status !== 'PENDING' || current.journalEntryId) throw new LedgerError('Only receipts awaiting review can be attached.', 409);
       receiptDate(current.extractedData);
-      if (typeof billId !== 'string' || !billId) throw new LedgerError('Select a posted bill.');
+      if (typeof billId !== 'string' || !billId) throw new LedgerError('Select an existing bill.');
       if (category != null && typeof category !== 'string') throw new LedgerError('Enter a valid receipt category.');
       const bill = await tx.bill.findFirst({
-        where: { id: billId, workspaceId: where.workspaceId, OR: [{ status: 'PAID' }, { status: 'RECEIVED', postingEntryId: { not: null } }] },
+        where: { id: billId, workspaceId: where.workspaceId, status: { not: 'VOID' } },
         select: { id: true, vendorId: true },
       });
-      if (!bill) throw new LedgerError('Select a posted bill from this workspace.');
+      if (!bill) throw new LedgerError('Select a non-void bill from this workspace.');
       const expectedVendor = vendorId === undefined ? current.vendorId : vendorId;
       if (expectedVendor && expectedVendor !== bill.vendorId) throw new LedgerError('Choose a bill for the receipt vendor.');
       return tx.receipt.update({ where, data: { billId: bill.id, vendorId: bill.vendorId, category, status: 'APPROVED' }, include: receiptDetail });
@@ -286,9 +298,12 @@ router.post('/:id/attach-to-bill', async (req, res) => {
 router.post('/:id/approve', async (req, res) => {
   try {
     const where = receiptWhere(req);
-    const { expenseAccountId, paymentAccountId } = req.body;
+    const { expenseAccountId, paymentAccountId, paidInFull, confirmedTotal } = req.body;
+    if (paidInFull !== true) throw new LedgerError('Confirm that this purchase was paid in full. Unpaid or partly paid purchases belong in Bills.');
     const result = await ledgerTransaction(async tx => {
       const current = await getReceipt(tx, where);
+      const amounts = receiptAmounts(current.extractedData);
+      confirmReceiptTotal(confirmedTotal, amounts.total);
       if (current.billId) throw new LedgerError('Attach this receipt as evidence and record the bill payment in Purchases.', 409);
       if (current.status === 'APPROVED' && current.journalEntry) {
         const lines = current.journalEntry.journalLines;
@@ -298,28 +313,65 @@ router.post('/:id/approve', async (req, res) => {
         }
       }
       if (current.status !== 'PENDING') throw new LedgerError('This receipt has already been reviewed.', 409);
+      if (amounts.due.gt(0) || amounts.paid.gt(0) && !amounts.paid.eq(amounts.total)) {
+        throw new LedgerError('This document has an unpaid balance. Create or attach a bill, then record the actual payment from the bill.');
+      }
       const data = current.extractedData;
       const date = receiptDate(data);
-      const amount = decimalInput(data?.amount ?? data?.total ?? data?.amountPaid, 'Receipt amount');
+      const amount = amounts.total;
+      const reference = vendorReference(data?.invoiceNumber);
+      if (current.vendorId && reference) {
+        const bill = await tx.bill.findFirst({
+          where: { workspaceId: where.workspaceId, vendorId: current.vendorId, vendorInvoiceNo: reference, status: { not: 'VOID' } }, select: { id: true },
+        });
+        if (bill) throw new LedgerError('This supplier invoice already has a bill. Attach this document to that bill instead of posting another purchase.', 409);
+        await checkPaidReceiptReference(tx, where.workspaceId, current.vendorId, reference, current.id);
+      }
       if (amount.isZero()) throw new LedgerError('Confirm a positive receipt amount before posting.');
       const accounts = await ledgerAccounts(tx, where.workspaceId, [expenseAccountId, paymentAccountId]);
-      if (accounts.get(expenseAccountId).type !== 'EXPENSE' ||
-          !['ASSET', 'LIABILITY'].includes(accounts.get(paymentAccountId).type)) {
-        throw new LedgerError('Choose an expense account and a cash or credit account.');
-      }
+      if (!purchaseAccount(accounts.get(expenseAccountId))) throw new LedgerError('Choose an expense or general asset account for this purchase.');
+      requireAccountRole(accounts.get(paymentAccountId), ['CASH', 'BANK', 'CREDIT_CARD'], 'Payment account');
       const journalEntry = await createPosting(tx, where.workspaceId, {
         date, description: data?.vendor ? 'Receipt: ' + data.vendor : 'Receipt ' + current.id.slice(0, 8),
         referenceNo: data?.invoiceNumber || data?.vendor || null,
         lines: [{ accountId: expenseAccountId, debit: amount }, { accountId: paymentAccountId, credit: amount }],
       });
       const receipt = await tx.receipt.update({
-        where, data: { status: 'APPROVED', journalEntryId: journalEntry.id }, include: receiptDetail,
+        where, data: { status: 'APPROVED', journalEntryId: journalEntry.id, extractedData: { ...data, invoiceNumber: reference ?? '' } }, include: receiptDetail,
       });
       return { receipt, journalEntry };
     });
     res.json(result);
   } catch (error) {
     sendLedgerError(res, error, 'Failed to post the receipt expense.');
+  }
+});
+
+router.post('/:id/create-bill', async (req, res) => {
+  try {
+    const where = receiptWhere(req);
+    const receipt = await ledgerTransaction(async tx => {
+      const current = await getReceipt(tx, where);
+      const amounts = receiptAmounts(current.extractedData);
+      confirmReceiptTotal(req.body.confirmedTotal, amounts.total);
+      if (current.status === 'APPROVED' && current.billId && !current.journalEntryId) return current;
+      if (current.status !== 'PENDING' || current.journalEntryId) throw new LedgerError('Only documents awaiting review can create a bill.', 409);
+      if (current.billId) throw new LedgerError('This document already links to a bill. Attach it to that bill instead of creating another.', 409);
+      const data = current.extractedData;
+      const lines = amounts.lines.length ? amounts.lines : [{ description: data.vendor || 'Receipt purchase', amount: amounts.total }];
+      if (amounts.lines.length && amounts.tax.gt(0)) lines.push({ description: 'Tax shown on document', amount: amounts.tax });
+      if (amounts.lines.length && amounts.tip.gt(0)) lines.push({ description: 'Tip shown on document', amount: amounts.tip });
+      const bill = await createDraftBill(tx, where.workspaceId, {
+        vendorId: req.body.vendorId, vendorInvoiceNo: vendorReference(data.invoiceNumber),
+        date: receiptDate(data).toISOString(), dueDate: req.body.dueDate,
+        notes: 'Drafted from receipt ' + current.id + '. Review and post the bill before recording any payment.',
+        lines: lines.map(line => ({ description: line.description, quantity: '1', unitPrice: line.amount.toFixed(2), accountId: req.body.accountId })),
+      });
+      return tx.receipt.update({ where, data: { status: 'APPROVED', billId: bill.id, vendorId: bill.vendorId }, include: receiptDetail });
+    });
+    res.json(receipt);
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to create a bill from this receipt.');
   }
 });
 

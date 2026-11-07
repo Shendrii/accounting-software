@@ -21,6 +21,7 @@ model Account {
   description      String?
   isActive         Boolean           @default(true)
   isBankAccount    Boolean           @default(false)
+  role             AccountRole       @default(GENERAL)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   journalLines     JournalLine[]
@@ -65,6 +66,7 @@ model Receipt {
   workspaceId    String
   workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   imageUrl       String
+  imageHash      String?
   extractedData  Json
   status         ReceiptStatus @default(PENDING)
   journalEntryId String?       @unique
@@ -81,6 +83,7 @@ model Receipt {
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, createdAt])
   @@index([billId])
+  @@unique([workspaceId, imageHash])
 }
 
 model ReceiptImage {
@@ -193,6 +196,7 @@ model Bill {
   workspaceId        String
   workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   billNo             String
+  vendorInvoiceNo    String?
   vendorId           String
   vendor             Vendor        @relation(fields: [vendorId], references: [id])
   date               DateTime
@@ -214,6 +218,7 @@ model Bill {
   updatedAt          DateTime      @updatedAt
 
   @@unique([workspaceId, billNo])
+  @@unique([workspaceId, vendorId, vendorInvoiceNo])
   @@index([workspaceId, date, id])
   @@index([workspaceId, status, dueDate])
 }
@@ -290,6 +295,16 @@ enum AccountType {
   EQUITY
   REVENUE
   EXPENSE
+}
+
+enum AccountRole {
+  GENERAL
+  CASH
+  BANK
+  ACCOUNTS_RECEIVABLE
+  ACCOUNTS_PAYABLE
+  CREDIT_CARD
+  SALES_TAX
 }
 
 enum Status {

@@ -42,7 +42,7 @@ export function billStatus(bill: Pick<Bill, 'status' | 'postingEntryId' | 'amoun
 }
 
 export function WorkspaceStatus({ children }: { children: string }) {
-  const good = ['Paid', 'Complete', 'Posted', 'Matched', 'Approved'].includes(children);
+  const good = ['Paid', 'Complete', 'Posted', 'Matched', 'Approved', 'Balanced'].includes(children);
   const warn = ['Awaiting posting', 'Posting unverified', 'Awaiting payment', 'Partially paid', 'Needs review', 'Check date', 'Check match', 'Open item', 'Unmatched'].includes(children);
   const bad = ['Overdue', 'Rejected', 'Void'].includes(children);
   return (

@@ -54,7 +54,7 @@ export default function ReceiptImage({ receiptId }: { receiptId: string }) {
     }
   }
 
-  return <div className="grid min-h-40 shrink-0 place-items-center bg-slate-100 p-4 md:w-[32%]">
+  return <div className="grid min-h-40 min-w-0 place-items-center bg-slate-100 p-4">
     {preview.status === 'ready' ?
       <a href={preview.url} target="_blank" rel="noopener noreferrer" aria-label="Open receipt image in a new tab" className="block w-full rounded-lg">
         {/* The image is an authenticated local blob. */}

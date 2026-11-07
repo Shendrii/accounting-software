@@ -14,6 +14,7 @@ import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity'
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { decimalUnits, localDay } from '@/lib/money';
+import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
 
 function formatCurrency(v: string | number) {
   return new Intl.NumberFormat('en-US', { style: 'currency', currency: 'USD' }).format(Number(v));
@@ -145,7 +146,7 @@ export function BillDetailPage() {
       <div className="workspace-content">
         <div className="mb-5">
           <WorkspaceHeading section="Purchases / Bills" title={bill.billNo}
-            description={<>{bill.vendor?.name ?? 'Vendor'} · Due {formatDate(bill.dueDate)}</>}
+            description={<>{bill.vendor?.name ?? 'Vendor'} · Due {formatDate(bill.dueDate)}{bill.vendorInvoiceNo ? ' · Supplier invoice ' + bill.vendorInvoiceNo : ''}</>}
             actions={<><WorkspaceStatus>{billStatus(bill)}</WorkspaceStatus><Link href="/purchases/bills" className="workspace-button"><ArrowLeft className="size-4" aria-hidden="true" />Bills</Link></>} />
         </div>
 
@@ -268,7 +269,7 @@ export function BillDetailPage() {
             {bill.lines?.map(line => <label key={line.id} className="grid gap-1 text-sm font-semibold">{line.description}
               <select name={line.id} className="workspace-field" defaultValue={line.accountId ?? ''} required>
                 <option value="">Select expense or asset account…</option>
-                {accounts.filter(account => account.type === 'EXPENSE' || account.type === 'ASSET' && !account.isBankAccount).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+                {accounts.filter(isPurchaseAccount).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
               </select>
             </label>)}
             <div><button type="submit" className="workspace-primary" disabled={actionLoading}>Save line accounts</button></div>
@@ -281,7 +282,7 @@ export function BillDetailPage() {
             <label className="grid gap-1 text-sm font-semibold">Payment account
               <select className="workspace-field" name="paymentAccountId" required disabled={actionLoading}>
                 <option value="">Select payment account…</option>
-                {accounts.filter(account => account.type === 'ASSET').map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
+                {accounts.filter(account => isPaymentAccount(account, true)).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
               </select>
             </label>
             <label className="grid gap-1 text-sm font-semibold">Payment amount

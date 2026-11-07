@@ -17,6 +17,7 @@ import Link from 'next/link';
 import { closeItems, CloseProgress, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import { accountRoles } from '@/lib/account-roles';
 
 export function BookkeepingPage() {
   const searchParams = useSearchParams();
@@ -212,6 +213,7 @@ export function BookkeepingPage() {
           </WorkspacePanel>
         ) : activeTab === 'accounts' ? (
           <div className="space-y-6">
+            <p className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">Set account roles before posting: receivables for invoices, one active payable account for bills, and cash, bank, or credit card accounts for payments. General assets cannot be used as payment accounts.</p>
             {/* Accounts Header */}
             <div className="flex flex-wrap items-center justify-between gap-3">
               <div>
@@ -428,6 +430,7 @@ export function BookkeepingPage() {
                                   </td>
                                   <td className="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
                                     {account.type}
+                                    <p className="mt-1 text-xs text-blue-800">{accountRoles.find(role => role.value === account.role)?.label ?? 'Review account role'}</p>
                                   </td>
                                   <td className="px-6 py-4 text-right text-sm text-zinc-900 dark:text-zinc-50">
                                     ${parseFloat(account.balance).toLocaleString('en-US', {
@@ -479,6 +482,7 @@ export function BookkeepingPage() {
                             </td>
                             <td className="px-6 py-4 text-sm text-zinc-600 dark:text-zinc-400">
                               {account.type}
+                              <p className="mt-1 text-xs text-blue-800">{accountRoles.find(role => role.value === account.role)?.label ?? 'Review account role'}</p>
                             </td>
                             <td className="px-6 py-4 text-right text-sm text-zinc-900 dark:text-zinc-50">
                               ${parseFloat(account.balance).toLocaleString('en-US', {

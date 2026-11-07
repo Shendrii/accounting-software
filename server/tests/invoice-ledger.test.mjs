@@ -30,7 +30,7 @@ test('posted invoices, partial collections, and manual journals keep one consist
   };
   const api = await signup();
   const other = await signup();
-  const account = (code, name, type, client = api) => client('/accounts', 'POST', { code, name, type }, 201);
+  const account = (code, name, type, client = api) => client('/accounts', 'POST', { code, name, type, role: code === '1000' ? 'CASH' : code === '1100' ? 'ACCOUNTS_RECEIVABLE' : code === '2000' ? 'ACCOUNTS_PAYABLE' : code === '2100' ? 'SALES_TAX' : 'GENERAL' }, 201);
   const cash = await account('1000', 'Checking', 'ASSET');
   const ar = await account('1100', 'Trade debtors', 'ASSET');
   const tax = await account('2100', 'Sales tax payable', 'LIABILITY');

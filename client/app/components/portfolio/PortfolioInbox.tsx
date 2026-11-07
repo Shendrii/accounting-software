@@ -1,8 +1,8 @@
 import { Check, FileText, Search, Upload, X } from 'lucide-react';
 import type { Receipt } from '@/lib/api';
 
-function fmt(n: number | undefined) {
-  return n != null ? n.toFixed(2) : '—';
+function fmt(n: number | string | undefined) {
+  return n != null ? Number(n).toFixed(2) : '—';
 }
 
 export function PortfolioInbox({ receipts }: { receipts: Receipt[] }) {

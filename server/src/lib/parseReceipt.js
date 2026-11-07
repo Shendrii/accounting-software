@@ -16,6 +16,8 @@ Return ONLY a valid JSON object with these exact keys (no markdown, no code bloc
 - total (number): total amount as a number (e.g. 99.99)
 - amountPaid (number): amount paid if shown, else 0
 - balanceDue (number): balance due if shown, else 0
+- tax (number): tax shown separately from line items, else 0. Do not count tax twice if included in the item amounts.
+- tip (number): tip shown separately from line items, else 0
 - items (array): list of line items, each with "description" (string) and "amount" (number). If none found use []
 - category (string): expense category e.g. "Office Supplies", "Meals", "Travel" (optional)
 - confidence (number): 0 to 1, how confident you are in the extraction

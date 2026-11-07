@@ -9,6 +9,7 @@ import { toast } from '@/lib/toast';
 import { DocumentLines, type DocumentLine } from '@/app/components/DocumentLines';
 import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import { isPurchaseAccount } from '@/lib/account-roles';
 
 const emptyLine = (): DocumentLine => ({
   description: '',
@@ -23,6 +24,7 @@ export function NewBillPage() {
   const [vendors, setVendors] = useState<Vendor[]>([]);
   const [accounts, setAccounts] = useState<Account[]>([]);
   const [vendorId, setVendorId] = useState('');
+  const [vendorInvoiceNo, setVendorInvoiceNo] = useState('');
   const [date, setDate] = useState(new Date().toISOString().split('T')[0]);
   const [dueDate, setDueDate] = useState(() => {
     const d = new Date();
@@ -68,6 +70,7 @@ export function NewBillPage() {
     try {
       const bill = await createBill({
         vendorId,
+        vendorInvoiceNo,
         date,
         dueDate,
         notes,
@@ -90,7 +93,7 @@ export function NewBillPage() {
     }
   }
 
-  const expenseAccounts = accounts.filter((a) => a.type === 'EXPENSE');
+  const expenseAccounts = accounts.filter(isPurchaseAccount);
 
   if (initLoading) {
     return (
@@ -128,6 +131,10 @@ export function NewBillPage() {
           <div className="mb-5 grid items-start gap-4 xl:grid-cols-[1.65fr_1fr]">
             <div className="workspace-panel p-4 sm:p-5">
               <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Bill details</h2>
+              <label className="mb-4 grid gap-1 text-sm font-medium">Supplier invoice number
+                <input className="workspace-field" value={vendorInvoiceNo} maxLength={160} onChange={event => setVendorInvoiceNo(event.target.value)} placeholder="The reference printed on the supplier invoice" />
+                <span className="text-xs font-normal text-slate-600">Used to prevent recording the same supplier invoice twice.</span>
+              </label>
               <div className="grid grid-cols-1 sm:grid-cols-3 gap-4">
                 <div className="sm:col-span-1">
                   <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1" htmlFor="bills-vendorId">Vendor *</label>

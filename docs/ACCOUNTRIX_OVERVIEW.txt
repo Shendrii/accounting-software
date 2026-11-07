@@ -1,0 +1,18 @@
+ACCOUNTRIX - CURRENT FEATURES
+Updated: November 8, 2026
+
+Accountrix is a web-based bookkeeping app for accountants and bookkeepers managing business or client workspaces. It connects sales, purchases, receipts, bank reconciliation, and financial reports through a shared double-entry ledger.
+
+Current features:
+
+- Accounts and workspaces: Email/password and Google sign-in, workspace creation and switching, member invitations, and workspace roles.
+- Overview: Cash position, outstanding invoices, unpaid bills, items needing review, recent invoices, and period-close checks.
+- Sales: Customer records, draft invoices, invoice posting, PDF downloads, email delivery, partial payments, payment history, and outstanding balances.
+- Purchases: Vendor records, supplier invoice references, draft bills, bill posting, partial payments, due dates, and recurring bill schedules.
+- Receipts: Image upload and text extraction, source-image review, correction of extracted details, duplicate-image checks, and supplier-reference checks. Users can post a fully paid purchase, create a bill for an unpaid or partly paid purchase, or attach evidence to an existing bill.
+- Ledger: Chart of accounts, account roles, manual journal entries, balanced posting, reversals, and close checks. Account selectors restrict payment and control accounts to their intended uses.
+- Bank reconciliation: Statement import, matching bank lines to ledger entries, review of unmatched items, and a saved reconciliation proof requiring zero difference.
+- Reports: Profit and loss, balance sheet, and an as-of trial balance with net debit/credit balances and CSV exports.
+- AI assistant: A workspace assistant for accounting questions and reviewing available workspace information.
+
+The app runs on Vercel, Render, and Neon using the existing free plans. Render can take time to wake after inactivity. Receipt extraction, email, and AI features depend on their configured services. Uploaded payment details are not automatically recorded as payments; users review and confirm accounting actions.
