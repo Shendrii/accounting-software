@@ -1,56 +1,47 @@
 'use client';
 
-import { Suspense, useEffect, useState } from 'react';
+import { Suspense, useEffect, useRef, useState } from 'react';
 import { useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Loader2, CheckCircle, XCircle, Users } from 'lucide-react';
 import { AccessStatus } from '@/app/components/AccessStatus';
 import { acceptWorkspaceInvite, fetchWorkspaces } from '@/lib/api';
-import { isAuthenticated, setWorkspaceId } from '@/lib/auth';
+import { getToken, useAuthToken, setWorkspaceId } from '@/lib/auth';
 
-type State = 'loading' | 'needs_login' | 'accepting' | 'success' | 'error';
+type State = 'needs_login' | 'accepting' | 'success' | 'error';
 
 function InvitePageContent() {
   const searchParams = useSearchParams();
   const token = searchParams.get('token') ?? '';
 
-  const [state, setState] = useState<State>('loading');
-  const [message, setMessage] = useState('');
+  const session = useAuthToken();
+  const [result, setResult] = useState<{ token: string; session: string; state: 'success' | 'error'; message?: string } | null>(null);
+  const acceptance = useRef<{ token: string; session: string; promise: ReturnType<typeof acceptWorkspaceInvite> } | null>(null);
+  const state: State = !token ? 'error' : !session ? 'needs_login' : result?.token === token && result.session === session ? result.state : 'accepting';
+  const message = !token ? 'Invalid invite link — no token found.' : result?.token === token && result.session === session ? result.message : '';
 
   useEffect(() => {
-    if (!token) {
-      setState('error');
-      setMessage('Invalid invite link — no token found.');
-      return;
+    if (!token || !session) return;
+    let current = true;
+    // Strict Mode may resubscribe; an invitation must only be accepted once.
+    if (acceptance.current?.token !== token || acceptance.current.session !== session) {
+      acceptance.current = { token, session, promise: acceptWorkspaceInvite(token) };
     }
+    acceptance.current.promise.then(async () => {
+      if (!current || getToken() !== session) return;
+      const workspaces = await fetchWorkspaces().catch(() => []);
+      if (!current || getToken() !== session) return;
+      const last = workspaces[workspaces.length - 1];
+      if (last) setWorkspaceId(last.id);
+      setResult({ token, session, state: 'success' });
+    }).catch((error: unknown) => {
+      if (current && getToken() === session) setResult({ token, session, state: 'error', message: error instanceof Error ? error.message : 'Failed to accept invite.' });
+    });
+    return () => { current = false; };
+  }, [token, session]);
 
-    if (!isAuthenticated()) {
-      setState('needs_login');
-      return;
-    }
-
-    setState('accepting');
-    acceptWorkspaceInvite(token)
-      .then(async () => {
-        try {
-          const workspaces = await fetchWorkspaces();
-          if (workspaces.length > 0) {
-            const last = workspaces[workspaces.length - 1];
-            setWorkspaceId(last.id);
-          }
-        } catch {
-          // non-critical
-        }
-        setState('success');
-      })
-      .catch((e: unknown) => {
-        setState('error');
-        setMessage(e instanceof Error ? e.message : 'Failed to accept invite.');
-      });
-  }, [token]);
-
-  if (state === 'loading' || state === 'accepting') {
-    return <AccessStatus title={state === 'accepting' ? 'Accepting invitation…' : 'Loading invitation…'} icon={Loader2} pending />;
+  if (state === 'accepting') {
+    return <AccessStatus title="Accepting invitation…" icon={Loader2} pending />;
   }
 
   if (state === 'needs_login') {

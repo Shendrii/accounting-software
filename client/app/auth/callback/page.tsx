@@ -1,11 +1,11 @@
 'use client';
 
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useMemo, useRef, useSyncExternalStore } from 'react';
 import { useRouter } from 'next/navigation';
 import Link from 'next/link';
 import { CircleAlert, Loader2 } from 'lucide-react';
 import { AccessStatus } from '@/app/components/AccessStatus';
-import { isAuthenticated, setSession, setWorkspaceId } from '@/lib/auth';
+import { isAuthenticated, setSession, setWorkspaceId, useIsAuthenticated } from '@/lib/auth';
 import type { AuthUser, AuthWorkspace } from '@/lib/api';
 
 function decodeSession(hash: string): {
@@ -29,29 +29,33 @@ function decodeSession(hash: string): {
   }
 }
 
+function subscribeToHash(callback: () => void) {
+  window.addEventListener('hashchange', callback);
+  return () => window.removeEventListener('hashchange', callback);
+}
+function readHash() { return window.location.hash; }
+
 export default function OAuthCallbackPage() {
   const router = useRouter();
-  const [error, setError] = useState<string | null>(null);
+  const hash = useSyncExternalStore<string | null>(subscribeToHash, readHash, () => null);
+  const data = useMemo(() => decodeSession(hash ?? ''), [hash]);
+  const signedIn = useIsAuthenticated();
   // Prevent React Strict Mode double-invoke from clearing the session on the 2nd run
   const handled = useRef(false);
 
   useEffect(() => {
-    if (handled.current) return;
+    if (hash === null || handled.current) return;
     handled.current = true;
 
-    // Capture hash BEFORE replaceState removes it
-    const hash = window.location.hash;
+    // The URL snapshot was captured before removing the credential fragment.
     window.history.replaceState(null, '', window.location.pathname);
 
-    const data = decodeSession(hash);
-
     if (!data?.token || !data.user) {
-      // If session was already saved (first Strict Mode run succeeded), just go home
+      // Reuse an existing session when the callback has no new credentials.
       if (isAuthenticated()) {
         router.replace('/');
         return;
       }
-      setError('Missing session. Try signing in again.');
       return;
     }
 
@@ -59,11 +63,11 @@ export default function OAuthCallbackPage() {
     setSession(data.token, data.user, workspaces);
     if (workspaces[0]) setWorkspaceId(workspaces[0].id);
     router.replace('/');
-  }, [router]);
+  }, [hash, data, router]);
 
-  if (error) {
+  if (hash !== null && (!data?.token || !data.user) && !signedIn) {
     return (
-      <AccessStatus title="Sign-in could not finish" description={error} icon={CircleAlert}>
+      <AccessStatus title="Sign-in could not finish" description="Missing session. Try signing in again." icon={CircleAlert}>
         <Link href="/login" className="workspace-primary">Back to sign in</Link>
       </AccessStatus>
     );

@@ -194,9 +194,12 @@ export default function PhoneInput({ value, onChange, disabled, id, country }: P
   const initial = parse(value);
   const [dialCode, setDialCode] = useState(initial.dialCode || '');
   const [selectedCountry, setSelectedCountry] = useState(
-    DIAL_CODE_OPTIONS.find((o) => o.code === initial.dialCode)?.country ?? ''
+    DIAL_CODE_OPTIONS.find((o) => o.code === initial.dialCode && o.country === country)?.country
+      ?? DIAL_CODE_OPTIONS.find((o) => o.code === initial.dialCode)?.country ?? ''
   );
   const [number, setNumber] = useState(initial.number);
+  const [previousValue, setPreviousValue] = useState(value);
+  const [previousCountry, setPreviousCountry] = useState(country);
   const [isOpen, setIsOpen] = useState(false);
   const [query, setQuery] = useState('');
 
@@ -212,26 +215,25 @@ export default function PhoneInput({ value, onChange, disabled, id, country }: P
     );
   }, [query]);
 
-  useEffect(() => {
-    if (!country) return;
+  // Apply external changes before painting stale local phone fields.
+  if (country !== previousCountry) {
+    setPreviousCountry(country);
     const match = DIAL_CODE_OPTIONS.find((o) => o.country === country);
     if (match) {
       setSelectedCountry(match.country);
       setDialCode(match.code);
     }
-  }, [country]);
-
-  useEffect(() => {
+  }
+  if (value !== previousValue) {
+    setPreviousValue(value);
     const parsed = parse(value);
-    setDialCode(parsed.dialCode || '');
+    setDialCode(parsed.dialCode);
     setSelectedCountry((current) => {
-      if (current && DIAL_CODE_OPTIONS.find((o) => o.country === current)?.code === parsed.dialCode) {
-        return current;
-      }
+      if (DIAL_CODE_OPTIONS.find((o) => o.country === current)?.code === parsed.dialCode) return current;
       return DIAL_CODE_OPTIONS.find((o) => o.code === parsed.dialCode)?.country ?? '';
     });
     setNumber(parsed.number);
-  }, [value]);
+  }
 
   useEffect(() => {
     function handleClickOutside(e: MouseEvent) {
@@ -246,14 +248,6 @@ export default function PhoneInput({ value, onChange, disabled, id, country }: P
   function emit(code: string, num: string) {
     const combined = code && num ? `${code} ${num}` : num || code || '';
     onChange(combined.trim());
-  }
-
-  function handleCodeChange(e: React.ChangeEvent<HTMLSelectElement>) {
-    const option = DIAL_CODE_OPTIONS.find((o) => o.country === e.target.value);
-    const nextCode = option?.code ?? '';
-    setSelectedCountry(e.target.value);
-    setDialCode(nextCode);
-    emit(nextCode, number);
   }
 
   function handleNumberChange(e: React.ChangeEvent<HTMLInputElement>) {

@@ -52,15 +52,26 @@ export function isAuthenticated() {
   return Boolean(getToken());
 }
 
-export function getCurrentUser(): AuthUser | null {
-  if (typeof window === 'undefined') return null;
-  const raw = localStorage.getItem(USER_KEY);
+function readStoredUser() {
+  return typeof window === 'undefined' ? null : localStorage.getItem(USER_KEY);
+}
+
+function parseStoredUser(raw: string | null): AuthUser | null {
   if (!raw) return null;
   try {
     return JSON.parse(raw);
   } catch {
     return null;
   }
+}
+
+export function getCurrentUser(): AuthUser | null {
+  return parseStoredUser(readStoredUser());
+}
+
+export function useCurrentUser(): AuthUser | null {
+  const raw = useSyncExternalStore(subscribeToSession, readStoredUser, () => null);
+  return parseStoredUser(raw);
 }
 
 export function getWorkspaceId(): string | null {
@@ -73,6 +84,10 @@ export function setWorkspaceId(workspaceId: string) {
   window.dispatchEvent(new Event(WORKSPACE_CHANGE));
 }
 
+
+export function useAuthToken() {
+  return useSyncExternalStore(subscribeToSession, getToken, () => null);
+}
 
 export function useIsAuthenticated() {
   return useSyncExternalStore(subscribeToSession, isAuthenticated, () => false);

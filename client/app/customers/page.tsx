@@ -1,6 +1,6 @@
 'use client';
 
-import { useEffect, useState } from 'react';
+import { useCallback, useEffect, useState } from 'react';
 import {
   Plus, Search, Pencil, ToggleLeft, ToggleRight, X, Loader2,
 } from 'lucide-react';
@@ -32,7 +32,7 @@ export function CustomersPage() {
   const [saving, setSaving] = useState(false);
   const [error, setError] = useState<string | null>(null);
 
-  async function load() {
+  const load = useCallback(async () => {
     setLoading(true);
     setLoadError(null);
     try {
@@ -43,9 +43,9 @@ export function CustomersPage() {
     } finally {
       setLoading(false);
     }
-  }
+  }, [showInactive]);
 
-  useEffect(() => { load(); }, [showInactive]);
+  useEffect(() => { void load(); }, [load]);
 
   const filtered = customers.filter((c) =>
     c.name.toLowerCase().includes(search.toLowerCase()) ||

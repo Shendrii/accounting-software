@@ -3,30 +3,21 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { LogOut, User } from 'lucide-react';
-import { clearSession, getCurrentUser, isAuthenticated } from '@/lib/auth';
+import { clearSession, useCurrentUser, useIsAuthenticated } from '@/lib/auth';
 import { hideAppChrome } from '@/lib/public-paths';
 
 export function ProfileButton() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
-  const [initials, setInitials] = useState('');
-  const [name, setName] = useState('');
-  const [email, setEmail] = useState('');
+  const signedIn = useIsAuthenticated();
+  const user = useCurrentUser();
+  const name = user?.name || '';
+  const email = user?.email || '';
+  const parts = (name || email).trim().split(/\s+/);
+  const initials = parts.length >= 2
+    ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
+    : (parts[0] || '?').slice(0, 2).toUpperCase();
   const ref = useRef<HTMLDivElement>(null);
-
-  useEffect(() => {
-    if (!isAuthenticated()) return;
-    const user = getCurrentUser();
-    if (!user) return;
-    setName(user.name || '');
-    setEmail(user.email || '');
-    const parts = (user.name || user.email || '').trim().split(/\s+/);
-    setInitials(
-      parts.length >= 2
-        ? (parts[0][0] + parts[parts.length - 1][0]).toUpperCase()
-        : (parts[0] || '?').slice(0, 2).toUpperCase()
-    );
-  }, [pathname]);
 
   useEffect(() => {
     function onOutside(e: MouseEvent) {
@@ -36,7 +27,7 @@ export function ProfileButton() {
     return () => document.removeEventListener('mousedown', onOutside);
   }, [open]);
 
-  if (hideAppChrome(pathname, isAuthenticated()) || !isAuthenticated()) return null;
+  if (hideAppChrome(pathname, signedIn) || !signedIn) return null;
 
   function onLogout() {
     clearSession();
