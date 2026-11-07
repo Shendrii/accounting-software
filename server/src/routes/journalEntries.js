@@ -18,6 +18,13 @@ const withSources = {
   invoicePayment: { select: { invoice: { select: { id: true, invoiceNo: true } } } },
   reversal: { select: { id: true } },
 };
+const listDetails = {
+  ...withSources,
+  journalLines: { include: { account: { select: { id: true, name: true, code: true, type: true } } } },
+  receipt: { select: { id: true, vendor: { select: { name: true } } } },
+  invoices: { select: { id: true, invoiceNo: true, customer: { select: { name: true } } } },
+  bills: { select: { id: true, billNo: true, vendor: { select: { name: true } } } },
+};
 
 function scopedEntry(req) {
   return { id: req.params.id, workspaceId: req.workspace.id };
@@ -39,7 +46,7 @@ router.get('/', async (req, res) => {
       if (startDate) where.date.gte = ledgerDate(startDate);
       if (endDate) where.date.lt = nextDay(endDate);
     }
-    res.json(await prisma.journalEntry.findMany({ where, include: withSources, orderBy: { date: 'desc' } }));
+    res.json(await prisma.journalEntry.findMany({ where, include: listDetails, orderBy: { date: 'desc' } }));
   } catch (error) {
     sendLedgerError(res, error, 'Failed to load journal entries.');
   }

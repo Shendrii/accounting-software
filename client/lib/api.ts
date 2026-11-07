@@ -7,10 +7,12 @@
 
 import { clearSession } from './auth';
 import { isPublicPath } from './public-paths';
+import { localDay } from './money';
 
 export const API_BASE_URL = process.env.NEXT_PUBLIC_API_URL || 'http://localhost:8000';
 const API_URL = API_BASE_URL;
 const baseFetch = globalThis.fetch.bind(globalThis);
+const pendingReads = new Map<string, Promise<Response>>();
 
 function getAuthToken(): string | null {
   if (typeof window === 'undefined') return null;
@@ -28,10 +30,26 @@ async function apiFetch(input: RequestInfo | URL, init?: RequestInit): Promise<R
   const workspaceId = getWorkspaceId();
   if (token) headers.set('Authorization', `Bearer ${token}`);
   if (workspaceId) headers.set('x-workspace-id', workspaceId);
-  const response = await baseFetch(input, { ...init, headers });
+  const method = (init?.method ?? (input instanceof Request ? input.method : 'GET')).toUpperCase();
+  const shareRead = method === 'GET' && !init?.signal && !(input instanceof Request);
+  if (method !== 'GET') pendingReads.clear();
+  const key = JSON.stringify([String(input), [...headers.entries()], init?.credentials, init?.cache]);
+  let pending = shareRead ? pendingReads.get(key) : undefined;
+  if (!pending) {
+    pending = baseFetch(input, { ...init, headers });
+    if (shareRead) pendingReads.set(key, pending);
+  }
+  let response: Response;
+  try {
+    const received = await pending;
+    response = shareRead ? received.clone() : received;
+  } finally {
+    if (shareRead && pendingReads.get(key) === pending) pendingReads.delete(key);
+    if (method !== 'GET') pendingReads.clear();
+  }
 
   // Auto-logout only when we sent a token and the server rejected it
-  if (response.status === 401 && typeof window !== 'undefined' && token) {
+  if (response.status === 401 && typeof window !== 'undefined' && token && token === getAuthToken()) {
     const path = window.location.pathname;
     const onAuthPage = ['/login', '/signup', '/auth/callback'].includes(path);
     clearSession();
@@ -383,18 +401,9 @@ export async function getReceipts(status?: string): Promise<Receipt[]> {
   return handleResponse<Receipt[]>(response);
 }
 
-const pendingCountRequests = new Map<string, Promise<number>>();
-
-export function getPendingReceiptCount(): Promise<number> {
-  const key = `${getAuthToken()}:${getWorkspaceId()}`;
-  const existing = pendingCountRequests.get(key);
-  if (existing) return existing;
-  const request = fetch(`${API_URL}/api/receipts/pending-count`)
-    .then(handleResponse<{ count: number }>)
-    .then(({ count }) => count)
-    .finally(() => pendingCountRequests.delete(key));
-  pendingCountRequests.set(key, request);
-  return request;
+export async function getPendingReceiptCount(): Promise<number> {
+  const response = await fetch(`${API_URL}/api/receipts/pending-count`);
+  return (await handleResponse<{ count: number }>(response)).count;
 }
 
 export async function getReceipt(id: string): Promise<Receipt> {
@@ -450,10 +459,50 @@ export interface DashboardData {
   netIncome: string;
   outstandingInvoicesCount: number;
   outstandingInvoicesTotal: string;
+  sales: SalesSummary;
+  purchases: PurchaseSummary;
+  closeChecklist: CloseChecklist;
+}
+
+export type RecentInvoice = Pick<Invoice, 'id' | 'invoiceNo' | 'status' | 'postingEntryId' | 'date' | 'dueDate' | 'total' | 'amountPaid' | 'balanceDue'> & {
+  customer: Pick<Customer, 'id' | 'name'>;
+};
+
+export interface SalesSummary {
+  openCount: number;
+  openBalance: string;
+  overdueCount: number;
+  overdueBalance: string;
+  draftCount: number;
+  recent: RecentInvoice[];
+}
+
+export type RecentBill = Pick<Bill, 'id' | 'billNo' | 'status' | 'postingEntryId' | 'date' | 'dueDate' | 'total' | 'amountPaid' | 'balanceDue'> & {
+  vendor: Pick<Vendor, 'id' | 'name'>;
+};
+
+export interface PurchaseSummary {
+  openCount: number;
+  openBalance: string;
+  overdueCount: number;
+  overdueBalance: string;
+  dueSoonCount: number;
+  dueSoonBalance: string;
+  recent: RecentBill[];
+}
+
+export async function getSalesSummary(): Promise<SalesSummary> {
+  const response = await fetch(`${API_URL}/api/invoices/summary?today=${localDay()}`);
+  return handleResponse<SalesSummary>(response);
+}
+
+export async function getPurchaseSummary(): Promise<PurchaseSummary> {
+  const response = await fetch(`${API_URL}/api/bills/summary?today=${localDay()}`);
+  return handleResponse<PurchaseSummary>(response);
 }
 
 export async function fetchDashboard(): Promise<DashboardData> {
-  const response = await fetch(`${API_URL}/api/dashboard`);
+  const response = await fetch(`${API_URL}/api/dashboard?today=${localDay()}`);
   return handleResponse<DashboardData>(response);
 }
 
@@ -468,7 +517,7 @@ export interface CloseChecklist {
 }
 
 export async function getCloseChecklist(): Promise<CloseChecklist> {
-  const response = await fetch(`${API_URL}/api/dashboard/close-checklist`);
+  const response = await fetch(`${API_URL}/api/dashboard/close-checklist?today=${localDay()}`);
   return handleResponse<CloseChecklist>(response);
 }
 

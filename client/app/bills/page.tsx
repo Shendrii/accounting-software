@@ -1,10 +1,11 @@
 'use client';
 
-import { useCallback, useEffect, useState } from 'react';
+import { useCallback, useState } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
 import Link from 'next/link';
 import { Plus, Search, Loader2, Repeat } from 'lucide-react';
-import { getBills, getRecurringBills, triggerRecurring, type Bill, type BillStatus } from '@/lib/api';
+import { getBills, getRecurringBills, triggerRecurring, type BillStatus } from '@/lib/api';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { toast } from '@/lib/toast';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
@@ -28,10 +29,6 @@ const INTERVAL_LABELS: Record<string, string> = {
 };
 
 export function BillsPage() {
-  const [bills, setBills] = useState<Bill[]>([]);
-  const [recurringBills, setRecurringBills] = useState<Bill[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [loadError, setLoadError] = useState<string | null>(null);
   const [search, setSearch] = useState('');
   const router = useRouter();
   const searchParams = useSearchParams();
@@ -43,22 +40,13 @@ export function BillsPage() {
   const [tab, setTab] = useState<'all' | 'recurring'>('all');
   const [runningRecurring, setRunningRecurring] = useState(false);
 
-  const load = useCallback(async () => {
-    setLoading(true);
-    setLoadError(null);
-    try {
-      const [data, recurring] = await Promise.all([
-        getBills(apiStatus ? { status: apiStatus } : undefined),
-        getRecurringBills(),
-      ]);
-      setBills(data);
-      setRecurringBills(recurring);
-    } catch (err: unknown) {
-      setLoadError(err instanceof Error ? err.message : 'Failed to load bills');
-    } finally {
-      setLoading(false);
-    }
-  }, [apiStatus]);
+  const loadTab = useCallback(() => tab === 'all'
+    ? getBills(apiStatus ? { status: apiStatus } : undefined)
+    : getRecurringBills(), [apiStatus, tab]);
+  const { data, loading, error, retry: load } = useWorkspaceData(loadTab);
+  const bills = tab === 'all' ? data ?? [] : [];
+  const recurringBills = tab === 'recurring' ? data ?? [] : [];
+  const loadError = error ? 'Failed to load bills. Try again.' : null;
 
   async function handleRunRecurring() {
     setRunningRecurring(true);
@@ -76,8 +64,6 @@ export function BillsPage() {
       setRunningRecurring(false);
     }
   }
-
-  useEffect(() => { void load(); }, [load]);
 
   const today = localDay();
   const soon = new Date(today + 'T00:00:00Z');
@@ -165,6 +151,8 @@ export function BillsPage() {
               <Loader2 className="h-5 w-5 animate-spin" />
               <span>Loading…</span>
             </div>
+          ) : loadError ? (
+            <p className="p-4 text-sm text-slate-600" role="status">Bills are unavailable. Retry loading above.</p>
           ) : filtered.length === 0 ? (
             <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
               No bills found.{' '}
@@ -237,7 +225,13 @@ export function BillsPage() {
               </button>
             </div>
             <div className="workspace-panel overflow-hidden">
-              {recurringBills.length === 0 ? (
+              {loading ? (
+                <div className="flex items-center justify-center gap-2 py-16 text-sm text-slate-600" role="status">
+                  <Loader2 className="size-4 animate-spin" aria-hidden="true" />Loading recurring bills…
+                </div>
+              ) : loadError ? (
+                <p className="p-4 text-sm text-slate-600" role="status">Recurring bills are unavailable. Retry loading above.</p>
+              ) : recurringBills.length === 0 ? (
                 <div className="text-center py-16 text-zinc-500 dark:text-zinc-400">
                   No recurring bills yet.{' '}
                   <Link href="/purchases/bills/new" className="text-zinc-700 dark:text-zinc-300 underline">

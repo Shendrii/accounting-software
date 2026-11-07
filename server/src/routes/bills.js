@@ -1,5 +1,6 @@
 import express from 'express';
 import prisma from '../db/prisma.js';
+import { purchaseSummary, summaryDay } from '../lib/workflowSummaries.js';
 import {
   Decimal, LedgerError, createPosting, decimalInput, decimalSum, ledgerAccounts, ledgerDate,
   ledgerTransaction, nextDay, reversePosting, sendLedgerError,
@@ -85,6 +86,14 @@ router.get('/', async (req, res) => {
     res.json(bills.map(billAmounts));
   } catch (error) {
     sendLedgerError(res, error, 'Failed to load bills.');
+  }
+});
+
+router.get('/summary', async (req, res) => {
+  try {
+    res.json(await purchaseSummary(prisma, req.workspace.id, summaryDay(req.query.today)));
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to load the purchases summary.');
   }
 });
 

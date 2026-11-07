@@ -1,12 +1,13 @@
 'use client';
 
-import React, { useState, useEffect } from 'react';
+import React, { useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type CloseChecklist, type JournalEntry } from '@/lib/api';
+import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type JournalEntry } from '@/lib/api';
 import { decimalText, formatUsd, journalTotals, localDay } from '@/lib/money';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { PostingTable, postedLines } from '@/app/components/PostingTable';
 import { toast } from '@/lib/toast';
+import { useWorkspaceData } from '@/lib/use-workspace-data';
 import CreateAccountForm from '@/app/components/CreateAccountForm';
 import EditAccountForm from '@/app/components/EditAccountForm';
 import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
@@ -22,10 +23,6 @@ export function BookkeepingPage() {
   const router = useRouter();
   const requestedTab = searchParams.get('tab');
   const activeTab = requestedTab === 'accounts' || requestedTab === 'journal' ? requestedTab : 'close';
-  const [accounts, setAccounts] = useState<Account[]>([]);
-  const [journalEntries, setJournalEntries] = useState<JournalEntry[]>([]);
-  const [loading, setLoading] = useState(true);
-  const [error, setError] = useState<string | null>(null);
   const [showCreateForm, setShowCreateForm] = useState(false);
   const [showCreateJournalForm, setShowCreateJournalForm] = useState(searchParams.get('new') === '1');
   const [editingAccount, setEditingAccount] = useState<Account | null>(null);
@@ -33,13 +30,24 @@ export function BookkeepingPage() {
   const [journalAction, setJournalAction] = useState<{ entry: JournalEntry; kind: 'view' | 'post' | 'reverse' } | null>(null);
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalError, setJournalError] = useState('');
-  const [closeChecklist, setCloseChecklist] = useState<CloseChecklist | null>(null);
-  const [closeError, setCloseError] = useState(false);
-
-  function loadClose() {
-    setCloseError(false);
-    getCloseChecklist().then(setCloseChecklist).catch(() => setCloseError(true));
-  }
+  const loadTab = useCallback(async () => {
+    if (activeTab === 'close') return { accounts: [] as Account[], entries: [] as JournalEntry[] };
+    const [accounts, entries] = await Promise.all([
+      getAccounts(), activeTab === 'journal' ? getJournalEntries() : Promise.resolve([]),
+    ]);
+    return { accounts, entries };
+  }, [activeTab]);
+  const tabData = useWorkspaceData(loadTab);
+  const accounts = tabData.data?.accounts ?? [];
+  const journalEntries = tabData.data?.entries ?? [];
+  const loading = tabData.loading;
+  const error = tabData.error ? 'Ledger data could not load. Try again.' : null;
+  const loadData = tabData.retry;
+  const loadChecklist = useCallback(() => activeTab === 'close' ? getCloseChecklist() : Promise.resolve(null), [activeTab]);
+  const close = useWorkspaceData(loadChecklist);
+  const closeChecklist = close.data;
+  const closeError = close.error;
+  const loadClose = close.retry;
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   
   // Account filters
@@ -53,28 +61,6 @@ export function BookkeepingPage() {
   const [journalStatusFilter, setJournalStatusFilter] = useState<string>('all');
   const [journalStartDate, setJournalStartDate] = useState('');
   const [journalEndDate, setJournalEndDate] = useState('');
-
-  useEffect(() => {
-    loadData();
-    loadClose();
-  }, []);
-
-  const loadData = async () => {
-    setLoading(true);
-    setError(null);
-    try {
-      const [accountsData, entriesData] = await Promise.all([
-        getAccounts(),
-        getJournalEntries()
-      ]);
-      setAccounts(accountsData);
-      setJournalEntries(entriesData);
-    } catch (err) {
-      setError(err instanceof Error ? err.message : 'Failed to load data');
-    } finally {
-      setLoading(false);
-    }
-  };
 
   function openJournal(entry: JournalEntry, kind: 'view' | 'post' | 'reverse') {
     setJournalError('');

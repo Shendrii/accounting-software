@@ -24,7 +24,7 @@ export function CloseProgress({ checklist }: { checklist: CloseChecklist }) {
   );
 }
 
-export function invoiceStatus(invoice: Invoice) {
+export function invoiceStatus(invoice: Pick<Invoice, 'status' | 'postingEntryId' | 'balanceDue' | 'dueDate' | 'amountPaid'>) {
   if (invoice.status === 'PAID') return 'Paid';
   if (invoice.status === 'DRAFT') return 'Draft';
   if (invoice.status !== 'SENT') return 'Void';
@@ -33,7 +33,7 @@ export function invoiceStatus(invoice: Invoice) {
   return decimalUnits(invoice.amountPaid) > BigInt(0) ? 'Partially paid' : 'Open';
 }
 
-export function billStatus(bill: Bill) {
+export function billStatus(bill: Pick<Bill, 'status' | 'postingEntryId' | 'amountPaid'>) {
   if (bill.status === 'RECEIVED') {
     if (!bill.postingEntryId) return 'Posting unverified';
     return decimalUnits(bill.amountPaid ?? '0') > BigInt(0) ? 'Partially paid' : 'Awaiting payment';
@@ -55,7 +55,7 @@ export function WorkspaceStatus({ children }: { children: string }) {
   );
 }
 
-export function InvoiceActivity({ invoices }: { invoices: Invoice[] }) {
+export function InvoiceActivity({ invoices }: { invoices: import('@/lib/api').RecentInvoice[] }) {
   return (
     <div className="workspace-table-wrap">
       <table className="workspace-table">

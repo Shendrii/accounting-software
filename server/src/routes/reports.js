@@ -1,7 +1,8 @@
 import express from 'express';
+import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
 import {
-  accountBalance, decimalSum, ledgerBalances, ledgerDate, nextDay, sendLedgerError,
+  accountBalance, decimalSum, ledgerDate, nextDay, sendLedgerError,
 } from '../lib/ledger.js';
 
 const router = express.Router();
@@ -14,12 +15,18 @@ function dateRange(startDate, endDate) {
 }
 
 async function reportBalances(workspaceId, date) {
-  const sums = await ledgerBalances(prisma, workspaceId, date);
-  const accounts = await prisma.account.findMany({
-    where: { workspaceId, id: { in: [...sums.keys()] } },
-    select: { id: true, name: true, code: true, type: true },
-    orderBy: { code: 'asc' },
-  });
+  const start = date.gte ? Prisma.sql`AND j."date" >= ${date.gte.toISOString()}::timestamp` : Prisma.empty;
+  const end = date.lt ? Prisma.sql`AND j."date" < ${date.lt.toISOString()}::timestamp` : Prisma.empty;
+  const rows = await prisma.$queryRaw`
+    SELECT a."id", a."name", a."code", a."type", SUM(l."debit") AS debit, SUM(l."credit") AS credit
+    FROM "Account" a JOIN "JournalLine" l ON l."accountId" = a."id"
+    JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
+    WHERE a."workspaceId" = ${workspaceId} AND j."workspaceId" = ${workspaceId} AND j."status" = 'POSTED'
+      ${start} ${end}
+    GROUP BY a."id", a."name", a."code", a."type" ORDER BY a."code" ASC
+  `;
+  const accounts = rows.map(({ id, name, code, type }) => ({ id, name, code, type }));
+  const sums = new Map(rows.map(row => [row.id, { debit: row.debit, credit: row.credit }]));
   return { sums, accounts };
 }
 

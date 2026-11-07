@@ -58,6 +58,7 @@ export function ReceiptsPage({
   const [statusFilter, setStatusFilter] = useState<'PENDING' | 'all'>('PENDING');
   const [search, setSearch] = useState('');
   const [selectedId, setSelectedId] = useState<string | null>(null);
+  const [reviewOpened, setReviewOpened] = useState(false);
   const [editingId, setEditingId] = useState<string | null>(null);
   const [approveModal, setApproveModal] = useState<{ receipt: Receipt } | null>(null);
   const [approveExpenseId, setApproveExpenseId] = useState('');
@@ -66,7 +67,8 @@ export function ReceiptsPage({
 
   const loadReceipts = useCallback(() => getReceipts(statusFilter === 'all' ? undefined : statusFilter), [statusFilter]);
   const queue = useWorkspaceData(loadReceipts);
-  const lookups = useWorkspaceData(loadReceiptLookups);
+  const loadLookups = useCallback(() => reviewOpened ? loadReceiptLookups() : Promise.resolve(null), [reviewOpened]);
+  const lookups = useWorkspaceData(loadLookups);
   const receipts = queue.data ?? [];
   const { loading } = queue;
   const accounts = lookups.data?.accounts ?? [];
@@ -223,7 +225,7 @@ export function ReceiptsPage({
                     <td><button type="button" aria-expanded={selected?.id === receipt.id}
                       aria-controls={selected?.id === receipt.id ? 'receipt-review' : undefined}
                       className="workspace-text-action min-h-10 px-0 text-left"
-                      onClick={() => { setSelectedId(selected?.id === receipt.id ? null : receipt.id); setEditingId(null); }}>
+                      onClick={() => { setReviewOpened(true); setSelectedId(selected?.id === receipt.id ? null : receipt.id); setEditingId(null); }}>
                       {details?.vendor || details?.invoiceNumber || 'Uploaded receipt'}
                     </button></td>
                     <td className="whitespace-nowrap">{details?.invoiceDate || details?.date || '—'}</td>

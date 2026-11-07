@@ -2,28 +2,18 @@
 
 import Link from 'next/link';
 import { CalendarClock, CalendarDays, Plus, ShoppingCart } from 'lucide-react';
-import { getBills, type Bill } from '@/lib/api';
-import { decimalText, decimalUnits, formatUsd, localDay } from '@/lib/money';
+import { getPurchaseSummary } from '@/lib/api';
+import { formatUsd, localDay } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { billStatus, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { WorkflowTabs, WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
 
 export default function PurchasesPage() {
-  const { data: bills, loading, error, retry } = useWorkspaceData(getBills);
-  const open = bills?.filter(bill => bill.status === 'RECEIVED' && bill.postingEntryId && decimalUnits(bill.balanceDue ?? '0') > BigInt(0));
+  const { data: summary, loading, error, retry } = useWorkspaceData(getPurchaseSummary);
+  const bills = summary?.recent;
   const today = localDay();
-  const overdue = open?.filter(bill => bill.dueDate.slice(0, 10) < today);
-  const cutoff = new Date(today + 'T00:00:00Z');
-  cutoff.setUTCDate(cutoff.getUTCDate() + 7);
-  const cutoffDay = cutoff.toISOString().slice(0, 10);
-  const dueSoon = open?.filter(bill => {
-    const due = bill.dueDate.slice(0, 10);
-    return due >= today && due <= cutoffDay;
-  });
-  const sum = (rows: Bill[] | undefined) => rows
-    ? formatUsd(decimalText(rows.reduce((total, bill) => total + decimalUnits(bill.balanceDue ?? bill.total), BigInt(0))))
-    : '—';
-  const detail = (count: number | undefined, unit: string) => count === undefined ? loading ? 'Loading…' : 'Unavailable' : `${count} ${unit}`;
+  const detail = (count: number | undefined, unit: string) => count === undefined
+    ? loading ? 'Loading…' : 'Unavailable' : `${count} ${unit}`;
 
   return (
     <div className="workspace-page">
@@ -33,9 +23,9 @@ export default function PurchasesPage() {
         <WorkflowTabs area="purchases" active="summary" />
         {error && <WorkspaceNotice title="Purchases activity could not load" onRetry={retry} />}
         <div className="grid grid-cols-2 gap-3 lg:grid-cols-3">
-          <WorkspaceMetric label="Unpaid bills" value={sum(open)} detail={detail(open?.length, 'open bills')} icon={ShoppingCart} href="/purchases/bills?view=open" />
-          <WorkspaceMetric label="Overdue balance" value={sum(overdue)} detail={detail(overdue?.length, 'past due')} icon={CalendarClock} href="/purchases/bills?view=overdue" />
-          <WorkspaceMetric label="Due within 7 days" value={sum(dueSoon)} detail={detail(dueSoon?.length, 'bills, including today')} icon={CalendarDays} href="/purchases/bills?view=due-soon" />
+          <WorkspaceMetric label="Unpaid bills" value={summary ? formatUsd(summary.openBalance) : '—'} detail={detail(summary?.openCount, 'open bills')} icon={ShoppingCart} href="/purchases/bills?view=open" />
+          <WorkspaceMetric label="Overdue balance" value={summary ? formatUsd(summary.overdueBalance) : '—'} detail={detail(summary?.overdueCount, 'past due')} icon={CalendarClock} href="/purchases/bills?view=overdue" />
+          <WorkspaceMetric label="Due within 7 days" value={summary ? formatUsd(summary.dueSoonBalance) : '—'} detail={detail(summary?.dueSoonCount, 'bills, including today')} icon={CalendarDays} href="/purchases/bills?view=due-soon" />
         </div>
         <WorkspacePanel title="Recent bills" description="See what is due and what has already been paid."
           action={<Link href="/purchases/bills" className="workspace-text-action">All bills</Link>}>

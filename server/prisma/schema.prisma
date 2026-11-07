@@ -78,7 +78,8 @@ model Receipt {
   bill           Bill?         @relation(fields: [billId], references: [id])
   image          ReceiptImage?
 
-  @@index([workspaceId, status])
+  @@index([workspaceId, status, createdAt])
+  @@index([workspaceId, createdAt])
   @@index([billId])
 }
 
@@ -100,6 +101,7 @@ model JournalLine {
   account        Account      @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
+  @@index([accountId, journalEntryId])
 }
 
 model Customer {
@@ -158,6 +160,8 @@ model Invoice {
   updatedAt      DateTime      @updatedAt
 
   @@unique([workspaceId, invoiceNo])
+  @@index([workspaceId, date, id])
+  @@index([workspaceId, status, dueDate])
 }
 
 model InvoicePayment {
@@ -210,6 +214,8 @@ model Bill {
   updatedAt          DateTime      @updatedAt
 
   @@unique([workspaceId, billNo])
+  @@index([workspaceId, date, id])
+  @@index([workspaceId, status, dueDate])
 }
 
 model BillPayment {
@@ -352,6 +358,7 @@ model WorkspaceMember {
   user        User          @relation(fields: [userId], references: [id], onDelete: Cascade)
 
   @@unique([workspaceId, userId])
+  @@index([userId, createdAt])
 }
 
 model AuthProvider {

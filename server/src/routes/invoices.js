@@ -7,6 +7,7 @@ import {
   ledgerTransaction, nextDay, reversePosting, sendLedgerError,
 } from '../lib/ledger.js';
 import { invoiceAmounts } from '../lib/invoiceLedger.js';
+import { salesSummary, summaryDay } from '../lib/workflowSummaries.js';
 
 const router = express.Router();
 const accountFields = { id: true, name: true, code: true };
@@ -93,6 +94,14 @@ router.get('/', async (req, res) => {
     res.json(invoices.map(({ payments, ...invoice }) => ({ ...invoice, ...invoiceAmounts({ ...invoice, payments }) })));
   } catch (error) {
     sendLedgerError(res, error, 'Failed to fetch invoices.');
+  }
+});
+
+router.get('/summary', async (req, res) => {
+  try {
+    res.json(await salesSummary(prisma, req.workspace.id, summaryDay(req.query.today)));
+  } catch (error) {
+    sendLedgerError(res, error, 'Failed to load the sales summary.');
   }
 });
 

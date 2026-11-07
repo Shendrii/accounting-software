@@ -83,19 +83,19 @@ app.get('/api/health', (req, res) => {
 // API Routes
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/workspaces', requireAuth, workspacesRouter);
-app.use('/api/accounts', requireAuth, requireWorkspace, accountsRouter);
-app.use('/api/journal-entries', requireAuth, requireWorkspace, journalEntriesRouter);
-app.use('/api/receipts', requireAuth, requireWorkspace, receiptsRouter);
-app.use('/api/dashboard', requireAuth, requireWorkspace, dashboardRouter);
-app.use('/api/customers', requireAuth, requireWorkspace, customersRouter);
-app.use('/api/vendors', requireAuth, requireWorkspace, vendorsRouter);
-app.use('/api/invoices', requireAuth, requireWorkspace, invoicesRouter);
-app.use('/api/bills', requireAuth, requireWorkspace, billsRouter);
-app.use('/api/reconciliation', requireAuth, requireWorkspace, reconciliationRouter);
-app.use('/api/reports', requireAuth, requireWorkspace, reportsRouter);
-app.use('/api/insights', requireAuth, requireWorkspace, insightsRouter);
-app.use('/api/ai', requireAuth, requireWorkspace, aiRouter);
-app.use('/api/recurring', requireAuth, requireWorkspace, recurringRouter);
+app.use('/api/accounts', requireWorkspace, accountsRouter);
+app.use('/api/journal-entries', requireWorkspace, journalEntriesRouter);
+app.use('/api/receipts', requireWorkspace, receiptsRouter);
+app.use('/api/dashboard', requireWorkspace, dashboardRouter);
+app.use('/api/customers', requireWorkspace, customersRouter);
+app.use('/api/vendors', requireWorkspace, vendorsRouter);
+app.use('/api/invoices', requireWorkspace, invoicesRouter);
+app.use('/api/bills', requireWorkspace, billsRouter);
+app.use('/api/reconciliation', requireWorkspace, reconciliationRouter);
+app.use('/api/reports', requireWorkspace, reportsRouter);
+app.use('/api/insights', requireWorkspace, insightsRouter);
+app.use('/api/ai', requireWorkspace, aiRouter);
+app.use('/api/recurring', requireWorkspace, recurringRouter);
 
 // Error handling middleware
 app.use((err, req, res, next) => {
