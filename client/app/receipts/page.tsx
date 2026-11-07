@@ -142,7 +142,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
   const [saved, setSaved] = useState(false);
   const snapshot = JSON.stringify({ data, vendorId });
   const savedSnapshot = useRef(snapshot);
-  const dirty = editableReceipt(receipt) && (snapshot !== savedSnapshot.current || Boolean(accountId || paymentId || billId !== (receipt.billId || '') || dueDate !== (original.dueDate || '') || paidInFull));
+  const dirty = editableReceipt(receipt) && (snapshot !== savedSnapshot.current || Boolean(accountId || paymentId || billId !== (receipt.billId || '') || dueDate !== (validDate(original.dueDate || '') ? original.dueDate || '' : '') || paidInFull));
   const stateCallback = useRef(onReviewState); stateCallback.current = onReviewState;
   useEffect(() => { stateCallback.current(dirty, busy); }, [dirty, busy]);
   const [billSearch, setBillSearch] = useState('');
