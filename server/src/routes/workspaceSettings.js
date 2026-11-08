@@ -2,6 +2,8 @@ import express from 'express';
 import prisma from '../db/prisma.js';
 import { LedgerError, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
 import { hasFinancialRecords, openingPreview, postOpening, profileInput, requireBooksAdmin, starterAccounts } from '../lib/workspaceBooks.js';
+import { demand } from '../lib/permissions.js';
+import { audit } from '../lib/audit.js';
 
 const router = express.Router();
 router.get('/', async (req, res) => {
@@ -38,6 +40,22 @@ router.put('/', async (req, res) => {
 router.post('/opening-balances/preview', async (req, res) => {
   try { requireBooksAdmin(req); res.json(await openingPreview(prisma, req.workspace.id, req.body)); }
   catch (error) { sendLedgerError(res, error, 'Opening balances could not be reviewed.'); }
+});
+router.put('/controls', async (req,res) => {
+  try {
+    demand(req,'owner');
+    const keys=['memberCanPost','requireJournalApproval','separateCloseReviewer'];
+    if(keys.some(key=>typeof req.body[key]!=='boolean'))throw new LedgerError('Confirm each posting and review control.');
+    const reason=typeof req.body.reason==='string'?req.body.reason.trim():'';
+    if(reason.length<5||reason.length>1000)throw new LedgerError('Document the control change in 5–1,000 characters.');
+    const result=await ledgerTransaction(async tx=>{
+      const before=await tx.workspace.findUnique({where:{id:req.workspace.id}});
+      const controls=Object.fromEntries(keys.map(key=>[key,req.body[key]]));
+      await tx.workspace.update({where:{id:req.workspace.id},data:controls});
+      await audit(tx,req.workspace.id,'POSTING_CONTROLS_CHANGED',req.workspace.id,{before:Object.fromEntries(keys.map(key=>[key,before[key]])),after:controls},reason);
+      return controls;
+    });res.json(result);
+  }catch(error){sendLedgerError(res,error,'Posting controls could not save.');}
 });
 router.post('/opening-balances', async (req, res) => {
   try {

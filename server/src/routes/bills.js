@@ -1,6 +1,10 @@
 import express from 'express';
 import { reversePaymentHandler } from '../lib/paymentCorrection.js';
 import prisma from '../db/prisma.js';
+import {audit} from '../lib/audit.js';
+import {reasonInput} from '../lib/settlements.js';
+import { assertPermission } from '../lib/permissions.js';
+import {taxDraft,taxCode,taxPostingAccount,recordTax} from '../lib/tax.js';
 import { purchaseSummary, summaryDay } from '../lib/workflowSummaries.js';
 import { checkDates, checkVendor, checkPaidReceiptReference, createDraftBill, draftLines, vendorReference } from '../lib/billDraft.js';
 import { purchaseAccount, requireAccountRole } from '../lib/accountRoles.js';
@@ -16,6 +20,7 @@ const posting = { journalLines: { include: { account: { select: { name: true, ty
 const detail = {
   vendor: true, lines: { include: { account: { select: { id: true, name: true, code: true } } } },
   journalEntry: { include: posting }, postingEntry: { include: posting },
+  creditAllocations: {include:{credit:true}},
   payments: { include: { reversalEntry: true, journalEntry: { include: posting } }, orderBy: { journalEntry: { date: 'asc' } } },
   receipts: { select: { id: true, createdAt: true } },
 };
@@ -24,8 +29,8 @@ const billWhere = req => ({ id: req.params.id, workspaceId: req.workspace.id });
 
 function billAmounts(bill) {
   const total = new Decimal(bill.total);
-  const paid = bill.status === 'PAID' && !bill.payments.length ? total : decimalSum(bill.payments.filter(item => !item.reversalEntryId).map(item => item.amount));
-  const balanceDue = bill.status === 'RECEIVED' && bill.postingEntryId ? total.minus(paid).toFixed(2) : '0.00';
+  const paid = bill.status === 'PAID' && !bill.postingEntryId ? total : decimalSum([...bill.payments.filter(item => !item.reversalEntryId),...(bill.creditAllocations??[]).filter(item=>!item.reversedDate)].map(item => item.amount));
+  const balanceDue = ['RECEIVED','PAID'].includes(bill.status) && bill.postingEntryId ? total.minus(paid).toFixed(2) : '0.00';
   return { ...bill, amountPaid: paid.toFixed(2), balanceDue };
 }
 
@@ -48,7 +53,7 @@ router.get('/', async (req, res) => {
       if (endDate) where.date.lt = nextDay(endDate);
     }
     const bills = await prisma.bill.findMany({
-      where, include: { vendor: { select: { id: true, name: true } }, payments: { select: { amount: true, reversalEntryId: true } } },
+      where, include: { vendor: { select: { id: true, name: true } }, creditAllocations: true, payments: { select: { amount: true, reversalEntryId: true } } },
       orderBy: { date: 'desc' },
     });
     res.json(bills.map(billAmounts));
@@ -92,14 +97,19 @@ router.put('/:id', async (req, res) => {
       const due = dueDate === undefined ? current.dueDate : ledgerDate(dueDate, 'Due date');
       checkDates(billDate, due);
       const draft = lines === undefined ? null : await draftLines(tx, where.workspaceId, lines);
-      return tx.bill.update({
+      const tax=taxDraft({tax:req.body.tax??current.tax,taxCodeId:req.body.taxCodeId??current.taxCodeId});
+      const code=await taxCode(tx,where.workspaceId,tax.taxCodeId,'INPUT',billDate);
+      if(tax.tax.gt(0)&&(!code||code.purpose==='EXEMPT'))throw new LedgerError('Select an input-tax code for recoverable tax.');
+      const updated=await tx.bill.update({
         where, data: {
           vendorId, date: billDate, dueDate: due, notes,
           ...(vendorInvoiceNo !== undefined && { vendorInvoiceNo: vendorReference(vendorInvoiceNo) }),
-          ...(draft && { total: draft.total, lines: { deleteMany: {}, create: draft.lines } }),
+          ...tax,total:(draft?.total??decimalSum(current.lines.map(l=>l.amount))).plus(tax.tax),
+          ...(draft && { lines: { deleteMany: {}, create: draft.lines } }),
         },
         include: detail,
       });
+      await audit(tx,where.workspaceId,'BILL_DRAFT_UPDATED',updated.id,{before:current,after:updated});return updated;
     });
     res.json(billAmounts(bill));
   } catch (error) {
@@ -125,7 +135,7 @@ router.post('/:id/receive', async (req, res) => {
       if (current.status !== 'DRAFT') throw new LedgerError('Only draft bills can be posted.', 409);
       await checkPaidReceiptReference(tx, where.workspaceId, current.vendorId, current.vendorInvoiceNo);
       if (current.lines.some(line => !line.accountId)) throw new LedgerError('Assign an expense or asset account to every bill line before posting.');
-      if (!current.total.gt(0) || !decimalSum(current.lines.map(line => line.amount)).eq(current.total)) {
+      if (!current.total.gt(0) || !decimalSum(current.lines.map(line => line.amount)).plus(current.tax).eq(current.total)) {
         throw new LedgerError('The bill total does not agree with its lines. Edit the draft before posting.');
       }
       const accounts = await ledgerAccounts(tx, where.workspaceId, current.lines.map(line => line.accountId));
@@ -133,13 +143,18 @@ router.post('/:id/receive', async (req, res) => {
         throw new LedgerError('Choose expense or general asset accounts for all bill lines.');
       }
       const ap = await payableAccount(tx, where.workspaceId);
+      const code=await taxCode(tx,where.workspaceId,current.taxCodeId,'INPUT',current.date);
+      const taxAccount=current.tax.gt(0)?await taxPostingAccount(tx,where.workspaceId,code,'INPUT'):null;
       const entry = await createPosting(tx, where.workspaceId, {
         date: ledgerDate(current.date.toISOString(), 'Bill date'), description: 'Bill posted: ' + current.billNo, referenceNo: current.billNo,
         lines: [
           ...current.lines.filter(line => line.amount.gt(0)).map(line => ({ accountId: line.accountId, debit: line.amount, description: line.description })),
+          ...(taxAccount?[{accountId:taxAccount,debit:current.tax}]:[]),
           { accountId: ap, credit: current.total },
         ],
       });
+      await audit(tx,where.workspaceId,'BILL_POSTED',current.id,{postingEntryId:entry.id,date:current.date,total:current.total,currency:req.workspace.currency});
+      if(code||current.tax.gt(0))await recordTax(tx,req.workspace,code,{source:'BILL',sourceId:current.id,postingEntryId:entry.id,date:current.date,baseAmount:current.total.minus(current.tax),amount:current.tax});
       return tx.bill.update({ where, data: { status: 'RECEIVED', postingEntryId: entry.id }, include: detail });
     });
     res.json(billAmounts(bill));
@@ -170,7 +185,7 @@ router.post('/:id/pay', async (req, res) => {
         return current;
       }
       const billPosting = current.postingEntry;
-      if (current.status !== 'RECEIVED' || !billPosting || billPosting.status !== 'POSTED' || billPosting.workspaceId !== where.workspaceId) {
+      if (!['RECEIVED','PAID'].includes(current.status) || !billPosting || billPosting.status !== 'POSTED' || billPosting.workspaceId !== where.workspaceId) {
         throw new LedgerError('Post an unpaid bill before recording a payment.', 409);
       }
       if (paymentDate < ledgerDate(billPosting.date.toISOString())) throw new LedgerError('The payment date cannot precede the bill posting date.');
@@ -188,6 +203,7 @@ router.post('/:id/pay', async (req, res) => {
         date: paymentDate, description: 'Payment recorded for ' + current.billNo, referenceNo: current.billNo,
         lines: [{ accountId: payable[0].accountId, debit: paid }, { accountId: paymentAccountId, credit: paid }],
       }, true);
+      await audit(tx,where.workspaceId,'BILL_PAYMENT_RECORDED',current.id,{amount:paid,date:paymentDate,paymentAccountId,postingEntryId:entry.id,currency:req.workspace.currency});
       await tx.billPayment.create({ data: { billId: current.id, journalEntryId: entry.id, requestId: key, amount: paid } });
       return tx.bill.update({
         where, data: { status: paid.eq(remaining) ? 'PAID' : 'RECEIVED', postingEntryId: billPosting.id }, include: detail,
@@ -207,14 +223,15 @@ router.post('/:id/void', async (req, res) => {
       const current = await getBill(tx, where);
       if (current.status === 'VOID') return current;
       if (current.isOpeningBalance) throw new LedgerError('Finalized opening documents cannot be voided. Their original balances remain part of the opening proof.', 409);
-      if (current.status === 'PAID' || current.payments.some(payment => !payment.reversalEntryId)) throw new LedgerError('A bill with a recorded payment cannot be voided.', 409);
+      if (current.status === 'PAID' || current.payments.some(payment => !payment.reversalEntryId) || current.creditAllocations.some(a=>!a.reversedDate)) throw new LedgerError('A bill with a recorded payment cannot be voided.', 409);
       if (current.status === 'RECEIVED') {
+        assertPermission('correct');
         const entry = current.postingEntry ?? current.journalEntry;
         if (!entry || entry.workspaceId !== where.workspaceId || entry.status !== 'POSTED') throw new LedgerError('The original bill posting could not be verified.', 409);
         if (date < ledgerDate(entry.date.toISOString())) throw new LedgerError('The void date cannot precede the bill posting date.');
-        await reversePosting(tx, where.workspaceId, entry, date, 'Void bill ' + current.billNo);
+        await reversePosting(tx, where.workspaceId, entry, date, 'Void bill '+current.billNo+' · '+reasonInput(req.body.reason,'Void reason'));
       }
-      return tx.bill.update({ where, data: { status: 'VOID' }, include: detail });
+      const updated=await tx.bill.update({ where, data: { status: 'VOID' }, include: detail });await audit(tx,where.workspaceId,'BILL_VOIDED',updated.id,{before:current,after:updated,date},req.body.reason);return updated;
     });
     res.json(billAmounts(bill));
   } catch (error) {

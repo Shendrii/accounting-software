@@ -103,6 +103,13 @@ export function isEmailConfigured() {
   return isBrevoConfigured() || isSmtpConfigured();
 }
 
+export async function sendAccountEmail({ to, purpose, url }) {
+  const subject = purpose === 'VERIFY_EMAIL' ? 'Verify your Accountrix email' : 'Reset your Accountrix password';
+  const html = `<h2>${subject}</h2><p><a href="${escapeHtml(url)}">${subject}</a></p><p>This link expires in one hour. If you did not request it, ignore this message.</p>`;
+  if (isBrevoConfigured()) return brevoSend({ from: process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '', to, subject, html });
+  return createTransporter().sendMail({ from: process.env.SMTP_FROM || process.env.MAIL_FROM || smtpAuth().user, to, subject, html });
+}
+
 // Keep backward-compat alias used in invoices/workspaces routes
 export { isEmailConfigured as isSmtpConfigured };
 

@@ -1,6 +1,10 @@
 import express from 'express';
 import { reversePaymentHandler } from '../lib/paymentCorrection.js';
 import prisma from '../db/prisma.js';
+import {audit} from '../lib/audit.js';
+import {reasonInput} from '../lib/settlements.js';
+import { assertPermission } from '../lib/permissions.js';
+import {taxCode,recordTax,invoiceSnapshot,invoiceDetails} from '../lib/tax.js';
 import { generateInvoicePdf } from '../lib/generateInvoicePdf.js';
 import { isSmtpConfigured, sendInvoiceEmail } from '../lib/sendEmail.js';
 import {
@@ -21,6 +25,7 @@ const detail = {
   lines: { include: { account: { select: accountFields } } },
   journalEntry: true,
   postingEntry: { include: journalDetails },
+  creditAllocations: {include:{credit:true}},
   payments: { include: { reversalEntry: true, journalEntry: { include: journalDetails } }, orderBy: { journalEntry: { date: 'asc' } } },
 };
 
@@ -93,7 +98,7 @@ router.get('/', async (req, res) => {
     }
     const invoices = await prisma.invoice.findMany({
       where,
-      include: { customer: { select: { id: true, name: true } }, payments: { select: { amount: true, reversalEntryId: true } } },
+      include: { customer: { select: { id: true, name: true } }, creditAllocations: true, payments: { select: { amount: true, reversalEntryId: true } } },
       orderBy: { date: 'desc' },
     });
     res.json(invoices.map(({ payments, ...invoice }) => ({ ...invoice, ...invoiceAmounts({ ...invoice, payments }) })));
@@ -128,16 +133,20 @@ router.post('/', async (req, res) => {
     const taxAmount = decimalInput(tax ?? 0, 'Tax');
     const invoice = await ledgerTransaction(async tx => {
       await checkCustomer(tx, workspaceId, customerId);
+      const code=await taxCode(tx,workspaceId,req.body.taxCodeId,'OUTPUT',invoiceDate);
+      if(code?.purpose==='EXEMPT'&&taxAmount.gt(0))throw new LedgerError('An exempt tax code cannot have a tax amount.');
       const lines = await draftLines(tx, workspaceId, req.body.lines);
-      return tx.invoice.create({
+      const created=await tx.invoice.create({
         data: {
           workspaceId, invoiceNo: await generateInvoiceNo(tx, workspaceId), customerId,
           date: invoiceDate, dueDate: due, notes,
+          taxCodeId:code?.id,invoiceDetails:invoiceDetails(req.body.invoiceDetails),
           ...totals(decimalSum(lines.map(line => line.amount)), taxAmount),
           lines: { create: lines },
         },
         include: detail,
       });
+      await audit(tx,workspaceId,'INVOICE_DRAFT_CREATED',created.id,{after:created});return created;
     });
     res.status(201).json(result(invoice));
   } catch (error) {
@@ -159,15 +168,19 @@ router.put('/:id', async (req, res) => {
       const replacement = lines === undefined ? undefined : await draftLines(tx, where.workspaceId, lines);
       const subtotal = replacement ? decimalSum(replacement.map(line => line.amount)) : existing.subtotal;
       const taxAmount = tax === undefined ? existing.tax : decimalInput(tax, 'Tax');
-      return tx.invoice.update({
+      const code=await taxCode(tx,where.workspaceId,req.body.taxCodeId??existing.taxCodeId,'OUTPUT',invoiceDate);
+      if(code?.purpose==='EXEMPT'&&taxAmount.gt(0))throw new LedgerError('An exempt tax code cannot have a tax amount.');
+      const updated=await tx.invoice.update({
         where,
         data: {
           customerId, date: invoiceDate, dueDate: due, notes,
+          taxCodeId:code?.id??null,invoiceDetails:invoiceDetails(req.body.invoiceDetails),
           ...(replacement || tax !== undefined ? totals(subtotal, taxAmount) : {}),
           ...(replacement && { lines: { deleteMany: {}, create: replacement } }),
         },
         include: detail,
       });
+      await audit(tx,where.workspaceId,'INVOICE_DRAFT_UPDATED',updated.id,{before:existing,after:updated});return updated;
     });
     res.json(result(invoice));
   } catch (error) {
@@ -178,10 +191,13 @@ router.put('/:id', async (req, res) => {
 router.post('/:id/post', async (req, res) => {
   try {
     const where = invoiceWhere(req);
-    const { receivableAccountId, revenueAccountId, taxAccountId, confirmUnposted } = req.body;
+    const { receivableAccountId, revenueAccountId, confirmUnposted } = req.body;
     const invoice = await ledgerTransaction(async tx => {
       const existing = await getInvoice(tx, where);
       if (existing.postingEntry) return existing;
+      const code=await taxCode(tx,where.workspaceId,req.body.taxCodeId??existing.taxCodeId,'OUTPUT',existing.date);
+      if(code?.purpose==='EXEMPT'&&existing.tax.gt(0))throw new LedgerError('An exempt code cannot have a tax amount.');
+      const taxAccountId=code?.accountId??req.body.taxAccountId;
       if (!['DRAFT', 'SENT'].includes(existing.status)) throw new LedgerError('Only open or draft invoices can be posted.', 409);
       if (existing.status === 'SENT') {
         if (confirmUnposted !== true) throw new LedgerError('Review the ledger for an existing sale before posting this older invoice.', 409);
@@ -233,7 +249,9 @@ router.post('/:id/post', async (req, res) => {
           data: { accountId: revenueAccountId },
         });
       }
-      return tx.invoice.update({ where, data: { status: 'SENT', postingEntryId: posting.id }, include: detail });
+      await audit(tx,where.workspaceId,'INVOICE_POSTED',existing.id,{postingEntryId:posting.id,date:existing.date,total:existing.total,currency:req.workspace.currency});
+      if(code||existing.tax.gt(0))await recordTax(tx,req.workspace,code,{source:'INVOICE',sourceId:existing.id,postingEntryId:posting.id,date:existing.date,baseAmount:existing.subtotal,amount:existing.tax});
+      return tx.invoice.update({ where, data: { status: 'SENT', postingEntryId: posting.id,taxCodeId:code?.id??null,legalSnapshot:await invoiceSnapshot(tx,where.workspaceId,existing) }, include: detail });
     });
     res.json(result(invoice));
   } catch (error) {
@@ -285,7 +303,7 @@ router.post('/:id/record-payment', async (req, res) => {
         }
         return { invoice: result(invoice), journalEntry: prior.journalEntry };
       }
-      if (invoice.status !== 'SENT' || !invoice.postingEntry) {
+      if (!['SENT','PAID'].includes(invoice.status) || !invoice.postingEntry) {
         throw new LedgerError('Post an open invoice before recording a payment.', 409);
       }
       if (paymentDate < ledgerDate(invoice.postingEntry.date.toISOString())) {
@@ -310,6 +328,7 @@ router.post('/:id/record-payment', async (req, res) => {
         ],
       }, true);
       await tx.invoicePayment.create({ data: { invoiceId: invoice.id, journalEntryId: journalEntry.id, requestId: key, amount: received } });
+      await audit(tx,where.workspaceId,'INVOICE_PAYMENT_RECORDED',invoice.id,{amount:received,date:paymentDate,paymentAccountId,postingEntryId:journalEntry.id,currency:req.workspace.currency});
       const updated = await tx.invoice.update({
         where, data: { status: received.eq(remaining) ? 'PAID' : 'SENT' }, include: detail,
       });
@@ -327,8 +346,9 @@ router.post('/:id/void', async (req, res) => {
     const invoice = await ledgerTransaction(async tx => {
       const existing = await getInvoice(tx, where);
       if (existing.status === 'VOID') return existing;
+      if (existing.status !== 'DRAFT') assertPermission('correct');
       if (existing.isOpeningBalance) throw new LedgerError('Finalized opening documents cannot be voided. Their original balances remain part of the opening proof.', 409);
-      if (existing.status === 'PAID' || existing.payments.some(payment => !payment.reversalEntryId) || existing.journalEntryId) {
+      if (existing.status === 'PAID' || existing.payments.some(payment => !payment.reversalEntryId) || existing.creditAllocations.some(a=>!a.reversedDate) || existing.journalEntryId) {
         throw new LedgerError('An invoice with a recorded payment cannot be voided.', 409);
       }
       if (existing.postingEntry) {
@@ -336,14 +356,14 @@ router.post('/:id/void', async (req, res) => {
         if (date < ledgerDate(existing.postingEntry.date.toISOString())) {
           throw new LedgerError('The reversal date cannot precede the posting date.');
         }
-        await reversePosting(tx, where.workspaceId, existing.postingEntry, date, 'Void invoice ' + existing.invoiceNo);
+        await reversePosting(tx, where.workspaceId, existing.postingEntry, date, 'Void invoice '+existing.invoiceNo+' · '+reasonInput(req.body.reason,'Void reason'));
       } else if (existing.status === 'SENT' && await tx.journalEntry.findFirst({
         where: { workspaceId: where.workspaceId, status: 'POSTED', referenceNo: existing.invoiceNo },
         select: { id: true },
       })) {
         throw new LedgerError('A journal already references this older invoice. Review it with your bookkeeper before voiding.', 409);
       }
-      return tx.invoice.update({ where, data: { status: 'VOID' }, include: detail });
+      const updated=await tx.invoice.update({ where, data: { status: 'VOID' }, include: detail });await audit(tx,where.workspaceId,'INVOICE_VOIDED',updated.id,{before:existing,after:updated,date:req.body.date},req.body.reason);return updated;
     });
     res.json(result(invoice));
   } catch (error) {
@@ -374,7 +394,7 @@ router.get('/:id/pdf', async (req, res) => {
       where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
-        payments: { select: { amount: true, reversalEntryId: true } },
+        creditAllocations: true, payments: { select: { amount: true, reversalEntryId: true } },
         lines: { include: { account: { select: { name: true } } } },
       },
     });
@@ -403,13 +423,14 @@ router.post('/:id/send-pdf', async (req, res) => {
       where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
         customer: true,
-        payments: { select: { amount: true, reversalEntryId: true } },
+        creditAllocations: true, payments: { select: { amount: true, reversalEntryId: true } },
         lines: { include: { account: { select: { name: true } } } },
       },
     });
     if (!invoice) return res.status(404).json({ error: 'Invoice not found' });
     if (invoice.isOpeningBalance) return res.status(409).json({ error: 'An opening balance is not a new invoice. Download its opening statement instead.' });
     if (invoice.status === 'VOID') return res.status(409).json({ error: 'A void invoice cannot be sent.' });
+    if (!invoice.postingEntryId) return res.status(409).json({error:'Post the invoice before emailing it. Draft and unposted PDFs are marked for review.'});
 
     const email = req.body.email || invoice.customer?.email;
     if (!email) {

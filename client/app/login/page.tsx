@@ -9,7 +9,8 @@ import { setSession, setWorkspaceId } from '@/lib/auth';
 function LoginForm() {
   const router = useRouter();
   const searchParams = useSearchParams();
-  const redirect = searchParams.get('redirect') || '/';
+  const requested = searchParams.get('redirect') || '/';
+  const redirect = requested.startsWith('/') && !requested.startsWith('//') && !requested.includes('\\') ? requested : '/';
   const [loading, setLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
 

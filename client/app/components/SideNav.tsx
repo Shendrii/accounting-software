@@ -5,7 +5,8 @@ import { usePathname } from 'next/navigation';
 import { ChevronRight, LogOut, Menu, MessageSquare, X } from 'lucide-react';
 import { useEffect, useRef, useState } from 'react';
 import { getPendingReceiptCount } from '@/lib/api';
-import { clearSession, getCurrentUser, useActiveWorkspaceId, useIsAuthenticated } from '@/lib/auth';
+import { getCurrentUser, useActiveWorkspaceId, useIsAuthenticated } from '@/lib/auth';
+import { logout } from '@/lib/account-access';
 import { navigationClusters, workspaceSection } from '@/lib/navigation';
 import { hideAppChrome } from '@/lib/public-paths';
 import { WorkspaceBrand, WorkspaceNavigation } from './WorkspaceSidebar';
@@ -14,6 +15,8 @@ import WorkspaceSwitcher from './WorkspaceSwitcher';
 
 export default function SideNav() {
   const pathname = usePathname();
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const signedIn = useIsAuthenticated();
   const workspaceId = useActiveWorkspaceId();
   const visible = !hideAppChrome(pathname, signedIn);
@@ -89,10 +92,11 @@ export default function SideNav() {
             <p className="truncate text-sm font-semibold" title={name}>{name}</p>
             <p className="truncate text-xs text-slate-600 capitalize">{selected ? selected.role.toLowerCase() : 'Workspace'}</p>
           </div>
-          <button type="button" onClick={() => { clearSession(); window.location.href = '/login'; }}
+          <button type="button" disabled={signingOut} onClick={() => { setSigningOut(true); logout().catch(() => { setLogoutError('Sign-out could not reach the server. Try again.'); setSigningOut(false); }); }}
             aria-label="Log out" className="grid size-10 shrink-0 place-items-center rounded-lg text-slate-700 hover:bg-slate-100 hover:text-slate-950">
             <LogOut className="size-4" aria-hidden="true" />
           </button>
+          {logoutError && <p role="alert" className="text-xs text-rose-800">{logoutError}</p>}
         </div>
       </aside>
     </>

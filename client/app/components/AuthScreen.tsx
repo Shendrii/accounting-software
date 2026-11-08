@@ -4,7 +4,7 @@ import Image from 'next/image';
 import Link from 'next/link';
 import { useState, type FormEventHandler, type ReactNode } from 'react';
 import { ArrowRight, BookOpenCheck, Check, CircleAlert, Eye, EyeOff, Loader2, ReceiptText } from 'lucide-react';
-import { API_BASE_URL } from '@/lib/api';
+import { beginGoogleSignIn } from '@/lib/account-access';
 import { PRODUCT_NAME } from '@/lib/brand';
 
 type AuthMode = 'login' | 'signup';
@@ -116,6 +116,7 @@ export function AuthForm({ mode, loading, error, onSubmit }: {
   const signup = mode === 'signup';
   const pendingLabel = signup ? 'Creating your account…' : 'Signing in…';
   const [passwordVisible, setPasswordVisible] = useState(false);
+  const [googleError, setGoogleError] = useState('');
 
   return (
     <>
@@ -140,6 +141,7 @@ export function AuthForm({ mode, loading, error, onSubmit }: {
               type={passwordVisible ? 'text' : 'password'}
               autoComplete={signup ? 'new-password' : 'current-password'}
               minLength={signup ? 8 : undefined}
+              maxLength={signup ? 128 : undefined}
               aria-describedby={signup ? 'auth-password-hint' : undefined}
               required
             />
@@ -183,13 +185,14 @@ export function AuthForm({ mode, loading, error, onSubmit }: {
       <div className="my-5 flex items-center gap-3 text-xs text-slate-600 before:h-px before:flex-1 before:bg-slate-300 after:h-px after:flex-1 after:bg-slate-300">
         or
       </div>
-      <a
-        href={`${API_BASE_URL}/api/auth/google/start`}
+      {!signup && <Link href="/reset-password" className="mt-3 inline-flex min-h-11 items-center text-sm font-semibold text-blue-800 underline">Forgot password?</Link>}
+      {googleError && <p role="alert" className="text-sm text-rose-800">{googleError}</p>}
+      <button type="button" onClick={() => { setGoogleError(''); beginGoogleSignIn().catch(cause => setGoogleError(cause instanceof Error ? cause.message : 'Google sign-in could not start.')); }}
         className={`flex min-h-12 items-center justify-center gap-2.5 rounded-xl border border-slate-500 bg-white px-3 text-sm font-medium text-slate-950 transition-colors hover:bg-slate-50 active:bg-slate-100 motion-reduce:transition-none ${focus}`}
       >
         <Image src="/google-g.png" width={20} height={20} alt="" className="size-5 object-contain" unoptimized />
         {signup ? 'Sign up with Google' : 'Continue with Google'}
-      </a>
+      </button>
       <p className="mt-4 flex flex-wrap items-center justify-center gap-x-1.5 text-center text-sm text-slate-600">
         {signup ? 'Already have an account?' : 'New to Accountrix?'}
         <Link href={signup ? '/login' : '/signup'} className={`inline-flex min-h-11 items-center rounded-sm font-semibold text-blue-800 underline-offset-4 hover:underline ${focus}`}>

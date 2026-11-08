@@ -1,5 +1,5 @@
 'use client';
-import { useEffect, useRef, useState } from 'react';
+import { useEffect, useId, useRef, useState } from 'react';
 import { X } from 'lucide-react';
 import { usePathname, useRouter, useSearchParams } from 'next/navigation';
 import type { PageResult } from '@/lib/api';
@@ -47,9 +47,13 @@ export function WorklistControls({ state, kind, statuses, views = [] }: {
   state: ReturnType<typeof useWorklist>; kind: string; statuses: [string, string][]; views?: [string, string][];
 }) {
   const { params, update } = state;
+  const [expanded,setExpanded]=useState(false);const filterId=useId();const filterCount=['status','view','startDate','endDate'].filter(k=>params[k]&&params[k]!=='all').length;
   return <div className="workbench-controls space-y-3">
     <div className="flex flex-wrap items-end gap-3">
       <SearchField key={params.q || ''} value={params.q || ''} onSearch={q => update({ q })} />
+      <button type="button" className="workspace-button sm:hidden" aria-expanded={expanded} aria-controls={filterId} onClick={()=>setExpanded(!expanded)}>Filters{filterCount?' · '+filterCount:''}</button>
+    </div>
+    <div id={filterId} className={(expanded?'flex':'hidden')+' flex-wrap items-end gap-3 sm:flex'}>
       <label className="grid gap-1 text-xs font-semibold">Status<select className="workspace-field" value={params.status || ''} onChange={event => update({ status: event.target.value })}><option value="">All statuses</option>{statuses.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>
       {views.length > 0 && <label className="grid gap-1 text-xs font-semibold">View<select className="workspace-field" value={params.view || 'all'} onChange={event => update({ view: event.target.value, status: '' })}><option value="all">All records</option>{views.map(([value, label]) => <option key={value} value={value}>{label}</option>)}</select></label>}
       <label className="grid gap-1 text-xs font-semibold">{kind === 'documents' ? 'Uploaded from' : 'From'}<input type="date" className="workspace-field" value={params.startDate || ''} onChange={event => update({ startDate: event.target.value })} /></label>

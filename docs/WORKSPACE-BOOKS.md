@@ -59,7 +59,7 @@ Aging uses posting dates, payment dates and dated reversals through the selected
 3. Regenerate the backend client with `npm run db:generate` from `server`, then deploy the backend and frontend from this same release. The new Prisma client and routes require the migration first.
 4. Verify setup, an existing workspace's unchanged currency, invoice/bill details and aging in the intended environment before entering new books.
 
-The incremental upgrade was tested against a disposable database created from the pre-batch schema, including an existing posted ledger. The repository's older migration chain is incomplete; this release does not claim a fresh database can be rebuilt with all historical migrations. If SQL is applied manually in Neon, keep that fact in deployment records; do not blindly rerun it through Prisma migration deployment or reset the database.
+The incremental upgrade was tested against a disposable database created from the pre-batch schema, including an existing posted ledger. The later readiness release adds a complete empty-database baseline and bootstrap; see [RECOVERY.md](RECOVERY.md). Existing databases still use their known incremental process. If SQL is applied manually in Neon, keep that fact in deployment records; do not blindly rerun it through Prisma migration deployment or reset the database.
 
 On November 8, 2026, the user confirmed that this migration was applied in Neon and authorized publishing the backend and frontend. Deployment verification must distinguish that confirmation from read-only checks of the live application; the release does not create opening journals or correct real payments.
 

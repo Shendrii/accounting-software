@@ -90,6 +90,8 @@ async function handleResponse<T>(response: Response): Promise<T> {
 export type AccountRole = 'GENERAL' | 'CASH' | 'BANK' | 'ACCOUNTS_RECEIVABLE' | 'ACCOUNTS_PAYABLE' | 'CREDIT_CARD' | 'SALES_TAX';
 
 export interface Account {
+  reportingGroup?:string|null;
+  cashFlowCategory?:string|null;
   id: string;
   code: string;
   name: string;
@@ -191,6 +193,14 @@ export interface JournalLine {
 }
 
 export interface JournalEntry {
+  scheduleOccurrence?:{id:string};
+  scheduleReversalOccurrence?:{id:string};
+  createdById?: string | null;
+  lastPreparedById?: string | null;
+  lastPreparedAt?: string | null;
+  postedById?: string | null;
+  postedAt?: string | null;
+  controlOverrideReason?: string | null;
   id: string;
   date: string;
   description: string;
@@ -207,7 +217,7 @@ export interface JournalEntry {
   billPosting?: { id: string; billNo: string } | null;
   billPayment?: { bill: { id: string; billNo: string } } | null;
   reversalOfId?: string | null;
-  reversal?: { id: string } | null;
+  reversal?: { id: string;status?:string;date?:string } | null;
 }
 
 export interface CreateJournalLineInput {
@@ -228,7 +238,7 @@ export interface UpdateJournalEntryInput {
   date?: string;
   description?: string;
   referenceNo?: string;
-  status?: 'DRAFT' | 'POSTED' | 'ARCHIVED';
+  status?: 'DRAFT' | 'ARCHIVED';
   journalLines?: CreateJournalLineInput[];
 }
 
@@ -241,6 +251,8 @@ export interface JournalEntryFilters {
 /**
  * Get all journal entries with optional filters
  */
+export async function getJournalEntryPage(params:Record<string,string>):Promise<PageResult<JournalEntry>>{const response=await apiFetch(API_URL+'/api/journal-entries?'+new URLSearchParams(params));return handleResponse<PageResult<JournalEntry>>(response);}
+
 export async function getJournalEntries(filters?: JournalEntryFilters): Promise<JournalEntry[]> {
   const params = new URLSearchParams();
   if (filters?.status) params.append('status', filters.status);
@@ -310,9 +322,10 @@ export async function updateJournalEntry(
  * Post a journal entry (change status from DRAFT to POSTED)
  * This will also update account balances
  */
-export async function postJournalEntry(id: string): Promise<JournalEntry> {
+export async function postJournalEntry(id: string, controlOverrideReason?: string): Promise<JournalEntry> {
   const response = await fetch(`${API_URL}/api/journal-entries/${id}/post`, {
     method: 'POST',
+    headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ controlOverrideReason }),
   });
   return handleResponse<JournalEntry>(response);
 }
@@ -363,10 +376,14 @@ export interface ReceiptExtractedData {
 }
 
 export interface Receipt {
+  postingDate?: string | null;
   id: string;
   imageUrl: string;
   extractedData: ReceiptExtractedData;
-  status: 'PENDING' | 'APPROVED' | 'REJECTED';
+  status: 'PENDING' | 'APPROVED' | 'REJECTED' | 'REVERSED';
+  replacesReceiptId?: string | null;
+  replacement?: { id: string } | null;
+  correction?: { date: string; reason: string; createdById: string; reversalEntryId: string | null; kind: string } | null;
   journalEntryId: string | null;
   vendorId?: string | null;
   category?: string | null;
@@ -421,7 +438,7 @@ export async function getReceipt(id: string): Promise<Receipt> {
 
 export async function updateReceipt(
   id: string,
-  data: { extractedData?: ReceiptExtractedData; status?: string; vendorId?: string | null; category?: string | null; billId?: string | null }
+  data: { extractedData?: ReceiptExtractedData; status?: string; vendorId?: string | null; category?: string | null; billId?: string | null; postingDate?: string | null }
 ): Promise<Receipt> {
   const response = await fetch(`${API_URL}/api/receipts/${id}`, {
     method: 'PUT',
@@ -523,6 +540,8 @@ export async function fetchDashboard(): Promise<DashboardData> {
 }
 
 export interface CloseChecklist {
+  unverifiedBankAccounts: number;
+  closedThrough: string | null;
   draftJournalEntries: number;
   pendingReceipts: number;
   overdueInvoices: number;
@@ -675,6 +694,10 @@ export interface InvoicePayment extends PaymentHistory {
 }
 
 export interface Invoice {
+  taxCodeId?:string|null;
+  invoiceDetails?:{buyerTaxId?:string;buyerAddress?:string;serialReference?:string};
+  legalSnapshot?:Record<string,string>;
+  creditAllocations?:{id:string;creditId:string;date:string;amount:string;reversedDate?:string;credit?:{reference:string;source:string}}[];
   id: string;
   invoiceNo: string;
   customerId: string;
@@ -708,6 +731,8 @@ export interface InvoiceLineInput {
 }
 
 export interface CreateInvoiceInput {
+  taxCodeId?:string;
+  invoiceDetails?:{buyerTaxId?:string;buyerAddress?:string;serialReference?:string};
   customerId: string;
   date: string;
   dueDate: string;
@@ -782,11 +807,11 @@ export async function recordInvoicePayment(id: string, data: { paymentAccountId:
   return handleResponse<{ invoice: Invoice; journalEntry: JournalEntry }>(response);
 }
 
-export async function voidInvoice(id: string, date?: string): Promise<Invoice> {
+export async function voidInvoice(id: string, date?: string,reason?:string): Promise<Invoice> {
   const response = await fetch(`${API_URL}/api/invoices/${id}/void`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ date }),
+    body: JSON.stringify({ date,reason }),
   });
   return handleResponse<Invoice>(response);
 }
@@ -827,6 +852,9 @@ export interface BillLine {
 }
 
 export interface Bill {
+  tax?:string;
+  taxCodeId?:string|null;
+  creditAllocations?:Invoice['creditAllocations'];
   id: string;
   billNo: string;
   vendorInvoiceNo?: string | null;
@@ -846,6 +874,9 @@ export interface Bill {
   notes?: string | null;
   isRecurring?: boolean;
   recurrenceInterval?: string | null;
+  recurrenceAnchorDay?: number | null;
+  nextOccurrences?: string[];
+  scheduleError?: string;
   nextDueDate?: string | null;
   journalEntryId?: string | null;
   lines?: BillLine[];
@@ -862,6 +893,8 @@ export interface BillLineInput {
 }
 
 export interface CreateBillInput {
+  tax?:string;
+  taxCodeId?:string;
   vendorId: string;
   vendorInvoiceNo?: string;
   date: string;
@@ -870,6 +903,7 @@ export interface CreateBillInput {
   notes?: string;
   isRecurring?: boolean;
   recurrenceInterval?: string;
+  recurrenceAnchorDay?: number;
   nextDueDate?: string;
 }
 
@@ -925,8 +959,8 @@ export async function payBill(id: string, payment: { paymentAccountId: string; a
   return handleResponse<Bill>(response);
 }
 
-export async function voidBill(id: string): Promise<Bill> {
-  const response = await fetch(`${API_URL}/api/bills/${id}/void`, { method: 'POST' });
+export async function voidBill(id: string,details?:{date:string;reason:string}): Promise<Bill> {
+  const response = await fetch(`${API_URL}/api/bills/${id}/void`, { method: 'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(details??{}) });
   return handleResponse<Bill>(response);
 }
 
@@ -1165,9 +1199,9 @@ export async function sendAiMessage(message: string, context?: { tab: string; it
 
 // ==================== RECURRING API ====================
 
-export async function triggerRecurring(): Promise<{ created: number; details: string[] }> {
-  const response = await fetch(`${API_URL}/api/recurring/run`, { method: 'POST' });
-  return handleResponse<{ created: number; details: string[] }>(response);
+export async function triggerRecurring(requestId: string): Promise<{ created: number; details: string[]; remainingTemplates: number; replayed?: boolean }> {
+  const response = await fetch(`${API_URL}/api/recurring/run`, { method: 'POST', headers: { 'Content-Type': 'application/json' }, body: JSON.stringify({ requestId, kind: 'bill' }) });
+  return handleResponse<{ created: number; details: string[]; remainingTemplates: number; replayed?: boolean }>(response);
 }
 
 export async function getRecurringBills(): Promise<Bill[]> {
@@ -1195,13 +1229,16 @@ export interface AuthUser {
   email: string;
   name: string;
   avatarUrl?: string | null;
+  emailVerifiedAt?: string | null;
 }
 
 export interface AuthWorkspace {
   id: string;
   name: string;
   type: 'PERSONAL' | 'TEAM';
-  role: 'OWNER' | 'ADMIN' | 'MEMBER';
+  role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'APPROVER' | 'VIEWER';
+  memberCanPost?: boolean;
+  requireJournalApproval?: boolean;
   currency?: 'PHP' | 'USD';
   country?: 'PH' | 'US' | null;
   setupCompletedAt?: string | null;
@@ -1274,7 +1311,7 @@ export async function fetchWorkspaceInvitations(workspaceId: string): Promise<Wo
   return handleResponse<WorkspaceInvitation[]>(response);
 }
 
-export async function inviteWorkspaceMember(data: { workspaceId: string; email: string; role?: 'OWNER' | 'ADMIN' | 'MEMBER' }) {
+export async function inviteWorkspaceMember(data: { workspaceId: string; email: string; role?: Exclude<AuthWorkspace['role'], 'OWNER'> }) {
   const response = await fetch(`${API_URL}/api/workspaces/invite`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },

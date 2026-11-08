@@ -1,11 +1,13 @@
 'use client';
+import {useWorkspaces} from '@/app/components/WorkspaceProvider';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { useMoney } from '@/lib/use-money';
 
 import { useCallback, useState, type FormEvent } from 'react';
 import Link from 'next/link';
-import { ArrowLeftRight, BookOpenCheck, FileSpreadsheet, Landmark } from 'lucide-react';
+import { ArrowLeftRight, BookOpenCheck, Landmark } from 'lucide-react';
 import {
-  completeReconciliation, getAccounts, getReconciliationHistory, importBankTransactions, importCSVTransactions,
+  completeReconciliation, getAccounts, getReconciliationHistory, importBankTransactions,
   matchTransaction, postBankFee, reviewStatement, unmatchTransaction,
   type ReconciliationRecord, type StatementInput, type StatementReview,
 } from '@/lib/api';
@@ -13,6 +15,7 @@ import { decimalText, decimalUnits, localDay } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import { toast } from '@/lib/toast';
 import AccountingDialog from '@/app/components/AccountingDialog';
+import BankReconciliationTools from '@/app/components/BankReconciliationTools';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { WorkspaceHeading, WorkspaceMetric, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
@@ -37,9 +40,9 @@ function Amounts({ rows }: { rows: [string, string][] }) {
 }
 
 export function ReconciliationPage() {
-  const money = useMoney();
+  const money = useMoney();const{active}=useWorkspaces();const access=workspacePermissions(active);
   const accounts = useWorkspaceData(getAccounts);
-  const [tab, setTab] = useState<'reconcile' | 'history'>('reconcile');
+  const [tab, setTab] = useState<'reconcile' | 'history'>(access.prepare?'reconcile':'history');
   const [step, setStep] = useState(0);
   const [input, setInput] = useState<StatementInput>(() => ({
     accountId: '', statementStart: localDay().slice(0, 8) + '01', statementDate: localDay(), openingBalance: '', statementBalance: '', statementLineCount: '',
@@ -53,7 +56,7 @@ export function ReconciliationPage() {
   const [dialogError, setDialogError] = useState('');
   const loadHistory = useCallback(() => input.accountId ? getReconciliationHistory(input.accountId) : Promise.resolve([]), [input.accountId]);
   const history = useWorkspaceData(loadHistory);
-  const bankAccounts = accounts.data?.filter(account => account.isBankAccount && (tab === 'history' || account.isActive)) ?? [];
+  const bankAccounts = accounts.data?.filter(account => ['BANK','CREDIT_CARD'].includes(account.role) && (tab === 'history' || account.isActive)) ?? [];
   const prior = history.data?.find(item => item.proof);
   const expenseAccounts = accounts.data?.filter(account => account.type === 'EXPENSE' && account.isActive) ?? [];
 
@@ -143,35 +146,23 @@ export function ReconciliationPage() {
   }
 
   const accountSelect = <div className="grid gap-1 text-sm font-semibold">
-    <label htmlFor="statement-bank-account">Bank account</label>
+    <label htmlFor="statement-bank-account">Bank or credit-card account</label>
     <select id="statement-bank-account" className="workspace-field" value={input.accountId} required disabled={busy || accounts.loading}
       onChange={event => field('accountId', event.target.value)}>
-      <option value="">Select bank account…</option>
+      <option value="">Select bank or card account…</option>
       {bankAccounts.map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
     </select>
   </div>;
 
-  const importActions = input.accountId && <div className="flex flex-wrap items-center gap-2">
-    <label className="workspace-button cursor-pointer focus-within:ring-2 focus-within:ring-blue-700">
-      <FileSpreadsheet className="size-4" aria-hidden="true" />Import statement CSV
-      <input type="file" accept=".csv,text/csv" aria-label="Import statement CSV" className="sr-only" disabled={busy}
-        onChange={event => {
-          const file = event.currentTarget.files?.[0];
-          event.currentTarget.value = '';
-          if (file) void run(async () => {
-            const result = await importCSVTransactions(input.accountId, file);
-            setImportNote(result.imported ? result.imported + ' statement lines imported.' : 'These statement lines are already imported.');
-            await runRefresh();
-          });
-        }} />
-    </label>
+  const importActions = access.prepare&&input.accountId && <div className="flex flex-wrap items-center gap-2">
+    <BankReconciliationTools key={input.accountId} accountId={input.accountId} review={review} accounts={accounts.data??[]} onSaved={message=>{setImportNote(message);void runRefresh();}}/>
     <button type="button" className="workspace-button" disabled={busy} onClick={() => open({ kind: 'manual' })}>Add statement line</button>
   </div>;
 
   return <div className="workspace-page"><div className="workspace-content space-y-5">
     <WorkspaceHeading section="Daily work" title="Bank reconciliation" description="Match a bank statement to posted transactions and save the reconciliation proof." />
     <nav className="workspace-tabs" aria-label="Bank reconciliation views">
-      {(['reconcile', 'history'] as const).map(view => <button key={view} type="button" className="workspace-tab"
+      {(['reconcile', 'history'] as const).filter(view=>access.prepare||view==='history').map(view => <button key={view} type="button" className="workspace-tab"
         aria-current={tab === view ? 'page' : undefined} disabled={busy} onClick={() => { setTab(view); setError(''); }}>
         {view === 'reconcile' ? 'Reconcile' : 'History'}
       </button>)}
@@ -198,14 +189,14 @@ export function ReconciliationPage() {
         </li>)}
       </ol>
       {step === 0 && <div className="grid items-start gap-4 xl:grid-cols-[1.3fr_1fr]">
-        <WorkspacePanel title="Statement details" description="Use the dates and balances printed on your bank statement.">
+        <WorkspacePanel title="Statement details" description="Use the dates and balances printed on your statement. For cards, enter balances owed and charges as negative; payments as positive.">
           <form className="grid gap-4 p-4 sm:p-5" onSubmit={event => {
             event.preventDefault();
             void run(async () => { await loadReview(); setStep(1); });
           }}>
             {accountSelect}
             {!accounts.loading && !accounts.error && !bankAccounts.length && <p className="text-sm text-slate-600">
-              Mark an active asset as a bank account in <Link className="font-semibold text-blue-800 underline" href="/ledger?tab=accounts">Chart of accounts</Link>.
+              Create a Bank asset or Credit card liability account in <Link className="font-semibold text-blue-800 underline" href="/ledger?tab=accounts">Chart of accounts</Link>.
             </p>}
             {prior?.proof && <div className="flex flex-wrap items-center justify-between gap-2 rounded-lg bg-blue-50 p-3 text-sm text-blue-950">
               <p>Last statement ended {prior.statementDate.slice(0, 10)} with {money.format(prior.statementBalance)}.</p>
@@ -304,7 +295,7 @@ export function ReconciliationPage() {
           </WorkspaceNotice>}
         <div className="flex flex-wrap gap-2">
           <button type="button" className="workspace-button" disabled={busy} onClick={() => setStep(1)}>Back to matches</button>
-          <button type="button" className="workspace-primary" disabled={busy || !ready} onClick={() => void finish()}>
+          <button type="button" className="workspace-primary" disabled={busy || !ready||!access.post} onClick={() => void finish()}>
             {busy ? 'Saving…' : 'Complete reconciliation'}
           </button>
         </div>

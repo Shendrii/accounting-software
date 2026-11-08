@@ -58,6 +58,8 @@ function Dashboard() {
           <div className="grid gap-4 xl:grid-cols-[1.2fr_1fr]">
             <WorkspacePanel title="Needs attention" description="Go straight to the work that needs a decision.">
               <div className="divide-y divide-slate-200">
+                <WorkspaceRow icon={ReceiptText} title={dashboard?.sales ? formatCount(dashboard.sales.overdueCount, 'overdue invoice') : 'Overdue invoices'}
+                  detail={dashboard?.sales ? money.format(dashboard.sales.overdueBalance) + ' to follow up.' : 'Unavailable'} href="/sales/invoices?view=overdue" action="Follow up" />
                 <WorkspaceRow icon={Inbox} title={reviewCount === undefined ? 'Receipt review' : formatCount(reviewCount, 'receipt') + ' to review'}
                   detail={summary.error ? 'The inbox count is unavailable.' : 'Check extracted details before posting.'} href="/purchases/documents?status=PENDING" action="Review" />
                 <WorkspaceRow icon={ShoppingCart} title={purchases ? formatCount(purchases.overdueCount, 'overdue bill') : 'Overdue bills'}
@@ -66,13 +68,14 @@ function Dashboard() {
                   detail="Review imported statement transactions." href="/banking" action="Match" />
               </div>
             </WorkspacePanel>
-            <WorkspacePanel title="Period close" description="Current workspace checklist"
+            <WorkspacePanel title="Books review" description={close?.closedThrough ? 'Books closed through ' + close.closedThrough.slice(0,10) : 'No period has been signed off yet.'}
               action={<Link href="/ledger" className="workspace-text-action"><ArrowUpRight className="size-4" aria-hidden="true" />Checklist</Link>}>
               {close ? <>
                 <CloseProgress checklist={close} />
                 <div className="divide-y divide-slate-200">
                   <WorkspaceRow icon={BookOpenCheck} title={formatCount(close.draftJournalEntries, 'draft journal entry')} detail="Review entries before posting." href="/ledger?tab=journal" action="Open" />
-                  <WorkspaceRow icon={Wallet} title="Trial balance" detail={<WorkspaceStatus>{close.trialBalanceBalanced ? 'Complete' : 'Needs review'}</WorkspaceStatus>} href="/reports?tab=trial-balance" action="View" />
+                  <WorkspaceRow icon={Wallet} title="Trial balance" detail={<WorkspaceStatus>{close.trialBalanceBalanced ? 'Balanced' : 'Needs review'}</WorkspaceStatus>} href="/reports?tab=trial-balance" action="View" />
+                  <WorkspaceRow icon={Landmark} title={formatCount(close.unverifiedBankAccounts, 'bank/card account') + ' without a verified statement'} detail="No imported lines does not mean an account is reconciled." href="/banking" action="Review" />
                 </div>
               </> : <div className="p-4 text-sm text-slate-600">{summary.error
                 ? <WorkspaceNotice title="The close checklist could not load" onRetry={summary.retry} />

@@ -15,6 +15,7 @@ async function fixture() {
   const account = (code, type, role = 'GENERAL') => api('/accounts', 'POST', { code, name: code, type, role }, 201);
   return { api, account };
 }
+test('journal pagination filters before paging and full history retains actors and source links',options,async()=>{const{api,account}=await fixture(),cash=await account('1000','ASSET','CASH'),equity=await account('3000','EQUITY');const drafts=[];for(let i=0;i<3;i++)drafts.push(await api('/journal-entries','POST',{date:'2026-02-0'+(i+1),description:'Paged journal fixture '+i,referenceNo:'PAGE-'+i,journalLines:[{accountId:cash.id,debit:'1'},{accountId:equity.id,credit:'1'}]},201));await api('/journal-entries/'+drafts[0].id+'/post','POST',{});const page=await api('/journal-entries?page=1&pageSize=1&status=DRAFT&q=Paged');assert.equal(page.total,2);assert.equal(page.items.length,1);assert.equal(page.items[0].id,drafts[2].id);assert.equal((await api('/journal-entries?page=2&pageSize=1&status=DRAFT')).items[0].id,drafts[1].id);const detail=await api('/journal-entries/'+drafts[0].id);assert.equal(detail.actorNames[detail.postedById],'Workbench test');assert.deepEqual(detail.sourceLinks,[]);assert.equal((await api('/journal-entries?page=1&startDate=2026-02-03&endDate=2026-02-03')).total,1);});
 test('paged worklists sort exact balances, filter before paging, and preserve legacy responses', options, async () => {
   const { api, account } = await fixture();
   const cash = await account('1000', 'ASSET', 'BANK'); const ar = await account('1100', 'ASSET', 'ACCOUNTS_RECEIVABLE');
@@ -58,7 +59,7 @@ test('account activity ties opening and running balances to posted reports acros
   await api('/invoices/' + invoice.id + '/post', 'POST', { receivableAccountId: ar.id });
   const activity = await api('/reports/account-activity?accountId=' + revenue.id + '&endDate=2026-02-28');
   assert.equal(activity.closing, '-5.10'); assert.equal(activity.items[0].sources[0].href, '/sales/invoices/' + invoice.id);
-  await api('/invoices/' + invoice.id + '/void', 'POST', { date: '2026-02-02' });
+  await api('/invoices/' + invoice.id + '/void', 'POST', { date: '2026-02-02', reason:'Reviewed cancellation supported by fixture evidence' });
   const corrected = await api('/reports/account-activity?accountId=' + revenue.id + '&endDate=2026-02-28');
   assert.equal(corrected.closing, '0.00'); assert.equal(corrected.items.length, 2); assert.ok(corrected.items[1].reversalOfId);
   assert.equal(corrected.items[1].sources[0].href, '/sales/invoices/' + invoice.id);

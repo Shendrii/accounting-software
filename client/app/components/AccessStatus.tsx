@@ -12,7 +12,7 @@ export function AccessStatus({ title, description, icon: Icon, children, pending
   return (
     <div className="grid min-h-dvh place-items-center bg-slate-50 p-4">
       <section aria-labelledby="access-title" className="w-full max-w-md overflow-hidden rounded-2xl border border-slate-200 bg-white">
-        <div className="bg-[#101b34] p-4 sm:p-5">
+        <div className="border-b border-slate-200 bg-[#fafaf7] p-4 sm:p-5">
           <Link href="/" className="workspace-brand w-fit"><span className="workspace-brand-mark"><BookOpenCheck className="size-5" aria-hidden="true" /></span>{PRODUCT_NAME}</Link>
         </div>
         <div className="space-y-4 p-5 sm:p-6">

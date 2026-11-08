@@ -3,7 +3,7 @@ import { useMoney } from '@/lib/use-money';
 
 import React, { useState, useCallback } from 'react';
 import { useRouter, useSearchParams } from 'next/navigation';
-import { getAccounts, getCloseChecklist, getJournalEntries, postJournalEntry, reverseJournalEntry, type Account, type JournalEntry } from '@/lib/api';
+import { getAccounts, getJournalEntryPage, postJournalEntry, reverseJournalEntry, type Account, type JournalEntry, type PageResult } from '@/lib/api';
 import { decimalText, journalTotals, localDay } from '@/lib/money';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { PostingTable, postedLines } from '@/app/components/PostingTable';
@@ -15,13 +15,18 @@ import CreateJournalEntryForm from '@/app/components/CreateJournalEntryForm';
 import EditJournalEntryForm from '@/app/components/EditJournalEntryForm';
 import { Plus, BookOpen, FileText, Edit2, Search, X, ChevronRight, ChevronDown, DollarSign, Calendar, Hash } from 'lucide-react';
 import Link from 'next/link';
-import { closeItems, CloseProgress, WorkspaceStatus } from '@/app/components/WorkspaceActivity';
-import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
+import { WorkspaceHeading } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import PeriodClose from '@/app/components/PeriodClose';
+import {WorklistPagination} from '@/app/components/WorklistControls';
+import { useWorkspaces } from '@/app/components/WorkspaceProvider';
+import { workspacePermissions } from '@/lib/workspace-permissions';
 import { accountRoles } from '@/lib/account-roles';
 
 export function BookkeepingPage() {
   const money = useMoney();
+  const { active } = useWorkspaces();
+  const access = workspacePermissions(active);
   const searchParams = useSearchParams();
   const router = useRouter();
   const requestedTab = searchParams.get('tab');
@@ -33,24 +38,24 @@ export function BookkeepingPage() {
   const [journalAction, setJournalAction] = useState<{ entry: JournalEntry; kind: 'view' | 'post' | 'reverse' } | null>(null);
   const [journalBusy, setJournalBusy] = useState(false);
   const [journalError, setJournalError] = useState('');
+  const [journalSearch, setJournalSearch] = useState('');
+  const [journalStatusFilter, setJournalStatusFilter] = useState<string>('all');
+  const [journalStartDate, setJournalStartDate] = useState('');
+  const [journalEndDate, setJournalEndDate] = useState('');
+  const [journalPage,setJournalPage]=useState(1);
   const loadTab = useCallback(async () => {
-    if (activeTab === 'close') return { accounts: [] as Account[], entries: [] as JournalEntry[] };
+    if (activeTab === 'close') return { accounts: [] as Account[], entries: [] as JournalEntry[],pagination:null as PageResult<JournalEntry>|null };
     const [accounts, entries] = await Promise.all([
-      getAccounts(), activeTab === 'journal' ? getJournalEntries() : Promise.resolve([]),
+      getAccounts(), activeTab === 'journal' ? getJournalEntryPage({page:String(journalPage),pageSize:'25',q:journalSearch,status:journalStatusFilter==='all'?'':journalStatusFilter,startDate:journalStartDate,endDate:journalEndDate}) : Promise.resolve(null),
     ]);
-    return { accounts, entries };
-  }, [activeTab]);
+    return { accounts, entries:entries?.items??[],pagination:entries };
+  }, [activeTab,journalPage,journalSearch,journalStatusFilter,journalStartDate,journalEndDate]);
   const tabData = useWorkspaceData(loadTab);
   const accounts = tabData.data?.accounts ?? [];
   const journalEntries = tabData.data?.entries ?? [];
   const loading = tabData.loading;
   const error = tabData.error ? 'Ledger data could not load. Try again.' : null;
   const loadData = tabData.retry;
-  const loadChecklist = useCallback(() => activeTab === 'close' ? getCloseChecklist() : Promise.resolve(null), [activeTab]);
-  const close = useWorkspaceData(loadChecklist);
-  const closeChecklist = close.data;
-  const closeError = close.error;
-  const loadClose = close.retry;
   const [expandedSources, setExpandedSources] = useState<Set<string>>(new Set());
   
   // Account filters
@@ -60,10 +65,7 @@ export function BookkeepingPage() {
   const [expandedAccountTypes, setExpandedAccountTypes] = useState<Set<string>>(new Set(['ASSET', 'LIABILITY', 'EQUITY', 'REVENUE', 'EXPENSE']));
   
   // Journal entry filters
-  const [journalSearch, setJournalSearch] = useState('');
-  const [journalStatusFilter, setJournalStatusFilter] = useState<string>('all');
-  const [journalStartDate, setJournalStartDate] = useState('');
-  const [journalEndDate, setJournalEndDate] = useState('');
+
 
   function openJournal(entry: JournalEntry, kind: 'view' | 'post' | 'reverse') {
     setJournalError('');
@@ -79,7 +81,7 @@ export function BookkeepingPage() {
     setJournalError('');
     try {
       if (kind === 'post') {
-        await postJournalEntry(entry.id);
+        await postJournalEntry(entry.id, String(fields.get('controlOverrideReason') || ''));
         toast.success('Journal entry posted');
       } else {
         await reverseJournalEntry(entry.id, { date: String(fields.get('date')), reason: String(fields.get('reason')) });
@@ -87,7 +89,6 @@ export function BookkeepingPage() {
       }
       setJournalAction(null);
       await loadData();
-      loadClose();
     } catch (err) {
       setJournalError(err instanceof Error ? err.message : 'Unable to save the journal entry.');
     } finally {
@@ -122,20 +123,7 @@ export function BookkeepingPage() {
   });
 
   // Filter journal entries
-  const filteredJournalEntries = journalEntries.filter((entry) => {
-    const matchesSearch = 
-      journalSearch === '' ||
-      entry.description.toLowerCase().includes(journalSearch.toLowerCase()) ||
-      (entry.referenceNo || '').toLowerCase().includes(journalSearch.toLowerCase());
-    
-    const matchesStatus = journalStatusFilter === 'all' || entry.status === journalStatusFilter;
-    
-    const entryDate = new Date(entry.date);
-    const matchesStartDate = !journalStartDate || entryDate >= new Date(journalStartDate);
-    const matchesEndDate = !journalEndDate || entryDate <= new Date(journalEndDate);
-    
-    return matchesSearch && matchesStatus && matchesStartDate && matchesEndDate;
-  });
+  const filteredJournalEntries=journalEntries;
 
   const clearAccountFilters = () => {
     setAccountSearch('');
@@ -144,6 +132,7 @@ export function BookkeepingPage() {
   };
 
   const clearJournalFilters = () => {
+    setJournalPage(1);
     setJournalSearch('');
     setJournalStatusFilter('all');
     setJournalStartDate('');
@@ -177,42 +166,20 @@ export function BookkeepingPage() {
       <div className="workspace-content">
         <div className="mb-5 space-y-4">
           <WorkspaceHeading section="Books and reporting" title="Accounting" description="Work through open items and review the posted ledger."
-            actions={<button type="button" className="workspace-primary" onClick={() => {
+            actions={access.prepare&&<button type="button" className="workspace-primary" onClick={() => {
               setShowCreateJournalForm(true);
               router.push('/ledger?tab=journal', { scroll: false });
             }}><Plus className="size-4" aria-hidden="true" />New journal entry</button>} />
           <nav aria-label="Ledger views" className="workspace-tabs">
             <Link href="/ledger" className="workspace-tab" aria-current={activeTab === 'close' ? 'page' : undefined}>Close checklist</Link>
             <Link href="/ledger?tab=accounts" className="workspace-tab" aria-current={activeTab === 'accounts' ? 'page' : undefined}>Chart of accounts</Link>
+            <Link href="/ledger/schedules" className="workspace-tab">Accounting schedules</Link>
             <Link href="/ledger?tab=journal" className="workspace-tab" aria-current={activeTab === 'journal' ? 'page' : undefined}>Journal entries</Link>
           </nav>
         </div>
 
         {activeTab === 'close' ? (
-          <WorkspacePanel title="Close checklist" description="Review open items in the current workspace.">
-            {closeChecklist ? <>
-              <CloseProgress checklist={closeChecklist} />
-              <ul className="divide-y divide-slate-200">
-                {closeItems.map(([key, label, href]) => (
-                  <li key={key} className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
-                    <span className="min-w-24 flex-1 text-sm font-semibold">{label}</span>
-                    <span className="text-sm text-slate-600 tabular-nums">{closeChecklist[key]} open</span>
-                    <WorkspaceStatus>{closeChecklist[key] === 0 ? 'Complete' : 'Open item'}</WorkspaceStatus>
-                    <Link href={href} className="workspace-text-action" aria-label={'View ' + label.toLowerCase()}>View</Link>
-                  </li>
-                ))}
-                <li className="flex flex-wrap items-center gap-2 px-4 py-3 sm:px-5">
-                  <span className="min-w-24 flex-1 text-sm font-semibold">Trial balance</span>
-                  <WorkspaceStatus>{closeChecklist.trialBalanceBalanced ? 'Complete' : 'Needs review'}</WorkspaceStatus>
-                  <Link href="/reports?tab=trial-balance" className="workspace-text-action">View report</Link>
-                </li>
-              </ul>
-              {closeChecklist.lastReconciliationAt && <p className="border-t border-slate-200 p-4 text-sm text-slate-600">Last reconciliation: {closeChecklist.lastReconciliationAt.slice(0, 10)}</p>}
-            </> : <div className="flex flex-wrap items-center gap-3 p-4 text-sm text-slate-600">
-              <p role="status">{closeError ? 'The close checklist could not load.' : 'Loading close checklist…'}</p>
-              {closeError && <button type="button" className="workspace-button" onClick={loadClose}>Retry</button>}
-            </div>}
-          </WorkspacePanel>
+          <PeriodClose />
         ) : activeTab === 'accounts' ? (
           <div className="space-y-6">
             <p className="rounded-xl border border-blue-100 bg-blue-50 p-4 text-sm text-blue-950">Set account roles before posting: receivables for invoices, one active payable account for bills, and cash, bank, or credit card accounts for payments. General assets cannot be used as payment accounts.</p>
@@ -228,7 +195,7 @@ export function BookkeepingPage() {
                 </p>
               </div>
               <button
-                onClick={() => setShowCreateForm(!showCreateForm)}
+                disabled={!access.manageBooks} onClick={() => setShowCreateForm(!showCreateForm)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
               >
                 <Plus className="h-4 w-4" />
@@ -237,7 +204,7 @@ export function BookkeepingPage() {
             </div>
 
             {/* Create Form */}
-            {showCreateForm && (
+            {showCreateForm&&access.manageBooks && (
               <div className="mb-6">
                 <CreateAccountForm
                   onSuccess={() => {
@@ -250,7 +217,7 @@ export function BookkeepingPage() {
             )}
 
             {/* Edit Form */}
-            {editingAccount && (
+            {editingAccount&&access.manageBooks && (
               <div className="mb-6">
                 <EditAccountForm
                   account={editingAccount}
@@ -337,7 +304,7 @@ export function BookkeepingPage() {
                 </p>
                 {accounts.length === 0 && (
                   <button
-                    onClick={() => setShowCreateForm(true)}
+                    disabled={!access.manageBooks} onClick={() => setShowCreateForm(true)}
                     className="inline-flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
                   >
                     <Plus className="h-4 w-4" />
@@ -447,7 +414,7 @@ export function BookkeepingPage() {
                                   </td>
                                   <td className="px-6 py-4 text-right">
                                     <button
-                                      onClick={() => setEditingAccount(account)}
+                                      disabled={!access.manageBooks} title={!access.manageBooks?'Owner or admin access required':'Edit account'} onClick={() => setEditingAccount(account)}
                                       className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
                                     >
                                       <Edit2 className="h-4 w-4" />
@@ -496,7 +463,7 @@ export function BookkeepingPage() {
                             </td>
                             <td className="px-6 py-4 text-right">
                               <button
-                                onClick={() => setEditingAccount(account)}
+                                disabled={!access.manageBooks} title={!access.manageBooks?'Owner or admin access required':'Edit account'} onClick={() => setEditingAccount(account)}
                                 className="text-zinc-600 dark:text-zinc-400 hover:text-zinc-900 dark:hover:text-zinc-50 transition-colors"
                               >
                                 <Edit2 className="h-4 w-4" />
@@ -520,21 +487,20 @@ export function BookkeepingPage() {
                   Journal Entries
                 </h2>
                 <p className="text-sm text-zinc-600 dark:text-zinc-400 mt-1">
-                  {filteredJournalEntries.length} {filteredJournalEntries.length === 1 ? 'entry' : 'entries'}
-                  {filteredJournalEntries.length !== journalEntries.length && ` of ${journalEntries.length} total`}
+                  {tabData.data?.pagination?.total??0} entries · Page {journalPage}
                 </p>
               </div>
-              <button
+              {access.prepare&&<button
                 onClick={() => setShowCreateJournalForm(!showCreateJournalForm)}
                 className="flex items-center gap-2 px-4 py-2 bg-blue-700 text-white rounded-lg hover:bg-blue-800 transition-colors text-sm font-medium"
               >
                 <Plus className="h-4 w-4" />
                 {showCreateJournalForm ? 'Cancel' : 'New Entry'}
-              </button>
+              </button>}
             </div>
 
             {/* Create Journal Entry Form */}
-            {showCreateJournalForm && (
+            {showCreateJournalForm&&access.prepare && (
               <div className="mb-6">
                 <CreateJournalEntryForm
                   onSuccess={() => {
@@ -570,8 +536,9 @@ export function BookkeepingPage() {
                       <input
                         type="text"
                         placeholder="Search by description or reference number..."
+                        aria-label="Search journal entries"
                         value={journalSearch}
-                        onChange={(e) => setJournalSearch(e.target.value)}
+                        onChange={(e) => {setJournalPage(1);setJournalSearch(e.target.value);}}
                         className="w-full pl-10 pr-4 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
                       />
                     </div>
@@ -579,7 +546,8 @@ export function BookkeepingPage() {
                   <div className="w-full md:w-48">
                     <select
                       value={journalStatusFilter}
-                      onChange={(e) => setJournalStatusFilter(e.target.value)}
+                      aria-label="Journal status"
+                      onChange={(e) => {setJournalPage(1);setJournalStatusFilter(e.target.value);}}
                       className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
                     >
                       <option value="ALL">All Status</option>
@@ -596,8 +564,9 @@ export function BookkeepingPage() {
                     </label>
                     <input
                       type="date"
+                      aria-label="Journal start date"
                       value={journalStartDate}
-                      onChange={(e) => setJournalStartDate(e.target.value)}
+                      onChange={(e) => {setJournalPage(1);setJournalStartDate(e.target.value);}}
                       className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
                     />
                   </div>
@@ -607,8 +576,9 @@ export function BookkeepingPage() {
                     </label>
                     <input
                       type="date"
+                      aria-label="Journal end date"
                       value={journalEndDate}
-                      onChange={(e) => setJournalEndDate(e.target.value)}
+                      onChange={(e) => {setJournalPage(1);setJournalEndDate(e.target.value);}}
                       className="w-full px-3 py-2 border border-zinc-300 dark:border-zinc-700 rounded-lg bg-white dark:bg-zinc-950 text-zinc-900 dark:text-zinc-50 focus:outline-none focus:ring-2 focus:ring-zinc-500 text-sm"
                     />
                   </div>
@@ -732,19 +702,10 @@ export function BookkeepingPage() {
                             <td className="px-6 py-4 whitespace-nowrap text-right">
                               <div className="flex justify-end gap-3">
                                 {sourceLabels.length > 0 && <button onClick={() => setExpandedSources((current) => { const next = new Set(current); if (next.has(entry.id)) next.delete(entry.id); else next.add(entry.id); return next; })} className="text-xs font-medium text-blue-600 hover:underline">View source</button>}
-                                {entry.status === 'POSTED' ? (
-                                  <>
-                                    <button type="button" onClick={() => openJournal(entry, 'view')} className="min-h-10 text-sm font-medium text-blue-700 underline">View entry</button>
-                                    {!sourceLabels.length && !entry.reversalOfId && !entry.reversal && (
-                                      <button type="button" onClick={() => openJournal(entry, 'reverse')} className="min-h-10 text-sm font-medium text-zinc-700 underline">Reverse entry</button>
-                                    )}
-                                  </>
-                                ) : (
-                                  <>
-                                    <button type="button" aria-label="Edit entry" onClick={() => setEditingJournalEntry(entry)} className="min-h-10 p-2 text-zinc-600 hover:text-zinc-900"><Edit2 className="h-4 w-4" aria-hidden="true" /></button>
-                                    {entry.status === 'DRAFT' && <button type="button" onClick={() => openJournal(entry, 'post')} className="min-h-10 rounded-lg bg-blue-700 px-3 text-sm font-medium text-white hover:bg-blue-800">Post entry</button>}
-                                  </>
-                                )}
+                                <Link className="workspace-text-action min-h-11" href={'/ledger/entries/'+entry.id}>History & source</Link>
+                                {entry.status==='DRAFT'&&access.prepare&&!entry.scheduleOccurrence&&!entry.scheduleReversalOccurrence&&!sourceLabels.length&&<button type="button" aria-label="Edit entry" onClick={()=>setEditingJournalEntry(entry)} className="min-h-11 p-2"><Edit2 className="size-4" aria-hidden="true"/></button>}
+                                {entry.status==='DRAFT'&&access.post&&!sourceLabels.length&&<button type="button" onClick={()=>openJournal(entry,'post')} className="workspace-primary">Post entry</button>}
+
                               </div>
                             </td>
                           </tr>
@@ -759,6 +720,7 @@ export function BookkeepingPage() {
                 </div>
               </div>
             )}
+            <WorklistPagination data={tabData.data?.pagination??null} loading={loading} onPage={setJournalPage}/>
           </div>
         )}
       </div>
@@ -768,8 +730,9 @@ export function BookkeepingPage() {
         onDismiss={() => setJournalAction(null)}
       >
         <p className="mb-2 text-sm text-zinc-600">{journalAction.entry.description}</p>
+        <p className="mb-3 break-words text-xs text-slate-600">Prepared by {journalAction.entry.lastPreparedById || journalAction.entry.createdById || 'Not recorded in this legacy entry'}{journalAction.entry.postedById && ' · Posted by ' + journalAction.entry.postedById}{journalAction.entry.postedAt && ' · ' + new Date(journalAction.entry.postedAt).toLocaleString()}</p>
         <PostingTable lines={postedLines(journalAction.entry).map(line => journalAction.kind === 'reverse' ? { ...line, debit: line.credit, credit: line.debit } : line)} />
-        {journalAction.entry.reversal && <p className="mt-2 text-sm text-zinc-600">A linked reversal has been posted.</p>}
+        {journalAction.entry.reversal && <p className="mt-2 text-sm text-zinc-600">{journalAction.entry.reversal.status==='POSTED'?'A linked reversal has been posted.':'A linked reversal draft is awaiting review.'}</p>}
         {journalAction.kind !== 'view' && <form onSubmit={saveJournal} className="mt-4 grid gap-3">
           {journalAction.kind === 'reverse' && <>
             <label className="grid gap-1 text-sm font-medium">Reversal date<input type="date" name="date" min={journalAction.entry.date.slice(0, 10)}
@@ -777,6 +740,7 @@ export function BookkeepingPage() {
               required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
             <label className="grid gap-1 text-sm font-medium">Reason<input name="reason" required className="min-h-11 rounded-lg border border-zinc-300 px-3" /></label>
           </>}
+          {journalAction.kind === 'post' && journalAction.entry.journalLines.some(line => ['ACCOUNTS_RECEIVABLE','ACCOUNTS_PAYABLE'].includes(line.account?.role || '')) && <label className="grid gap-1.5 text-sm font-semibold">Owner-only control-account override reason<textarea name="controlOverrideReason" className="workspace-field min-h-24" minLength={5} maxLength={1000} required /><span className="text-xs font-normal text-amber-900">Prefer a customer/supplier adjustment. This manual posting can create an aging-to-ledger difference that must be supported before closing.</span></label>}
           <p className="text-sm text-zinc-600">Total debits and credits · {money.format(decimalText(journalTotals(journalAction.entry.journalLines).totalDebits))} each</p>
           {journalError && <p className="rounded-lg bg-red-50 p-3 text-sm text-red-800" role="alert">{journalError}</p>}
           <div className="flex justify-end gap-2">

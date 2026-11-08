@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { Decimal, LedgerError, ledgerDate, nextDay } from './ledger.js';
+import { occurrences } from './recurrence.js';
 
 function scalar(query, key, fallback = '') {
   const value = query[key] ?? fallback;
@@ -34,7 +35,7 @@ export async function documentPage(client, workspaceId, kind, query) {
   const options = pageOptions(query);
   const invoice = kind === 'invoice';
   const table = Prisma.raw(invoice ? '"Invoice"' : '"Bill"');
-  const paymentTable = Prisma.raw(invoice ? '"InvoicePayment"' : '"BillPayment"');
+  const paymentTable = Prisma.raw('"SettlementApplication"');
   const paymentKey = Prisma.raw(invoice ? '"invoiceId"' : '"billId"');
   const contactTable = Prisma.raw(invoice ? '"Customer"' : '"Vendor"');
   const contactKey = Prisma.raw(invoice ? '"customerId"' : '"vendorId"');
@@ -52,20 +53,20 @@ export async function documentPage(client, workspaceId, kind, query) {
   if (!Object.hasOwn(sorts, sort)) throw new LedgerError('Choose a valid sort column.');
   const ordering = Prisma.sql`${Prisma.raw(sorts[sort])} ${Prisma.raw(options.direction.toUpperCase())}, "id" ${Prisma.raw(options.direction.toUpperCase())}`;
   const paid = invoice ? Prisma.sql`CASE WHEN d."status" = 'PAID' AND d."postingEntryId" IS NULL THEN d."total" ELSE COALESCE(p.paid, 0) END`
-    : Prisma.sql`CASE WHEN d."status" = 'PAID' AND p.paid IS NULL THEN d."total" ELSE COALESCE(p.paid, 0) END`;
+    : Prisma.sql`CASE WHEN d."status" = 'PAID' AND d."postingEntryId" IS NULL AND p.paid IS NULL THEN d."total" ELSE COALESCE(p.paid, 0) END`;
   const referenceSearch = invoice ? Prisma.empty : Prisma.sql`OR COALESCE("vendorInvoiceNo", '') ILIKE ${searchPattern(options.q)}`;
   const [result] = await client.$queryRaw`
     WITH payments AS (
       SELECT p.${paymentKey} AS document_id, SUM(p."amount") AS paid
       FROM ${paymentTable} p JOIN ${table} d ON d."id" = p.${paymentKey}
-      WHERE d."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL GROUP BY p.${paymentKey}
+      WHERE d."workspaceId" = ${workspaceId} AND p."reversedDate" IS NULL GROUP BY p.${paymentKey}
     ), documents AS (
       SELECT d.*, d.${reference} AS reference, c."name" AS "contactName", c."id" AS "contactId", ${paid} AS paid
       FROM ${table} d JOIN ${contactTable} c ON c."id" = d.${contactKey} AND c."workspaceId" = ${workspaceId}
       LEFT JOIN payments p ON p.document_id = d."id" WHERE d."workspaceId" = ${workspaceId}
     ), balances AS (
       SELECT d.*, CASE WHEN d."status" = 'VOID' THEN 0 ELSE d."total" - d.paid END AS remaining,
-        (d."status"::text = ${invoice ? 'SENT' : 'RECEIVED'} AND d."postingEntryId" IS NOT NULL AND d."total" > d.paid) AS open
+        (d."status"::text IN (${invoice ? 'SENT' : 'RECEIVED'},'PAID') AND d."postingEntryId" IS NOT NULL AND d."total" > d.paid) AS open
       FROM documents d
     ), filtered AS (
       SELECT * FROM balances WHERE true
@@ -91,13 +92,17 @@ export async function documentPage(client, workspaceId, kind, query) {
         ORDER BY p.position) FROM page p), '[]'::jsonb) AS items
   `;
   result.items = result.items.map(row => ({ ...row, total: new Decimal(row.total).toFixed(2), amountPaid: new Decimal(row.amountPaid).toFixed(2), balanceDue: new Decimal(row.balanceDue).toFixed(2) }));
+  if (!invoice && view === 'recurring') result.items = result.items.map(row => {
+    try { return { ...row, nextOccurrences: occurrences(row.nextDueDate, row.recurrenceInterval ?? 'monthly', row.recurrenceAnchorDay) }; }
+    catch { return { ...row, nextOccurrences: [], scheduleError: 'Review this schedule before generating drafts.' }; }
+  });
   return envelope(options, result);
 }
 
 export async function receiptPage(client, workspaceId, query) {
   const options = pageOptions(query);
   const status = scalar(query, 'status');
-  if (status && !['PENDING', 'APPROVED', 'REJECTED'].includes(status)) throw new LedgerError('Choose a valid receipt status.');
+  if (status && !['PENDING', 'APPROVED', 'REJECTED', 'REVERSED'].includes(status)) throw new LedgerError('Choose a valid receipt status.');
   const sort = scalar(query, 'sort', 'date');
   const sorts = { date: '"createdAt"', vendor: 'vendor', total: 'total' };
   if (!Object.hasOwn(sorts, sort)) throw new LedgerError('Choose a valid receipt sort column.');

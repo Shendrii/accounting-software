@@ -1,9 +1,12 @@
 import { API_BASE_URL, apiFetch } from './api';
 
 export type WorkspaceProfile = {
-  id: string; name: string; role: 'OWNER' | 'ADMIN' | 'MEMBER'; legalName: string | null;
+  id: string; name: string; role: 'OWNER' | 'ADMIN' | 'MEMBER' | 'APPROVER' | 'VIEWER'; legalName: string | null;
   country: 'PH' | 'US' | null; currency: 'PHP' | 'USD'; entityType: string | null; region: string | null;
   fiscalYearStartMonth: number; booksStartDate: string | null; accountingBasis: string;
+  separateCloseReviewer?: boolean;
+  memberCanPost?: boolean;
+  requireJournalApproval?: boolean;
   taxSettings: { vatStatus?: string; withholdingAgent?: boolean; salesTaxRegistered?: boolean; salesTaxJurisdictions?: string; contractorTracking?: boolean } | null;
   setupCompletedAt: string | null; currencyLocked: boolean; openingEligible: boolean;
   openingBalance: { id: string; asOfDate: string; currency: string; createdAt: string; snapshot: OpeningPreview } | null;
@@ -21,7 +24,7 @@ export type OpeningPreview = {
 export type AgingReport = {
   kind: 'receivables' | 'payables'; asOf: string; currency: string; basis: string; agingBy: string;
   page: number; pageSize: number; total: number; totalPages: number;
-  items: { id: string; reference: string; partyId: string; partyName: string; date: string; dueDate: string; originalAmount: string; paidAsOf: string; balance: string; age: number; bucket: string; isOpeningBalance: boolean }[];
+  items: { recordType?:'DOCUMENT'|'CREDIT';id: string; reference: string; partyId: string; partyName: string; date: string; dueDate: string; originalAmount: string; paidAsOf: string; balance: string; age: number; bucket: string; isOpeningBalance: boolean }[];
   parties: { partyId: string; partyName: string; balance: string; debits: string; credits: string; documents: number; buckets: Record<string, string> }[];
   totals: { net: string; debits: string; credits: string }; buckets: Record<string, string>;
   reconciliation: { controls: { accountId: string; code: string; name: string; ledgerBalance: string; subledgerBalance: string; difference: string }[];

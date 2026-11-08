@@ -94,8 +94,8 @@ body {
 }
 .workspace-page { background: var(--prism-paper); }
 .workspace-sidebar { background: var(--prism-paper); border-right: 1px solid var(--prism-rule); }
-.workspace-brand { color: var(--prism-ink); letter-spacing: -.035em; }
-.workspace-brand-mark { border-radius: 0; background: var(--prism-blue); }
+.workspace-brand { color: var(--prism-ink, #181b25); letter-spacing: -.035em; }
+.workspace-brand-mark { border-radius: 0; background: var(--prism-blue, #1546ce); }
 .workspace-topbar { border-color: var(--prism-rule); }
 .workspace-heading { padding: 8px 0 24px; border: 0; border-bottom: 1px solid var(--prism-rule); border-radius: 0; background: transparent; }
 .workspace-heading h1 { margin: 0; font-size: clamp(1.65rem, 2.5vw, 2rem); letter-spacing: -.03em; }
@@ -105,8 +105,8 @@ body {
 .workspace-nav-link:hover { background: #e7edfc; color: var(--prism-ink); }
 .workspace-nav-link[aria-current="page"], .workspace-nav-link[data-active="true"] { background: var(--prism-blue); color: white; border-color: var(--prism-blue); }
 .workspace-button, .workspace-primary, .workspace-field { border-radius: 0; min-height: 42px; }
-.workspace-primary { background: var(--prism-blue); border-color: var(--prism-blue); }
-.workspace-text-action { color: var(--prism-blue); border-radius: 0; text-underline-offset: 4px; }
+.workspace-primary { background: var(--prism-blue, #1546ce); border-color: var(--prism-blue, #1546ce); }
+.workspace-text-action { color: var(--prism-blue, #1546ce); border-radius: 0; text-underline-offset: 4px; }
 .workspace-tab { padding-inline: 16px; }
 .workspace-tabs { border-color: var(--prism-rule); }
 .workspace-table th { color: #565d69; background: var(--prism-paper); text-transform: none; letter-spacing: 0; }

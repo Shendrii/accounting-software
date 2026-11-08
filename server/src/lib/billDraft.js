@@ -1,5 +1,8 @@
 import { Decimal, LedgerError, decimalInput, decimalSum, ledgerAccounts, ledgerDate } from './ledger.js';
 import { purchaseAccount } from './accountRoles.js';
+import {audit} from './audit.js';
+import { scheduleInput } from './recurrence.js';
+import {taxDraft,taxCode} from './tax.js';
 
 export function vendorReference(value) {
   if (value == null || value === '') return null;
@@ -55,21 +58,25 @@ export function checkDates(date, dueDate) {
 }
 
 export async function createDraftBill(tx, workspaceId, input, include) {
-  const { vendorId, notes, isRecurring, recurrenceInterval, nextDueDate } = input;
+  const { vendorId, notes, isRecurring } = input;
   const date = ledgerDate(input.date, 'Bill date');
   const dueDate = ledgerDate(input.dueDate, 'Due date');
   checkDates(date, dueDate);
+  if (isRecurring !== undefined && typeof isRecurring !== 'boolean') throw new LedgerError('Confirm whether this bill repeats.');
+  const schedule = isRecurring ? scheduleInput(input, date) : { recurrenceInterval: null, recurrenceAnchorDay: null, nextDueDate: null };
   await checkVendor(tx, workspaceId, vendorId);
   const vendorInvoiceNo = vendorReference(input.vendorInvoiceNo);
   await checkPaidReceiptReference(tx, workspaceId, vendorId, vendorInvoiceNo);
   const draft = await draftLines(tx, workspaceId, input.lines);
-  return tx.bill.create({
+  const tax=taxDraft(input);const code=await taxCode(tx,workspaceId,tax.taxCodeId,'INPUT',date);
+  if(tax.tax.gt(0)&&(!code||code.purpose==='EXEMPT'))throw new LedgerError('Positive recoverable purchase tax needs an active input-tax code. Include nonrecoverable tax in the expense or asset line instead.');
+  const created=await tx.bill.create({
     data: {
       workspaceId, vendorId, billNo: await generateBillNo(tx, workspaceId), vendorInvoiceNo,
-      date, dueDate, total: draft.total, notes, isRecurring: Boolean(isRecurring),
-      recurrenceInterval: isRecurring ? recurrenceInterval ?? 'monthly' : null,
-      nextDueDate: isRecurring && nextDueDate ? ledgerDate(nextDueDate, 'Next due date') : null,
+      date, dueDate, total: draft.total.plus(tax.tax),...tax, notes, isRecurring: Boolean(isRecurring),
+      ...schedule,
       lines: { create: draft.lines },
     }, include,
   });
+  await audit(tx,workspaceId,'BILL_DRAFT_CREATED',created.id,{after:created});return created;
 }

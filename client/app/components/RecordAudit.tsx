@@ -1,0 +1,2 @@
+'use client';import {useState} from 'react';import AuditHistory from './AuditHistory';
+export default function RecordAudit({entityId}:{entityId:string}){const[open,setOpen]=useState(false);return <details className="workspace-panel p-4" onToggle={e=>setOpen(e.currentTarget.open)}><summary className="cursor-pointer text-sm font-semibold">Source preparation and change history</summary>{open&&<div className="mt-4"><AuditHistory entityId={entityId}/></div>}</details>;}

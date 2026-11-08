@@ -1,0 +1,13 @@
+import {LedgerError,ledgerDate,nextDay} from './ledger.js';import {pageOptions} from './workbenchQueries.js';
+export async function taxRegister(tx,workspace,query,exportAll=false){const p=pageOptions(query),start=ledgerDate(query.startDate??new Date().toISOString().slice(0,4)+'-01-01'),end=nextDay(query.endDate??new Date().toISOString()),purpose=String(query.purpose??'');if(start>=end)throw new LedgerError('The register ending date must follow its starting date.');if(purpose&&!['OUTPUT','INPUT','WITHHOLDING_RECEIVABLE','WITHHOLDING_PAYABLE','EXEMPT'].includes(purpose))throw new LedgerError('Choose a valid tax purpose.');const limit=exportAll?10001:p.pageSize,offset=exportAll?0:p.offset;
+const [r]=await tx.$queryRaw`WITH records AS (SELECT t.*,j."referenceNo",r.date AS "reversalDate",
+ (CASE WHEN t.date>=${start.toISOString()}::timestamp AND t.date<${end.toISOString()}::timestamp THEN t.amount ELSE 0 END) AS posted,
+ (CASE WHEN r.date>=${start.toISOString()}::timestamp AND r.date<${end.toISOString()}::timestamp THEN -t.amount ELSE 0 END) AS reversed
+ FROM "TaxRecord" t JOIN "JournalEntry" j ON j.id=t."postingEntryId" AND j."workspaceId"=${workspace.id} AND j.status='POSTED'
+ LEFT JOIN "JournalEntry" r ON r."reversalOfId"=j.id AND r.status='POSTED' AND r.date<${end.toISOString()}::timestamp
+ WHERE t."workspaceId"=${workspace.id} AND (${purpose}='' OR t."codeSnapshot"->>'purpose'=${purpose}) AND (t.date>=${start.toISOString()}::timestamp AND t.date<${end.toISOString()}::timestamp OR r.date>=${start.toISOString()}::timestamp AND r.date<${end.toISOString()}::timestamp)),
+ selected AS (SELECT * FROM records ORDER BY date DESC,id LIMIT ${limit} OFFSET ${offset})
+ SELECT (SELECT count(*)::integer FROM records) AS total,COALESCE((SELECT jsonb_agg((to_jsonb(s)-'posted'-'reversed')||jsonb_build_object('baseAmount',s."baseAmount"::text,'amount',s.amount::text,'netAmount',(s.posted+s.reversed)::text) ORDER BY date DESC,id) FROM selected s),'[]'::jsonb) AS items,
+ (SELECT count(*)::integer FROM records WHERE "evidenceStatus"='PENDING' AND "reversalDate" IS NULL) AS pending,
+ COALESCE((SELECT jsonb_object_agg(purpose,amount) FROM (SELECT "codeSnapshot"->>'purpose' AS purpose,sum(posted+reversed)::text AS amount FROM records GROUP BY "codeSnapshot"->>'purpose') totals),'{}'::jsonb) AS "purposeTotals"`;
+if(exportAll&&r.total>10000)throw new LedgerError('Narrow the dates or tax purpose to export at most 10,000 tax records.',409);return {items:r.items,total:r.total,page:p.page,totalPages:Math.max(1,Math.ceil(r.total/p.pageSize)),summary:{pendingEvidence:r.pending,purposeTotals:r.purposeTotals},currency:workspace.currency};}

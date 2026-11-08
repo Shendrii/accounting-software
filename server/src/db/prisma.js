@@ -18,12 +18,7 @@ const SCOPED_MODELS = new Set([
 function mergeWorkspaceWhere(where, workspaceId) {
   if (!workspaceId) return where ?? {};
   if (!where) return { workspaceId };
-  if (where.workspaceId) return where;
   return { AND: [where, { workspaceId }] };
-}
-
-function modelDelegateName(model) {
-  return model.charAt(0).toLowerCase() + model.slice(1);
 }
 
 const prisma = basePrisma.$extends({
@@ -37,11 +32,12 @@ const prisma = basePrisma.$extends({
 
         const merge = (where) => mergeWorkspaceWhere(where, workspaceId);
 
-        if (operation === 'findUnique') {
-          const key = modelDelegateName(model);
-          return basePrisma[key].findFirst({
+        if (['findUnique','findUniqueOrThrow','update','delete','upsert'].includes(operation)) {
+          // Keep the operation on its transaction client. Calling basePrisma here
+          // escapes the transaction and cannot see its uncommitted corrections.
+          return query({
             ...args,
-            where: merge(args.where),
+            where: { ...args.where, workspaceId },
           });
         }
 
@@ -50,7 +46,7 @@ const prisma = basePrisma.$extends({
           operation === 'findFirst' ||
           operation === 'count' ||
           operation === 'aggregate' ||
-          operation === 'groupBy'
+          operation === 'groupBy' || operation === 'updateMany' || operation === 'deleteMany'
         ) {
           return query({
             ...args,

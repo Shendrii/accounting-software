@@ -19,15 +19,16 @@ export function CloseProgress({ checklist }: { checklist: CloseChecklist }) {
   return (
     <div className="border-b border-blue-100 bg-blue-50 px-4 py-3 sm:px-5">
       <div className="flex justify-between gap-2 text-sm font-semibold text-blue-950">
-        <span>Checks complete</span><span>{complete} of {total}</span>
+        <span>Work queues clear</span><span>{complete} of {total}</span>
       </div>
-      <progress aria-label="Period close checks complete" className="workspace-progress" value={complete} max={total} />
+      <progress aria-label="Work queues clear; this does not close a period" className="workspace-progress" value={complete} max={total} />
+      <p className="mt-2 text-xs">Period sign-off requires account evidence and a posting lock in Accounting.</p>
     </div>
   );
 }
 
 export function invoiceStatus(invoice: Pick<Invoice, 'status' | 'postingEntryId' | 'balanceDue' | 'dueDate' | 'amountPaid'>) {
-  if (invoice.status === 'PAID') return 'Paid';
+  if (invoice.status === 'PAID') return decimalUnits(invoice.balanceDue)>BigInt(0)?'Needs review':'Settled';
   if (invoice.status === 'DRAFT') return 'Draft';
   if (invoice.status !== 'SENT') return 'Void';
   if (!invoice.postingEntryId) return 'Awaiting posting';
@@ -35,7 +36,8 @@ export function invoiceStatus(invoice: Pick<Invoice, 'status' | 'postingEntryId'
   return decimalUnits(invoice.amountPaid) > BigInt(0) ? 'Partially paid' : 'Open';
 }
 
-export function billStatus(bill: Pick<Bill, 'status' | 'postingEntryId' | 'amountPaid'>) {
+export function billStatus(bill: Pick<Bill, 'status' | 'postingEntryId' | 'amountPaid' | 'balanceDue'>) {
+  if(bill.status==='PAID')return decimalUnits(bill.balanceDue??'0')>BigInt(0)?'Needs review':'Settled';
   if (bill.status === 'RECEIVED') {
     if (!bill.postingEntryId) return 'Posting unverified';
     return decimalUnits(bill.amountPaid ?? '0') > BigInt(0) ? 'Partially paid' : 'Awaiting payment';
@@ -44,8 +46,8 @@ export function billStatus(bill: Pick<Bill, 'status' | 'postingEntryId' | 'amoun
 }
 
 export function WorkspaceStatus({ children }: { children: string }) {
-  const good = ['Paid', 'Complete', 'Posted', 'Matched', 'Approved', 'Balanced'].includes(children);
-  const warn = ['Awaiting posting', 'Posting unverified', 'Awaiting payment', 'Partially paid', 'Needs review', 'Check date', 'Check match', 'Open item', 'Unmatched'].includes(children);
+  const good = ['Settled','Paid', 'Complete', 'Posted', 'Matched', 'Approved', 'Balanced', 'Verified'].includes(children);
+  const warn = ['Awaiting posting', 'Posting unverified', 'Awaiting payment', 'Partially paid', 'Needs review', 'Check date', 'Check match', 'Open item', 'Unmatched', 'Blocked', 'Waived'].includes(children);
   const bad = ['Overdue', 'Rejected', 'Void'].includes(children);
   return (
     <span className={cn('inline-flex items-center gap-1.5 rounded-full px-2 py-1 text-xs font-semibold whitespace-nowrap before:size-1.5 before:rounded-full before:bg-current', {

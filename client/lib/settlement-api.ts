@@ -1,0 +1,4 @@
+import {API_BASE_URL,apiFetch} from './api';
+export interface CreditAction {id:string;amount:string;date:string;invoiceId?:string;billId?:string;postingEntryId?:string;reversalEntryId?:string;reversedDate?:string;reason?:string}
+export interface Credit {id:string;kind:'AR'|'AP';source:string;partyId:string|null;partyName:string|null;reference:string;date:string;amount:string;remaining:string;accountId:string;reason:string;support:string;postingEntryId:string;reversalEntryId?:string;allocations:CreditAction[];refunds:CreditAction[]}
+export async function settlementRequest<T>(path:string,body?:Record<string,unknown>):Promise<T>{const response=await apiFetch(API_BASE_URL+'/api/settlements'+path,body?{method:'POST',headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);const data=await response.json();if(!response.ok)throw new Error(data.error||'The accounting action could not finish.');return data;}

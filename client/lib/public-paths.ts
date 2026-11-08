@@ -1,4 +1,4 @@
-const AUTH_PUBLIC_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite']);
+const AUTH_PUBLIC_PATHS = new Set(['/login', '/signup', '/auth/callback', '/invite', '/verify-email', '/reset-password']);
 
 export function isPreviewPath(pathname: string): boolean {
   return pathname === '/reports-preview' || pathname.startsWith('/portfolio-preview');

@@ -3,11 +3,16 @@
 import { useCallback, useEffect, useState, type FormEvent } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import DraftDocumentEditor from '@/app/components/DraftDocumentEditor';
+import RecordAudit from '@/app/components/RecordAudit';
+import AppliedCredits from '@/app/components/AppliedCredits';
+import {useWorkspaces} from '@/app/components/WorkspaceProvider';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { PaymentCorrections } from '@/app/components/PaymentCorrections';
 import BackToWorklist from '@/app/components/BackToWorklist';
 import { Loader2 } from 'lucide-react';
 import {
-  getBill, receiveBill, payBill, voidBill, updateBill, getAccounts,
+  getBill, receiveBill, payBill, voidBill, getAccounts,
   type Bill, type Account,
 } from '@/lib/api';
 import { toast } from '@/lib/toast';
@@ -17,7 +22,7 @@ import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import { useMoney } from '@/lib/use-money';
 import { decimalUnits, localDay } from '@/lib/money';
-import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
+import { isPaymentAccount } from '@/lib/account-roles';
 
 
 function formatDate(d: string) {
@@ -26,6 +31,7 @@ function formatDate(d: string) {
 
 export function BillDetailPage() {
   const { format: formatCurrency } = useMoney();
+  const {active}=useWorkspaces();const access=workspacePermissions(active);
   const { id } = useParams<{ id: string }>();
   const [bill, setBill] = useState<Bill | null>(null);
   const [loading, setLoading] = useState(true);
@@ -33,6 +39,7 @@ export function BillDetailPage() {
   const [payModalOpen, setPayModalOpen] = useState(false);
   const [paymentRequestId, setPaymentRequestId] = useState('');
   const [paymentError, setPaymentError] = useState('');
+  const[voiding,setVoiding]=useState(false);
   const [coding, setCoding] = useState(false);
   const [actionLoading, setActionLoading] = useState(false);
   const [error, setError] = useState<string | null>(null);
@@ -88,32 +95,14 @@ export function BillDetailPage() {
     }
   }
 
-  async function saveCoding(event: FormEvent<HTMLFormElement>) {
-    event.preventDefault();
-    if (!bill?.lines) return;
-    const values = new FormData(event.currentTarget);
-    setActionLoading(true);
-    setError(null);
-    try {
-      setBill(await updateBill(bill.id, { lines: bill.lines.map(line => ({
-        description: line.description, quantity: line.quantity, unitPrice: line.unitPrice, amount: line.amount,
-        accountId: String(values.get(line.id)),
-      })) }));
-      setCoding(false);
-    } catch (cause) {
-      setError(cause instanceof Error ? cause.message : 'Could not save the bill accounts.');
-    } finally {
-      setActionLoading(false);
-    }
-  }
-
-  async function handleVoid() {
+  async function handleVoid(event:FormEvent<HTMLFormElement>) {
+    event.preventDefault();const fields=new FormData(event.currentTarget);
     if (!bill) return;
-    if (!confirm('Are you sure you want to void this bill?')) return;
     setActionLoading(true);
     setError(null);
     try {
-      const updated = await voidBill(bill.id);
+      const updated = await voidBill(bill.id,{date:String(fields.get('date')),reason:String(fields.get('reason'))});
+      setVoiding(false);
       setBill(updated);
       toast.success('Bill voided');
     } catch (e: unknown) {
@@ -157,9 +146,9 @@ export function BillDetailPage() {
           </div>
         )}
 
-        {bill.status !== 'VOID' && bill.status !== 'PAID' && (
+        {bill.status !== 'VOID' && (bill.status !== 'PAID'||decimalUnits(balanceDue)>BigInt(0)) && (
           <div className="flex flex-wrap gap-3 mb-8">
-            {bill.status === 'DRAFT' && (
+            {bill.status === 'DRAFT' && access.post && (
               <button
                 onClick={handleReceive}
                 disabled={actionLoading}
@@ -169,7 +158,7 @@ export function BillDetailPage() {
                 Post bill
               </button>
             )}
-            {bill.status === 'RECEIVED' && bill.postingEntryId && (
+            {access.post&&['RECEIVED','PAID'].includes(bill.status)&&decimalUnits(balanceDue)>BigInt(0)&&bill.postingEntryId && (
               <button
                 onClick={() => {
                   setPaymentRequestId(crypto.randomUUID());
@@ -182,9 +171,9 @@ export function BillDetailPage() {
                 Record payment
               </button>
             )}
-            {bill.status === 'DRAFT' && <button type="button" className="workspace-button" disabled={actionLoading} onClick={() => setCoding(current => !current)}>Assign line accounts</button>}
-            {!bill.isOpeningBalance && decimalUnits(amountPaid) === BigInt(0) && <button
-              onClick={handleVoid}
+            {bill.status === 'DRAFT' && access.prepare && <button type="button" className="workspace-button" disabled={actionLoading} onClick={() => setCoding(current => !current)}>Edit draft bill</button>}
+            {(bill.status==='DRAFT'?access.prepare:access.correct)&&!bill.isOpeningBalance && decimalUnits(amountPaid) === BigInt(0) && <button
+              onClick={()=>setVoiding(true)}
               disabled={actionLoading}
               className="flex items-center gap-2 px-4 py-2 rounded-lg border border-red-200 dark:border-red-800 text-red-600 dark:text-red-400 text-sm font-medium hover:bg-red-50 dark:hover:bg-red-900/20 disabled:opacity-50"
             >
@@ -251,28 +240,20 @@ export function BillDetailPage() {
         <WorkspacePanel title="Payment summary">
           <dl className="space-y-2 p-4 text-sm sm:p-5">
             <div className="flex justify-between gap-3"><dt>Bill total</dt><dd>{formatCurrency(bill.total)}</dd></div>
-            <div className="flex justify-between gap-3"><dt>Payments recorded</dt><dd>{formatCurrency(amountPaid)}</dd></div>
+            <div className="flex justify-between gap-3"><dt>Settled · payments and credits</dt><dd>{formatCurrency(amountPaid)}</dd></div>
             {bill.status !== 'DRAFT' && <div className="flex justify-between gap-3 border-t border-slate-200 pt-2 font-semibold"><dt>Remaining balance</dt><dd>{formatCurrency(balanceDue)}</dd></div>}
           </dl>
-          <PaymentCorrections kind="bill" documentId={bill.id} payments={bill.payments ?? []} onCorrected={load} />
+          <AppliedCredits kind="bill" allocations={bill.creditAllocations}/><PaymentCorrections kind="bill" documentId={bill.id} payments={bill.payments ?? []} onCorrected={load} />
           {!!bill.receipts?.length && <p className="border-t border-slate-200 p-4 text-sm text-slate-600">
             {bill.receipts.length} attached {bill.receipts.length === 1 ? 'receipt' : 'receipts'} · <Link className="font-semibold text-blue-800 underline" href="/inbox">View receipts</Link>
           </p>}
         </WorkspacePanel>
         </div>
 
-        {coding && bill.status === 'DRAFT' && <WorkspacePanel title="Bill line accounts">
-          <form onSubmit={saveCoding} className="grid gap-3 p-4">
-            {bill.lines?.map(line => <label key={line.id} className="grid gap-1 text-sm font-semibold">{line.description}
-              <select name={line.id} className="workspace-field" defaultValue={line.accountId ?? ''} required>
-                <option value="">Select expense or asset account…</option>
-                {accounts.filter(isPurchaseAccount).map(account => <option key={account.id} value={account.id}>{account.code} · {account.name}</option>)}
-              </select>
-            </label>)}
-            <div><button type="submit" className="workspace-primary" disabled={actionLoading}>Save line accounts</button></div>
-          </form>
-        </WorkspacePanel>}
+        {coding&&bill.status==='DRAFT'&&<DraftDocumentEditor kind="bill" document={bill} accounts={accounts} onDismiss={()=>setCoding(false)} onSaved={saved=>{setBill(saved as Bill);setCoding(false);}}/>}
 
+        {voiding&&<AccountingDialog title="Void bill with retained history" busy={actionLoading} onDismiss={()=>setVoiding(false)}><form className="grid gap-4" onSubmit={handleVoid}><p className="text-sm">Posted bills receive a dated reversal. The original source and reason stay in history.</p><label className="grid gap-1 text-sm font-semibold">Void date<input className="workspace-field" type="date" name="date" defaultValue={localDay()} required/></label><label className="grid gap-1 text-sm font-semibold">Reason<textarea className="workspace-field min-h-20" name="reason" minLength={5} maxLength={1000} required/></label>{error&&<p role="alert" className="text-sm text-rose-800">{error}</p>}<button className="workspace-primary" disabled={actionLoading}>{actionLoading?'Saving…':'Void bill and retain source history'}</button></form></AccountingDialog>}
+        <RecordAudit entityId={bill.id}/>
         {payModalOpen && <AccountingDialog title="Record bill payment" busy={actionLoading} onDismiss={() => setPayModalOpen(false)}>
           <form onSubmit={handlePay} className="space-y-3">
             <p className="text-sm text-slate-600">Record a payment already made. The remaining bill balance is <strong>{formatCurrency(balanceDue)}</strong>.</p>

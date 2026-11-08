@@ -1,5 +1,6 @@
 'use client';
 import { useMoney } from '@/lib/use-money';
+import {getWorkspaceProfile} from '@/lib/books-api';
 import { Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { Download } from 'lucide-react';
@@ -40,12 +41,14 @@ function TrialBalance({ asOf, onAccount }: { asOf: string; onAccount: (id: strin
 }
 function ReportsContent() {
   const state = useWorklist(); const { params, update } = state;
+  const profile=useWorkspaceData(getWorkspaceProfile);
   const tab = params.tab === 'balance-sheet' ? 'bs' : params.tab === 'trial-balance' ? 'tb' : 'pl';
   const day = localDay(); const monthStart = day.slice(0, 7) + '-01'; const start = params.startDate || monthStart; const end = (tab === 'pl' ? params.endDate : params.asOf) || day;
+  const fiscalMonth=profile.data?.fiscalYearStartMonth??1;const fiscalYear=Number(day.slice(5,7))<fiscalMonth?Number(day.slice(0,4))-1:Number(day.slice(0,4));const fiscalStart=String(fiscalYear)+'-'+String(fiscalMonth).padStart(2,'0')+'-01';
   const openAccount = (account: string) => update({ account, ...(tab === 'pl' ? { startDate: start, endDate: end } : { asOf: end }) }, false);
-  return <div className="workspace-page"><div className="workspace-content space-y-5"><WorkspaceHeading section="Accounting" title="Reports" description="Trace each reported balance to its posted entries and source records." />
+  return <div className="workspace-page"><div className="workspace-content space-y-5"><WorkspaceHeading section="Accounting" title="Reports" description="Trace each reported balance to its posted entries and source records." actions={<div className="flex flex-wrap gap-2"><Link className="workspace-button" href="/reports/analysis">Cash flow & comparisons</Link><Link className="workspace-button" href="/reports/tax">Tax workpapers</Link></div>} />
     <div className="mb-4"><Link className="workspace-text-action" href="/reports/aging">Receivables and payables aging · Ledger reconciliation</Link></div><nav className="workspace-tabs" aria-label="Financial statements">{[['pl', 'Profit & loss', ''], ['bs', 'Balance sheet', 'balance-sheet'], ['tb', 'Trial balance', 'trial-balance']].map(([id, label, value]) => <button key={id} type="button" className="workspace-tab" aria-current={tab === id ? 'page' : undefined} onClick={() => update({ tab: value, account: '' })}>{label}</button>)}</nav>
-    <div className="flex flex-wrap items-end gap-3">{tab === 'pl' && <label className="grid gap-1 text-sm font-semibold">From<input type="date" className="workspace-field" value={start} onChange={event => { if (event.target.value) update({ startDate: event.target.value, account: '' }); }} /></label>}<label className="grid gap-1 text-sm font-semibold">{tab === 'pl' ? 'Through' : 'As of date'}<input type="date" className="workspace-field" value={end} onChange={event => { if (event.target.value) update({ [tab === 'pl' ? 'endDate' : 'asOf']: event.target.value, account: '' }); }} /></label><button type="button" className="workspace-button" onClick={() => update({ startDate: day.slice(0, 4) + '-01-01', endDate: day, asOf: day, account: '' })}>This year</button><p className="py-2 text-sm text-slate-600">Select an account to inspect its activity.</p></div>
+    <div className="flex flex-wrap items-end gap-3">{tab === 'pl' && <label className="grid gap-1 text-sm font-semibold">From<input type="date" className="workspace-field" value={start} onChange={event => { if (event.target.value) update({ startDate: event.target.value, account: '' }); }} /></label>}<label className="grid gap-1 text-sm font-semibold">{tab === 'pl' ? 'Through' : 'As of date'}<input type="date" className="workspace-field" value={end} onChange={event => { if (event.target.value) update({ [tab === 'pl' ? 'endDate' : 'asOf']: event.target.value, account: '' }); }} /></label><button type="button" className="workspace-button" onClick={() => update({ startDate: fiscalStart, endDate: day, asOf: day, account: '' })} disabled={profile.loading||!profile.data}>Fiscal year to date</button><p className="py-2 text-sm text-slate-600">Select an account to inspect its activity.</p></div>
     {tab === 'tb' ? <TrialBalance asOf={end} onAccount={openAccount} /> : <Statement kind={tab} startDate={start} endDate={end} onAccount={openAccount} />}
     {params.account && <AccountActivityDrawer key={[params.account, start, end, tab].join(':')} accountId={params.account} startDate={tab === 'pl' ? start : undefined} endDate={end} returnTo={state.returnTo} onClose={() => update({ account: '' }, false)} />}
   </div></div>;

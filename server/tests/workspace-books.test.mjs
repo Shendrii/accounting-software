@@ -74,7 +74,7 @@ test('opening TB and unpaid documents post once, clear exactly and never duplica
   assert.equal(ar.totals.net, '300.00'); assert.equal(ar.reconciliation.balanced, true); assert.equal(ar.buckets.current, '300.00'); assert.equal(ar.parties[0].buckets.current, '100.00');
   const firstInvoice = (await api('/invoices'))[0];
   await api('/invoices/' + firstInvoice.id + '/send', 'POST', {}, 409);
-  await api('/invoices/' + firstInvoice.id + '/void', 'POST', { date: '2026-02-02' }, 409);
+  await api('/invoices/' + firstInvoice.id + '/void', 'POST', { date: '2026-02-02', reason:'Reviewed cancellation supported by fixture evidence' }, 409);
   const ap = await api('/reports/aging?kind=payables&asOf=2026-01-31'); assert.equal(ap.totals.net, '200.00'); assert.equal(ap.reconciliation.balanced, true);
 });
 
@@ -105,7 +105,8 @@ test('payment reversals and reapplication agree with historical AR/AP aging, wor
   assert.equal((await api('/bills/summary')).openBalance, '200.00');
   const control = accounts.find(row => row.role === 'ACCOUNTS_RECEIVABLE');
   const journal = await api('/journal-entries', 'POST', { date: '2026-02-10', description: 'Manual AR adjustment needing reconciliation', journalLines: [{ accountId: control.id, debit: '25' }, { accountId: equity.id, credit: '25' }] }, 201);
-  await api('/journal-entries/' + journal.id + '/post', 'POST');
+  await api('/journal-entries/' + journal.id + '/post', 'POST', {},403);
+  await api('/journal-entries/' + journal.id + '/post', 'POST', {controlOverrideReason:'Documented fixture exception to test a visible control-account mismatch.'});
   ar = await api('/reports/aging?kind=receivables&asOf=2026-02-10');
   assert.equal(ar.reconciliation.difference, '25.00'); assert.equal(ar.reconciliation.balanced, false);
 });
@@ -151,7 +152,7 @@ test('corrections require admin authority, refuse matched bank lines, reopen ful
     await api(path, 'POST', correction, 403);
     await db.workspaceMember.update({ where: { workspaceId_userId: { workspaceId: session.workspace.id, userId: session.user.id } }, data: { role: 'OWNER' } });
     invoice = await api(path, 'POST', correction); assert.equal(invoice.status, 'SENT'); assert.equal(invoice.balanceDue, '100.00');
-    await api('/invoices/' + invoice.id + '/void', 'POST', { date: '2026-02-04' });
+    await api('/invoices/' + invoice.id + '/void', 'POST', { date: '2026-02-04', reason:'Reviewed cancellation supported by fixture evidence' });
     assert.equal((await api('/reports/aging?kind=receivables&asOf=2026-02-01')).totals.net, '100.00');
     assert.equal((await api('/reports/aging?kind=receivables&asOf=2026-02-02')).totals.net, '0.00');
     const beforeVoid = await api('/reports/aging?kind=receivables&asOf=2026-02-03');

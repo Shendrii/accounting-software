@@ -64,6 +64,8 @@ test('reconciliation requires verified matches, the statement control totals, an
   const csv = new FormData();
   csv.append('accountId', bank.id);
   csv.append('csv', new Blob(['date,description,amount\n' + transactions.map(row => [row.date,row.description,row.amount].join(',')).join('\n')], { type: 'text/csv' }), 'statement.csv');
+  const preview=await api('/reconciliation/import-csv/preview','POST',csv);
+  csv.append('previewToken',preview.token);
   assert.equal((await api('/reconciliation/import-csv', 'POST', csv, 201)).imported, 3);
   assert.equal((await api('/reconciliation/import', 'POST', { accountId: bank.id, transactions }, 201)).imported, 0);
   await api('/reconciliation/import', 'POST', { accountId: otherBank.id, transactions }, 404);
@@ -161,7 +163,7 @@ test('receipt attachment leaves bills unpaid and partial bill payments agree wit
   assert.equal((await api('/accounts/' + payable.id)).balance, '60');
   assert.equal((await api('/accounts/' + cash.id)).balance, '-40');
   await api(path + '/pay', 'POST', { ...input, requestId: randomUUID(), amount: '61' }, 400);
-  await api(path + '/void', 'POST', { date: '2026-11-05' }, 409);
+  await api(path + '/void', 'POST', { date: '2026-11-05', reason:'Reviewed cancellation supported by fixture evidence' }, 409);
   const paid = await api(path + '/pay', 'POST', { ...input, requestId: randomUUID(), amount: '60' });
   assert.equal(paid.status, 'PAID');
   assert.equal(paid.balanceDue, '0.00');
@@ -169,7 +171,7 @@ test('receipt attachment leaves bills unpaid and partial bill payments agree wit
   const unpaid = await api('/bills', 'POST', billData, 201);
   const unpaidPath = '/bills/' + unpaid.id;
   await api(unpaidPath + '/receive', 'POST');
-  assert.equal((await api(unpaidPath + '/void', 'POST', { date: '2026-11-05' })).status, 'VOID');
+  assert.equal((await api(unpaidPath + '/void', 'POST', { date: '2026-11-05', reason:'Reviewed cancellation supported by fixture evidence' })).status, 'VOID');
   assert.equal((await api('/accounts/' + payable.id)).balance, '0');
   assert.equal((await api('/accounts/' + expense.id)).balance, '75');
 });

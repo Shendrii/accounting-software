@@ -7,6 +7,10 @@ import { fetchWorkspaceInvitations, fetchWorkspaceMembers, inviteWorkspaceMember
 import { getCurrentUser } from '@/lib/auth';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
 import AccountingDialog from '@/app/components/AccountingDialog';
+import AccountSecurity from '@/app/components/AccountSecurity';
+import PostingControls from '@/app/components/PostingControls';
+import AuditHistory from '@/app/components/AuditHistory';
+import MemberRoleEditor from '@/app/components/MemberRoleEditor';
 import { useWorkspaces } from '@/app/components/WorkspaceProvider';
 import { WorkspaceActiveBadge, WorkspaceAvatar, WorkspaceRole } from '@/app/components/WorkspaceSwitcher';
 import { WorkspaceHeading, WorkspaceNotice, WorkspacePanel, WorkspaceRow } from '@/app/components/WorkspaceUI';
@@ -19,6 +23,8 @@ export default function SettingsPage() {
     <div className="workspace-page">
       <div className="workspace-content space-y-5">
         <WorkspaceHeading section="Admin" title="Settings" description="Manage your account, workspaces, and integrations." />
+        <AccountSecurity />
+        <PostingControls />
         <WorkspacePanel title="Business profile and opening books" description={active ? 'Country, currency and bookkeeping setup for ' + active.name + '.' : 'Choose a workspace to configure its books.'}><div className="flex flex-wrap gap-3 p-4"><Link href="/settings/setup" className="workspace-primary">Business profile</Link><Link href="/settings/opening-balances" className="workspace-button">Opening balances</Link></div></WorkspacePanel>
         <section id="workspaces" aria-labelledby="workspace-settings-heading" className="scroll-mt-4 space-y-3">
           <div>
@@ -59,6 +65,7 @@ export default function SettingsPage() {
             </div>
           </WorkspacePanel>
         </div>
+        <AuditHistory />
       </div>
     </div>
   );
@@ -106,7 +113,7 @@ function WorkspaceTeam({ workspace }: { workspace: AuthWorkspace }) {
             <p className="text-sm font-semibold break-words">{member.user.name || member.user.email}</p>
             <p className="text-xs break-words text-slate-600">{member.user.email}</p>
           </div>
-          <span className="text-xs font-semibold text-slate-700"><WorkspaceRole role={member.role} /></span>
+          <span className="text-xs font-semibold text-slate-700"><WorkspaceRole role={member.role} /></span>{canInvite && member.role !== 'OWNER' && <MemberRoleEditor workspace={workspace} member={member} onSaved={members.retry} />}
         </li>)}
       </ul>
       {canInvite ? <section className="border-t border-slate-200 p-4">
@@ -144,11 +151,13 @@ function InviteDialog({ workspace, onDismiss, onSent }: {
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault();
     if (busy) return;
-    const email = String(new FormData(event.currentTarget).get('email') ?? '').trim();
+    const fields = new FormData(event.currentTarget);
+    const email = String(fields.get('email') ?? '').trim();
+    const role = String(fields.get('role')) as Exclude<AuthWorkspace['role'], 'OWNER'>;
     setBusy(true);
     setError('');
     try {
-      const result = await inviteWorkspaceMember({ workspaceId: workspace.id, email, role: 'MEMBER' });
+      const result = await inviteWorkspaceMember({ workspaceId: workspace.id, email, role });
       onSent({ email, emailSent: result.emailSent, inviteUrl: result.inviteUrl });
     } catch (cause) {
       setError(cause instanceof Error ? cause.message : 'Could not create invitation.');
@@ -158,10 +167,11 @@ function InviteDialog({ workspace, onDismiss, onSent }: {
 
   return <AccountingDialog title="Invite a member" busy={busy} onDismiss={onDismiss}>
     <form onSubmit={submit} className="space-y-4">
-      <p className="text-sm text-slate-600">Invite someone to {workspace.name} as a member.</p>
+      <p className="text-sm text-slate-600">Invite someone to {workspace.name} with the access role selected below.</p>
       <label className="grid gap-1.5 text-sm font-semibold">Email address
         <input name="email" type="email" autoComplete="email" placeholder="colleague@example.com" className="workspace-field" autoFocus required disabled={busy} />
       </label>
+      <label className="grid gap-1.5 text-sm font-semibold">Access role<select name="role" className="workspace-field" defaultValue="MEMBER" disabled={busy}><option value="MEMBER">Bookkeeper — prepare drafts</option><option value="APPROVER">Reviewer — post and correct</option><option value="VIEWER">Read only — inspect records and reports</option>{workspace.role === 'OWNER' && <option value="ADMIN">Admin — manage books and team</option>}</select></label>
       {error && <WorkspaceNotice title="Could not create invitation">{error}</WorkspaceNotice>}
       <div className="flex flex-wrap justify-end gap-2">
         <button type="button" className="workspace-button" onClick={onDismiss} disabled={busy}>Cancel</button>

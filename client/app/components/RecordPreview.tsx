@@ -9,6 +9,7 @@ import { billStatus, invoiceStatus, WorkspaceStatus } from './WorkspaceActivity'
 import { WorkspaceNotice } from './WorkspaceUI';
 import { PostingTable, postedLines } from './PostingTable';
 import WorkbenchDrawer from './WorkbenchDrawer';
+import AppliedCredits from './AppliedCredits';
 export default function RecordPreview({ kind, id, returnTo, onClose, previous, next }: {
   kind: 'invoice' | 'bill'; id: string; returnTo: string; onClose: () => void; previous?: () => void; next?: () => void;
 }) {
@@ -23,9 +24,10 @@ export default function RecordPreview({ kind, id, returnTo, onClose, previous, n
         <h3 className="mt-3 text-2xl font-semibold">{'invoiceNo' in data ? data.invoiceNo : data.billNo}</h3>
         <p className="mt-1 text-sm">{'customer' in data ? data.customer?.name : (data as Bill).vendor?.name}</p>
         <p className="mt-2 text-sm text-slate-600">Dated {data.date.slice(0, 10)} · Due {data.dueDate.slice(0, 10)}</p></div>
-      <dl className="workbench-balances"><div><dt>Total</dt><dd>{money.format(data.total)}</dd></div><div><dt>Paid</dt><dd>{money.format(data.amountPaid ?? '0')}</dd></div><div><dt>Balance due</dt><dd>{data.status === 'DRAFT' || data.status === 'VOID' ? '—' : money.format(data.balanceDue ?? '0')}</dd></div></dl>
+      <dl className="workbench-balances"><div><dt>Total</dt><dd>{money.format(data.total)}</dd></div><div><dt>Settled</dt><dd>{money.format(data.amountPaid ?? '0')}</dd></div><div><dt>Balance due</dt><dd>{data.status === 'DRAFT' || data.status === 'VOID' ? '—' : money.format(data.balanceDue ?? '0')}</dd></div></dl>
       <section><h3 className="mb-2 font-semibold">Line items</h3><ul className="divide-y divide-slate-200">{data.lines?.map(line => <li key={line.id} className="flex justify-between gap-4 py-3 text-sm"><span>{line.description}<span className="mt-1 block text-xs text-slate-600">{line.account?.name}</span></span><span className="tabular-nums">{money.format(line.amount)}</span></li>)}</ul></section>
       <section><h3 className="mb-2 font-semibold">Payments</h3>{data.payments?.length ? <ul className="divide-y divide-slate-200">{data.payments.map(payment => <li key={payment.id} className="flex flex-wrap justify-between gap-3 py-2 text-sm"><div><p>{payment.journalEntry?.date.slice(0, 10)}</p>{payment.reversalEntryId && <p className="mt-1 text-xs text-slate-600"><strong>Reversed</strong>{payment.reversalEntry && ' · ' + payment.reversalEntry.date.slice(0, 10)}{payment.reversalReason && ' · ' + payment.reversalReason}</p>}</div><span className="tabular-nums">{money.format(payment.amount)}</span></li>)}</ul> : <p className="text-sm text-slate-600">No recorded payments.</p>}</section>
+      <AppliedCredits kind={kind} allocations={data.creditAllocations}/>
       {data.postingEntry && <details><summary className="min-h-11 cursor-pointer font-semibold">Posted journal</summary><PostingTable lines={postedLines(data.postingEntry)} /></details>}
       <Link className="workspace-primary" href={(kind === 'invoice' ? '/sales/invoices/' : '/purchases/bills/') + id + '?returnTo=' + encodeURIComponent(returnTo)}>Open full record</Link>
       <p className="text-xs text-slate-600">Review, posting, and payment actions are available in the full record.</p>

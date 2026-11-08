@@ -1,5 +1,8 @@
 'use client';
+import {useWorkspaces} from '@/app/components/WorkspaceProvider';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { useMoney } from '@/lib/use-money';
+import DocumentTaxFields from '@/app/components/DocumentTaxFields';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -20,7 +23,7 @@ const emptyLine = (): DocumentLine => ({
   accountId: '',
 });
 
-export function NewInvoicePage() {
+function InvoiceForm() {
   const money = useMoney();
   const router = useRouter();
   const [customers, setCustomers] = useState<Customer[]>([]);
@@ -35,6 +38,7 @@ export function NewInvoicePage() {
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine()]);
   const [notes, setNotes] = useState('');
   const [tax, setTax] = useState('0.00');
+  const [taxCodeId,setTaxCode]=useState('');
   const [saving, setSaving] = useState(false);
   const [initLoading, setInitLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -74,7 +78,7 @@ export function NewInvoicePage() {
         customerId,
         date,
         dueDate,
-        tax: tax || '0',
+        tax: tax || '0',taxCodeId,invoiceDetails:Object.fromEntries(['buyerTaxId','buyerAddress','serialReference'].map(name=>[name,String(new FormData(e.currentTarget as HTMLFormElement).get(name)??'')])),
         notes,
         lines: lines.map((l): InvoiceLineInput => ({
           description: l.description,
@@ -127,6 +131,7 @@ export function NewInvoicePage() {
         )}
 
         <form onSubmit={handleSubmit}>
+          <details className="workspace-panel mb-5 p-4"><summary className="cursor-pointer text-sm font-semibold">Buyer identity and registered document reference</summary><div className="mt-4 grid gap-3 sm:grid-cols-2">{[['buyerTaxId','Buyer business tax ID'],['buyerAddress','Buyer registered address'],['serialReference','Registered serial reference · optional']].map(([name,label])=><label key={name} className="grid gap-1 text-sm font-semibold">{label}<input className="workspace-field" name={name} maxLength={name==='buyerAddress'?500:100}/></label>)}</div></details>
           <div className="mb-5 grid items-start gap-4 xl:grid-cols-[1.65fr_1fr]">
             <div className="workspace-panel p-4 sm:p-5">
               <h2 className="font-semibold text-zinc-900 dark:text-zinc-50 mb-4">Invoice details</h2>
@@ -173,9 +178,8 @@ export function NewInvoicePage() {
               <WorkspacePanel title="Totals" description={money.currency}>
                 <div className="space-y-2 p-4 text-sm sm:p-5">
                   <div className="flex justify-between gap-2"><span>Subtotal</span><strong className="tabular-nums">{money.format(decimalText(subtotal))}</strong></div>
-                  <label className="flex items-center justify-between gap-3">Tax
-                    <input type="number" min="0" step="0.01" value={tax} onChange={event => setTax(event.target.value)} className="workspace-field max-w-28 text-right" />
-                  </label>
+                  <DocumentTaxFields purpose="OUTPUT" codeId={taxCodeId} onCode={setTaxCode} amount={tax} onAmount={setTax}/>
+
                   <div className="flex justify-between gap-2 rounded-lg bg-blue-50 p-3 font-semibold"><span>Total</span><span className="tabular-nums">{money.format(decimalText(total))}</span></div>
                 </div>
               </WorkspacePanel>
@@ -220,6 +224,8 @@ export function NewInvoicePage() {
     </div>
   );
 }
+
+export function NewInvoicePage(){const{active}=useWorkspaces();if(!workspacePermissions(active).prepare)return <div className="workspace-page"><div className="workspace-content space-y-4"><p className="text-sm">Your workspace role allows viewing records. Ask an owner for preparation access to create drafts.</p><Link className="workspace-button" href="/sales/invoices">Return to records</Link></div></div>;return <InvoiceForm key={active?.id}/>;}
 
 export default function LegacyNewInvoicePage() {
   return <LegacyRedirect to="/sales/invoices/new" />;

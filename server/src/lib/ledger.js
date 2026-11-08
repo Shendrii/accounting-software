@@ -1,5 +1,8 @@
 import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
+import { getRequestContext } from './requestContext.js';
+import { permissions, assertPermission } from './permissions.js';
+import { audit } from './audit.js';
 
 export const Decimal = Prisma.Decimal;
 
@@ -119,9 +122,11 @@ export async function updateBalanceCache(tx, workspaceId, lines, accounts) {
 }
 
 export async function checkBankPostingDate(tx, workspaceId, date, accounts, opening = false) {
+  const closed = await tx.accountingPeriod.findFirst({ where: { workspaceId, status: 'CLOSED', endDate: { gte: ledgerDate(date.toISOString()) } }, orderBy: { endDate: 'desc' } });
+  if (closed) throw new LedgerError('The books are closed through ' + closed.endDate.toISOString().slice(0, 10) + '. Choose an open date or ask an owner to reopen the period.', 409);
   const workspace = await tx.workspace.findUnique({ where: { id: workspaceId }, select: { booksStartDate: true } });
   if (!opening && workspace?.booksStartDate && date < workspace.booksStartDate) throw new LedgerError('The posting date must be on or after the books starting date. Use the opening-balances workflow for brought-forward amounts.');
-  const accountIds = [...accounts.values()].filter(account => account.isBankAccount).map(account => account.id);
+  const accountIds = [...accounts.values()].filter(account => ['BANK','CREDIT_CARD'].includes(account.role)).map(account => account.id);
   if (!accountIds.length) return;
   const through = ledgerDate(date.toISOString());
   const reconciliation = await tx.reconciliation.findFirst({
@@ -135,18 +140,23 @@ export async function checkBankPostingDate(tx, workspaceId, date, accounts, open
 }
 
 export async function createPosting(tx, workspaceId, { lines: input, ...data }, allowInactive = false) {
+  assertPermission('post');
   const lines = journalLines(input);
   const accounts = await ledgerAccounts(tx, workspaceId, lines.map(line => line.accountId), allowInactive);
   await checkBankPostingDate(tx, workspaceId, data.date, accounts, Boolean(data.openingBatchId));
   const entry = await tx.journalEntry.create({
-    data: { ...data, workspaceId, status: 'POSTED', journalLines: { create: lines } },
+    data: { ...data, workspaceId, createdById: getRequestContext().userId, status: 'DRAFT', journalLines: { create: lines } },
     include: { journalLines: { include: { account: true } } },
   });
+  const posted = await tx.journalEntry.update({where:{id:entry.id},data:{status:'POSTED',postedById:getRequestContext().userId,postedAt:new Date()}});
+  Object.assign(entry,posted);
   await updateBalanceCache(tx, workspaceId, lines, accounts);
+  await audit(tx, workspaceId, 'POSTING_CREATED', entry.id, { date: entry.date, currency: getRequestContext().currency, reference: entry.referenceNo, reversalOfId: entry.reversalOfId, lines:lines.map(l=>({...l,accountName:accounts.get(l.accountId).name,accountCode:accounts.get(l.accountId).code,accountType:accounts.get(l.accountId).type,accountRole:accounts.get(l.accountId).role})) });
   return entry;
 }
 
-export function reversePosting(tx, workspaceId, entry, date, reason) {
+export async function reversePosting(tx, workspaceId, entry, date, reason) {
+  if(await tx.accountingSchedule.findFirst({where:{workspaceId,sourceEntryId:entry.id,status:{not:'CANCELLED'}},select:{id:true}}))throw new LedgerError('This source supports an active or paused accounting schedule. Reverse its recognized occurrences and cancel the schedule before reversing the original cost.',409);
   return createPosting(tx, workspaceId, {
     date,
     description: reason,
@@ -158,10 +168,29 @@ export function reversePosting(tx, workspaceId, entry, date, reason) {
   }, true);
 }
 
-export async function ledgerTransaction(callback) {
+export async function ledgerTransaction(callback, options = {}) {
+  const { workspaceId } = getRequestContext();
   for (let attempt = 0; ; attempt++) {
     try {
-      return await prisma.$transaction(callback, { isolationLevel: 'Serializable' });
+      return await prisma.$transaction(async tx => {
+        // One ordered accounting writer per workspace; unrelated clients do not share predicate locks.
+        if (workspaceId) {
+          await tx.$queryRaw`SELECT pg_advisory_xact_lock(hashtextextended(${workspaceId}, 0))::text`;
+          const context = getRequestContext();
+          const [live] = await tx.$queryRaw`SELECT m."role", w."memberCanPost", w."requireJournalApproval"
+            FROM "AuthSession" s JOIN "User" u ON u."id" = s."userId"
+            LEFT JOIN "WorkspaceMember" m ON m."userId" = u."id" AND m."workspaceId" = ${workspaceId}
+            LEFT JOIN "Workspace" w ON w."id" = m."workspaceId"
+            WHERE s."id" = ${context.sessionId} AND u."id" = ${context.userId} AND s."revokedAt" IS NULL
+              AND s."expiresAt" > CURRENT_TIMESTAMP AND s."version" = ${context.sessionVersion} AND u."sessionVersion" = s."version"`;
+          if (!live) throw new LedgerError('Your session expired. Sign in again.',401);
+          if (!live.role) throw new LedgerError('You no longer have access to this workspace.',403);
+          context.authorization = live;
+          const needed = context.requiredPermission || (['GET','HEAD'].includes(context.method) ? null : 'prepare');
+          if (needed && !permissions(live.role, live)[needed]) throw new LedgerError('Your current workspace role does not allow this action.',403);
+        }
+        return callback(tx);
+      }, { ...options, isolationLevel: workspaceId ? 'ReadCommitted' : 'Serializable' });
     } catch (error) {
       if (error.code !== 'P2034') throw error;
       if (attempt === 3) throw new LedgerError('The ledger changed while saving. Try again.', 409);

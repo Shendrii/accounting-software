@@ -22,7 +22,8 @@ export function generateInvoicePdf(invoice) {
 
     // ── Header ────────────────────────────────────────────────────────────
     doc.rect(0, 0, doc.page.width, 80).fill(primary);
-    doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text(invoice.isOpeningBalance ? 'OPENING BALANCE' : 'INVOICE', 50, 28);
+    const legal=invoice.legalSnapshot??{};
+    doc.fillColor('#ffffff').fontSize(24).font('Helvetica-Bold').text(invoice.isOpeningBalance ? 'OPENING BALANCE' : !invoice.postingEntryId?'DRAFT / UNPOSTED':legal.invoiceLabel??'INVOICE', 50, 28);
     doc.fillColor('#93c5fd').fontSize(10).font('Helvetica').text(`#${invoice.invoiceNo}`, 50, 58);
 
     // Company name (right side of header)
@@ -30,7 +31,7 @@ export function generateInvoicePdf(invoice) {
       .fillColor('#ffffff')
       .fontSize(12)
       .font('Helvetica-Bold')
-      .text(getRequestContext().legalName ?? 'Accountrix', doc.page.width - 200, 28, { width: 150, align: 'right' });
+      .text(legal.sellerName??getRequestContext().legalName ?? 'Accountrix', doc.page.width - 200, 28, { width: 150, align: 'right' });
 
     doc.moveDown(2);
     doc.y = 100;
@@ -41,13 +42,14 @@ export function generateInvoicePdf(invoice) {
       .fillColor(dark)
       .fontSize(11)
       .font('Helvetica-Bold')
-      .text(invoice.customer?.name ?? 'Customer', 50, 114);
+      .text(legal.buyerName??invoice.customer?.name ?? 'Customer', 50, 114);
     if (invoice.customer?.email) {
       doc.fillColor(textGray).fontSize(9).font('Helvetica').text(invoice.customer.email, 50, 130);
     }
-    if (invoice.customer?.address) {
-      doc.fillColor(textGray).fontSize(9).text(invoice.customer.address, 50, 143);
+    if (legal.buyerAddress||invoice.customer?.address) {
+      doc.fillColor(textGray).fontSize(9).text(legal.buyerAddress??invoice.customer.address, 50, 143,{width:260,height:30,ellipsis:true});
     }
+    if(legal.buyerTaxId)doc.fillColor(textGray).fontSize(8).text('Buyer tax ID: '+legal.buyerTaxId,50,176,{width:260});
 
     // Right column — dates
     const rightX = 350;
@@ -130,6 +132,8 @@ export function generateInvoicePdf(invoice) {
     }
 
     // ── Footer ─────────────────────────────────────────────────────────────
+    const identity=[legal.sellerAddress&&'Seller address: '+legal.sellerAddress,legal.sellerTaxId&&'Seller tax ID: '+legal.sellerTaxId,legal.registrationReference&&'Registration reference: '+legal.registrationReference,legal.serialReference&&'Document serial reference: '+legal.serialReference].filter(Boolean).join('\n');
+    if(identity){if(Math.max(y,doc.y)>doc.page.height-180)doc.addPage();else doc.y=Math.max(y+35,doc.y+20);doc.fillColor(textGray).fontSize(8).font('Helvetica').text(identity,50,doc.y,{width:doc.page.width-100});}
     doc
       .fillColor(textGray)
       .fontSize(8)
@@ -141,5 +145,5 @@ export function generateInvoicePdf(invoice) {
 }
 
 function fmt(n) {
-  return new Intl.NumberFormat('en-US', { style: 'currency', currency: getRequestContext().currency ?? 'USD', currencyDisplay: 'code' }).format(n);
+  return new Intl.NumberFormat('en-US', { style: 'currency', currency: getRequestContext().currency ?? 'USD', currencyDisplay: 'code' }).format(String(n));
 }

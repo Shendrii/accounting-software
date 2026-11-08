@@ -4,7 +4,8 @@ import { useMoney } from '@/lib/use-money';
 import { Suspense, useCallback, useEffect, useRef, useState, type FormEvent } from 'react';
 import Link from 'next/link';
 import { Check, Loader2, Upload, X } from 'lucide-react';
-import { approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBillPage, getReceipt, getReceiptPage, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
+import { API_BASE_URL, apiFetch, approveReceipt, attachReceiptToBill, createBillFromReceipt, getAccounts, getBillPage, getReceipt, getReceiptPage, getVendors, rejectReceipt, updateReceipt, uploadReceipt, type Account, type Bill, type Receipt, type ReceiptExtractedData, type Vendor } from '@/lib/api';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { isPaymentAccount, isPurchaseAccount } from '@/lib/account-roles';
 import { decimalUnits } from '@/lib/money';
 import { useWorkspaceData } from '@/lib/use-workspace-data';
@@ -12,6 +13,8 @@ import { LegacyRedirect } from '@/app/components/LegacyRedirect';
 import AccountingDialog from '@/app/components/AccountingDialog';
 import BackToWorklist from '@/app/components/BackToWorklist';
 import ReceiptImage from '@/app/components/ReceiptImage';
+import ReceiptCorrectionDialog from '@/app/components/ReceiptCorrectionDialog';
+import { useWorkspaces } from '@/app/components/WorkspaceProvider';
 import { WorkspaceStatus } from '@/app/components/WorkspaceActivity';
 import { useWorklist, WorklistControls, WorklistPagination } from '@/app/components/WorklistControls';
 import { WorkflowTabs, WorkspaceHeading, WorkspaceNotice, WorkspacePanel } from '@/app/components/WorkspaceUI';
@@ -33,6 +36,7 @@ function validDate(value: string) {
   return /^\d{4}-\d{2}-\d{2}$/.test(value) && !Number.isNaN(date.valueOf()) && date.toISOString().slice(0, 10) === value;
 }
 function status(receipt: Receipt) {
+  if (receipt.status === 'REVERSED') return receipt.journalEntryId ? 'Reversed purchase' : 'Superseded evidence';
   if (receipt.status === 'REJECTED') return 'Rejected';
   if (receipt.status === 'APPROVED') return receipt.billId ? 'Attached to bill' : 'Posted expense';
   return validDate(receipt.extractedData.invoiceDate || receipt.extractedData.date || '') ? 'Needs review' : 'Check date';
@@ -43,6 +47,7 @@ async function loadLookups() {
 }
 
 function DocumentsContent() {
+  const {active}=useWorkspaces();const access=workspacePermissions(active);
   const money = useMoney();
   const state = useWorklist(); const { params, update } = state;
   const selectedId = params.receipt || null;
@@ -84,10 +89,10 @@ function DocumentsContent() {
   }
   return <div className="workspace-page"><div className="workspace-content space-y-5">
     <WorkspaceHeading section="Daily work" title="Document inbox" description="Review source evidence, confirm the amounts, then choose paid purchase, draft bill, or attachment."
-      actions={!selectedId ? <a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a> : undefined} />
+      actions={!selectedId&&access.prepare ? <a href="#upload-receipt" className="workspace-primary"><Upload className="size-4" aria-hidden="true" />Upload receipt</a> : undefined} />
     {error && <WorkspaceNotice title="Upload could not finish">{error}</WorkspaceNotice>}
     {notice && <div role="status" className="rounded-xl border border-emerald-200 bg-emerald-50 p-4 text-sm text-emerald-950">{notice.text} {notice.billId && <Link href={'/purchases/bills/' + notice.billId} className="font-semibold underline">Open bill</Link>}</div>}
-    {!selectedId && <section id="upload-receipt" className="workspace-panel scroll-mt-4 p-4 sm:p-5">
+    {!selectedId&&access.prepare && <section id="upload-receipt" className="workspace-panel scroll-mt-4 p-4 sm:p-5">
       <label className="flex cursor-pointer flex-wrap items-center gap-3">
         <span className="workspace-icon">{uploading ? <Loader2 className="size-4 animate-spin" aria-hidden="true" /> : <Upload className="size-4" aria-hidden="true" />}</span>
         <span className="min-w-32 flex-1"><span className="block text-sm font-semibold">{uploading ? 'Processing receipt…' : 'Add a receipt image'}</span><span className="text-xs text-slate-600">JPEG, PNG, or WebP · Duplicate images are checked.</span></span>
@@ -97,7 +102,7 @@ function DocumentsContent() {
       </label>
     </section>}
     <WorkflowTabs area="purchases" active="documents" />
-    {!selectedId && <WorklistControls state={state} kind="documents" statuses={[["PENDING", "Needs review"], ["APPROVED", "Reviewed"], ["REJECTED", "Rejected"]]} />}
+    {!selectedId && <WorklistControls state={state} kind="documents" statuses={[["PENDING", "Needs review"], ["APPROVED", "Reviewed"], ["REJECTED", "Rejected"], ["REVERSED", "Corrected / superseded"]]} />}
     {queue.error && <WorkspaceNotice title="Receipts could not load" onRetry={queue.retry} />}
     {!selectedId && <WorkspacePanel title="Document queue" description={queue.loading ? 'Loading…' : (queue.data?.total ?? 0) + ' documents'}>
       {queue.loading || !receipts.length ? <p className="p-4 text-sm text-slate-600" role="status">{queue.loading ? 'Loading receipts…' : 'No receipts in this view.'}</p> :
@@ -125,6 +130,9 @@ function DocumentsContent() {
 
 function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReviewState }: { receipt: Receipt; accounts: Account[]; vendors: Vendor[]; bills: Bill[]; onComplete: (receipt: Receipt, text: string) => void; onReviewState: (dirty: boolean, busy: boolean) => void }) {
   const money = useMoney();
+  const { active } = useWorkspaces();
+  const [correcting, setCorrecting] = useState(false);
+  const [postingDate, setPostingDate] = useState(receipt.postingDate?.slice(0,10) || '');
   const original = receipt.extractedData;
   const [data, setData] = useState(() => ({
     vendor: original.vendor ?? '', invoiceNumber: original.invoiceNumber ?? '',
@@ -143,7 +151,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
   const [busy, setBusy] = useState(false);
   const [error, setError] = useState('');
   const [saved, setSaved] = useState(false);
-  const snapshot = JSON.stringify({ data, vendorId });
+  const snapshot = JSON.stringify({ data, vendorId, postingDate });
   const savedSnapshot = useRef(snapshot);
   const dirty = editableReceipt(receipt) && (snapshot !== savedSnapshot.current || Boolean(accountId || paymentId || billId !== (receipt.billId || '') || dueDate !== (validDate(original.dueDate || '') ? original.dueDate || '' : '') || paidInFull));
   const stateCallback = useRef(onReviewState); stateCallback.current = onReviewState;
@@ -156,7 +164,8 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
   const total = decimalUnits(data.total);
   const partial = decimalUnits(data.balanceDue) > BigInt(0) || decimalUnits(data.amountPaid) > BigInt(0) && decimalUnits(data.amountPaid) < total;
   const duplicate = availableBills.find(bill => bill.vendorId === vendorId && data.invoiceNumber.trim() && bill.vendorInvoiceNo === data.invoiceNumber.trim().toUpperCase());
-  const editable = receipt.status === 'PENDING';
+  const access=workspacePermissions(active);
+  const editable = receipt.status === 'PENDING'&&access.prepare;
   function field(name: keyof Omit<typeof data, 'items'>, label: string, type = 'text', required = false) {
     return <label className="grid gap-1 text-sm font-medium">{label}<input className="workspace-field" type={type} required={required} aria-invalid={Boolean(issues[name])} aria-describedby={issues[name] ? 'receipt-' + name + '-error' : undefined} disabled={busy || !editable}
       {...(type === 'number' ? { min: name === 'total' ? '0.01' : '0', step: '0.01' } : {})} value={data[name]}
@@ -165,7 +174,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
   async function save() {
     if (Object.keys(issues).length) throw new Error(Object.values(issues)[0]);
     const extractedData: ReceiptExtractedData = { ...original, ...data, date: data.invoiceDate, amount: data.total };
-    const result = await updateReceipt(receipt.id, { extractedData, vendorId: vendorId || null }); savedSnapshot.current = snapshot; return result;
+    const result = await updateReceipt(receipt.id, { extractedData, vendorId: vendorId || null, postingDate: postingDate || null }); savedSnapshot.current = snapshot; return result;
   }
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); setBusy(true); setError('');
@@ -194,6 +203,7 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
       <div className="grid gap-3 sm:grid-cols-2">{field('vendor', 'Vendor shown on document')}{field('invoiceNumber', 'Supplier invoice / receipt number')}
         {field('invoiceDate', 'Confirmed document date', 'date', true)}{field('total', 'Document total (' + money.currency + ')', 'number', action !== 'attach')}
         {field('amountPaid', 'Paid amount shown on document', 'number')}{field('balanceDue', 'Outstanding amount shown on document', 'number')}</div>
+      <label className="grid gap-1.5 text-sm font-semibold">Accounting posting date<input type="date" className="workspace-field" value={postingDate} disabled={!editable || busy} onChange={event => setPostingDate(event.target.value)} /><span className="text-xs font-normal text-slate-600">Leave blank to use the source document date. For a correction or late entry, choose an open accounting date; the source date stays in the evidence.</span></label>
       {issues.items && <p role="alert" className="text-sm text-red-800">{issues.items}</p>}
       <details className="rounded-lg border border-slate-200 p-3"><summary className="min-h-8 cursor-pointer text-sm font-semibold">Check line items, tax, and tip</summary>
         <p className="mb-3 text-xs text-slate-600">When items are present, their amounts plus tax and tip must equal the document total.</p>
@@ -232,13 +242,19 @@ function ReceiptReview({ receipt, accounts, vendors, bills, onComplete, onReview
         {error && <WorkspaceNotice title="Review could not finish">{error}</WorkspaceNotice>}
         {saved && <p role="status" className="text-sm text-emerald-800">Details saved. Nothing has been posted.</p>}
         <div className="document-actions flex flex-wrap gap-2 border-t border-slate-200 pt-4">
-          <button type="submit" className="workspace-primary" disabled={busy || action === 'expense' && partial || action === 'bill' && Boolean(duplicate)}><Check className="size-4" aria-hidden="true" />{busy ? 'Saving…' : action === 'expense' ? 'Post paid purchase' : action === 'bill' ? 'Create draft bill' : 'Attach document'}</button>
+          <button type="submit" className="workspace-primary" disabled={busy || action === 'expense' && (!access.post||partial) || action === 'bill' && Boolean(duplicate)}><Check className="size-4" aria-hidden="true" />{busy ? 'Saving…' : action === 'expense' ? 'Post paid purchase' : action === 'bill' ? 'Create draft bill' : 'Attach document'}</button>
           <button type="button" className="workspace-button" disabled={busy} onClick={async () => { setBusy(true); setError(''); try { await save(); setSaved(true); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not save.'); } finally { setBusy(false); } }}>Save details only</button>
           <button type="button" className="workspace-button text-red-800" disabled={busy} onClick={async () => { setBusy(true); try { onComplete(await rejectReceipt(receipt.id), 'Receipt rejected. Nothing was posted.'); } catch (cause) { setError(cause instanceof Error ? cause.message : 'Could not reject.'); } finally { setBusy(false); } }}>Reject</button>
         </div>
       </>}
-      {!editable && <p className="text-sm text-slate-600">Reviewed documents are read-only.</p>}
+      {!editable && <div className="space-y-3"><p className="text-sm text-slate-600">{!access.prepare?'Your workspace access is read only.':'Reviewed documents are read-only; corrections retain the original evidence.'}</p>
+        {receipt.correction && <p className="text-sm"><strong>{status(receipt)}</strong> · {receipt.correction.date.slice(0,10)} · {receipt.correction.reason}</p>}
+        {receipt.correction && !receipt.replacement && ['OWNER','ADMIN','APPROVER'].includes(active?.role||'') && <button type="button" className="workspace-button" disabled={busy} onClick={async()=>{setBusy(true);setError('');try{const response=await apiFetch(API_BASE_URL+'/api/receipts/'+receipt.id+'/replacement',{method:'POST'});const result=await response.json();if(!response.ok)throw new Error(result.error);onComplete(result,'Replacement draft created; source evidence retained.');}catch(e){setError(e instanceof Error?e.message:'Could not create replacement.');}finally{setBusy(false);}}}>Create a replacement draft</button>}
+        {receipt.replacement && <Link className="workspace-primary" href={'/purchases/documents?receipt=' + receipt.replacement.id}>Review replacement draft</Link>}
+        {receipt.status === 'APPROVED' && ['OWNER','ADMIN','APPROVER'].includes(active?.role || '') && <button type="button" className="workspace-button" onClick={() => setCorrecting(true)}>Correct this document</button>}
+      </div>}
     </form>
+    {correcting && <ReceiptCorrectionDialog receipt={receipt} onDismiss={() => setCorrecting(false)} onComplete={onComplete} />}
   </div>;
 }
 

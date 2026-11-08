@@ -22,6 +22,8 @@ model Account {
   isActive         Boolean           @default(true)
   isBankAccount    Boolean           @default(false)
   role             AccountRole       @default(GENERAL)
+  reportingGroup String?
+  cashFlowCategory String?
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   journalLines     JournalLine[]
@@ -34,20 +36,30 @@ model Account {
 }
 
 model JournalEntry {
+  scheduleOccurrence ScheduleOccurrence? @relation("SchedulePosting")
+  scheduleReversalOccurrence ScheduleOccurrence? @relation("ScheduleReversal")
   id                 String        @id @default(cuid())
   workspaceId        String
   workspace          Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   date               DateTime
   description        String
   referenceNo        String?
+  createdById        String?
+  lastPreparedById   String?
+  lastPreparedAt     DateTime?
+  postedById         String?
+  postedAt           DateTime?
+  controlOverrideReason String?
   status             Status        @default(DRAFT)
   isRecurring        Boolean       @default(false)
   recurrenceInterval String?
+  recurrenceAnchorDay Int?
   nextDueDate        DateTime?
   createdAt          DateTime      @default(now())
   updatedAt          DateTime      @updatedAt
   journalLines       JournalLine[]
   receipt            Receipt?
+  receiptCorrection  ReceiptCorrection?
   invoices           Invoice[]
   bills              Bill[]
   billPosting        Bill?         @relation("BillPosting")
@@ -71,6 +83,7 @@ model Receipt {
   workspace      Workspace     @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
   imageUrl       String
   imageHash      String?
+  postingDate    DateTime? @db.Date
   extractedData  Json
   status         ReceiptStatus @default(PENDING)
   journalEntryId String?       @unique
@@ -83,11 +96,29 @@ model Receipt {
   vendor         Vendor?       @relation(fields: [vendorId], references: [id])
   bill           Bill?         @relation(fields: [billId], references: [id])
   image          ReceiptImage?
+  correction     ReceiptCorrection?
+  replacesReceiptId String? @unique
+  replacesReceipt Receipt? @relation("ReceiptReplacement", fields: [replacesReceiptId], references: [id], onDelete: Restrict)
+  replacement Receipt? @relation("ReceiptReplacement")
 
   @@index([workspaceId, status, createdAt])
   @@index([workspaceId, createdAt])
   @@index([billId])
   @@unique([workspaceId, imageHash])
+}
+
+model ReceiptCorrection {
+  receiptId String @id
+  receipt Receipt @relation(fields: [receiptId], references: [id], onDelete: Restrict)
+  requestId String
+  kind String
+  date DateTime @db.Date
+  reason String
+  createdById String
+  createReplacement Boolean
+  reversalEntryId String? @unique
+  reversalEntry JournalEntry? @relation(fields: [reversalEntryId], references: [id], onDelete: Restrict)
+  createdAt DateTime @default(now())
 }
 
 model ReceiptImage {
@@ -105,6 +136,7 @@ model JournalLine {
   description    String?
   createdAt      DateTime     @default(now())
   journalEntry   JournalEntry @relation(fields: [journalEntryId], references: [id], onDelete: Cascade)
+  bankGroupLine BankMatchLine?
   account        Account      @relation(fields: [accountId], references: [id])
 
   @@index([journalEntryId])
@@ -125,6 +157,7 @@ model Customer {
   createdAt   DateTime  @default(now())
   updatedAt   DateTime  @updatedAt
   invoices    Invoice[]
+  taxProfile Json?
 }
 
 model Vendor {
@@ -140,6 +173,7 @@ model Vendor {
   updatedAt   DateTime  @updatedAt
   bills       Bill[]
   receipts    Receipt[]
+  taxProfile Json?
 }
 
 model Invoice {
@@ -156,6 +190,9 @@ model Invoice {
   tax            Decimal       @default(0) @db.Decimal(15, 2)
   total          Decimal       @db.Decimal(15, 2)
   notes          String?
+  taxCodeId      String?
+  invoiceDetails Json?
+  legalSnapshot Json?
   journalEntryId String?       @unique
   journalEntry   JournalEntry? @relation(fields: [journalEntryId], references: [id])
   postingEntryId String?       @unique
@@ -163,6 +200,7 @@ model Invoice {
   emailSentAt    DateTime?
   isOpeningBalance Boolean      @default(false)
   payments       InvoicePayment[]
+  creditAllocations CreditAllocation[]
   lines          InvoiceLine[]
   createdAt      DateTime      @default(now())
   updatedAt      DateTime      @updatedAt
@@ -214,9 +252,12 @@ model Bill {
   dueDate            DateTime
   status             BillStatus    @default(DRAFT)
   total              Decimal       @db.Decimal(15, 2)
+  tax                Decimal       @default(0) @db.Decimal(15,2)
+  taxCodeId          String?
   notes              String?
   isRecurring        Boolean       @default(false)
   recurrenceInterval String?
+  recurrenceAnchorDay Int?
   nextDueDate        DateTime?
   journalEntryId     String?       @unique
   journalEntry       JournalEntry? @relation(fields: [journalEntryId], references: [id])
@@ -224,6 +265,7 @@ model Bill {
   isOpeningBalance   Boolean       @default(false)
   postingEntry       JournalEntry? @relation("BillPosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
   payments           BillPayment[]
+  creditAllocations CreditAllocation[]
   lines              BillLine[]
   receipts           Receipt[]
   createdAt          DateTime      @default(now())
@@ -279,6 +321,12 @@ model BankTransaction {
   reconciliationId String?
   reconciliation Reconciliation? @relation(fields: [reconciliationId], references: [id], onDelete: Restrict)
   createdAt     DateTime  @default(now())
+  groupMatch BankMatchRow?
+  importId String?
+  sourceRow Int?
+  externalId String?
+  @@unique([accountId,externalId])
+  @@index([importId])
 
   @@index([workspaceId, accountId, date])
   @@index([reconciliationId])
@@ -305,6 +353,7 @@ enum ReceiptStatus {
   PENDING
   APPROVED
   REJECTED
+  REVERSED
 }
 
 enum AccountType {
@@ -351,12 +400,40 @@ model User {
   passwordHash     String?
   name             String
   avatarUrl        String?
+  emailVerifiedAt  DateTime?
+  sessionVersion   Int               @default(0)
+  sessions         AuthSession[]
+  authActions      AuthAction[]
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
   ownedWorkspaces  Workspace[]       @relation("WorkspaceOwner")
   workspaceMembers WorkspaceMember[]
   providers        AuthProvider[]
   invitesSent      WorkspaceInvite[] @relation("InviteSender")
+}
+
+model AuthSession {
+  id        String @id
+  userId    String
+  user      User @relation(fields: [userId], references: [id], onDelete: Cascade)
+  version   Int
+  expiresAt DateTime
+  revokedAt DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, expiresAt])
+}
+
+model AuthAction {
+  id        String @id @default(cuid())
+  purpose   String
+  tokenHash String @unique
+  userId    String?
+  user      User? @relation(fields: [userId], references: [id], onDelete: Cascade)
+  payload   Json?
+  expiresAt DateTime
+  usedAt    DateTime?
+  createdAt DateTime @default(now())
+  @@index([userId, purpose])
 }
 
 model Workspace {
@@ -375,6 +452,13 @@ model Workspace {
   accountingBasis String            @default("ACCRUAL")
   taxSettings      Json?
   setupCompletedAt DateTime?
+  separateCloseReviewer Boolean @default(false)
+  memberCanPost    Boolean @default(false)
+  requireJournalApproval Boolean @default(false)
+  periods          AccountingPeriod[]
+  auditEvents      AuditEvent[]
+  recurringRuns    RecurringRun[]
+  recurringOccurrences RecurringOccurrence[]
   ownerUser        User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
   createdAt        DateTime          @default(now())
   updatedAt        DateTime          @updatedAt
@@ -390,6 +474,313 @@ model Workspace {
   bankTransactions BankTransaction[]
   reconciliations  Reconciliation[]
   openingBalance   OpeningBalanceBatch?
+  credits          CreditBalance[]
+  financeActions   FinanceAction[]
+  bankMatchGroups BankMatchGroup[]
+  bankImports BankImport[]
+  invoiceSettings Json?
+  taxCodes TaxCode[]
+  taxRecords TaxRecord[]
+  cashFlowReviews CashFlowReview[]
+  collectionActivities CollectionActivity[]
+  accountingSchedules AccountingSchedule[]
+}
+
+model CollectionActivity {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ kind String
+ partyId String
+ documentId String?
+ type String
+ note String
+ promiseDate DateTime? @db.Date
+ promiseAmount Decimal? @db.Decimal(15,2)
+ status String @default("OPEN")
+ outcome String?
+ createdById String
+ createdAt DateTime @default(now())
+ resolvedById String?
+ resolvedAt DateTime?
+ @@index([workspaceId,kind,partyId,createdAt])
+ @@index([workspaceId,status,promiseDate])
+}
+model AccountingSchedule {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ type String
+ name String
+ reference String
+ support String
+ startDate DateTime @db.Date
+ periods Int
+ anchorDay Int?
+ amount Decimal @db.Decimal(15,2)
+ residual Decimal @default(0) @db.Decimal(15,2)
+ debitAccountId String
+ creditAccountId String
+ sourceEntryId String?
+ sourceAssetId String?
+ reversalPolicy String @default("NONE")
+ noReversalReason String?
+ status String @default("ACTIVE")
+ pausedFrom DateTime? @db.Date
+ stateReason String?
+ createdById String
+ createdAt DateTime @default(now())
+ occurrences ScheduleOccurrence[]
+ @@unique([workspaceId,reference])
+ @@index([workspaceId,sourceEntryId,sourceAssetId])
+}
+model ScheduleOccurrence {
+ id String @id @default(cuid())
+ scheduleId String
+ schedule AccountingSchedule @relation(fields:[scheduleId],references:[id],onDelete:Restrict)
+ index Int
+ date DateTime @db.Date
+ amount Decimal @db.Decimal(15,2)
+ waivedReason String?
+ archivedForPause Boolean @default(false)
+ journalEntryId String @unique
+ journalEntry JournalEntry @relation("SchedulePosting",fields:[journalEntryId],references:[id],onDelete:Restrict)
+ reversalEntryId String? @unique
+ reversalEntry JournalEntry? @relation("ScheduleReversal",fields:[reversalEntryId],references:[id],onDelete:Restrict)
+ @@unique([scheduleId,index])
+}
+
+model CashFlowReview {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ journalEntryId String
+ allocations Json
+ reason String
+ reviewedById String
+ reviewedAt DateTime @default(now())
+ @@unique([workspaceId,journalEntryId])
+}
+
+model TaxCode {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ code String
+ label String
+ purpose String
+ accountId String?
+ rate Decimal? @db.Decimal(9,6)
+ effectiveFrom DateTime @db.Date
+ effectiveTo DateTime? @db.Date
+ registration String?
+ isActive Boolean @default(true)
+ createdAt DateTime @default(now())
+ @@unique([workspaceId,code])
+}
+model TaxRecord {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ source String
+ sourceId String
+ postingEntryId String
+ codeId String?
+ codeSnapshot Json
+ date DateTime @db.Date
+ baseAmount Decimal @db.Decimal(15,2)
+ amount Decimal @db.Decimal(15,2)
+ evidenceStatus String @default("NOT_REQUIRED")
+ evidenceReference String?
+ @@index([workspaceId,date])
+ @@unique([workspaceId,source,sourceId])
+}
+
+model BankMatchGroup {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ accountId String
+ reason String
+ createdById String
+ createdAt DateTime @default(now())
+ lines BankMatchLine[]
+ rows BankMatchRow[]
+ @@index([workspaceId,accountId])
+}
+model BankMatchLine {
+ id String @id @default(cuid())
+ groupId String
+ group BankMatchGroup @relation(fields:[groupId],references:[id],onDelete:Cascade)
+ journalLineId String @unique
+ journalLine JournalLine @relation(fields:[journalLineId],references:[id],onDelete:Restrict)
+}
+model BankMatchRow {
+ id String @id @default(cuid())
+ groupId String
+ group BankMatchGroup @relation(fields:[groupId],references:[id],onDelete:Cascade)
+ bankTransactionId String @unique
+ bankTransaction BankTransaction @relation(fields:[bankTransactionId],references:[id],onDelete:Restrict)
+}
+model BankImport {
+ id String @id @default(cuid())
+ workspaceId String
+ workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+ accountId String
+ identity String
+ fileName String
+ dateFormat String
+ rows Int
+ imported Int
+ duplicateChoice String
+ createdById String
+ createdAt DateTime @default(now())
+ @@unique([workspaceId,accountId,identity])
+}
+
+model CreditBalance {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId], references:[id], onDelete:Restrict)
+  kind String
+  source String
+  partyId String?
+  partyName String?
+  reference String
+  date DateTime @db.Date
+  amount Decimal @db.Decimal(15,2)
+  accountId String
+  postingEntryId String @unique
+  reversalEntryId String? @unique
+  reason String
+  support String
+  createdById String
+  createdAt DateTime @default(now())
+  allocations CreditAllocation[]
+  refunds CreditRefund[]
+  @@unique([workspaceId,kind,reference])
+  @@index([workspaceId,kind,date])
+}
+
+model CreditAllocation {
+  id String @id @default(cuid())
+  creditId String
+  credit CreditBalance @relation(fields:[creditId],references:[id],onDelete:Restrict)
+  invoiceId String?
+  invoice Invoice? @relation(fields:[invoiceId],references:[id],onDelete:Restrict)
+  billId String?
+  bill Bill? @relation(fields:[billId],references:[id],onDelete:Restrict)
+  date DateTime @db.Date
+  amount Decimal @db.Decimal(15,2)
+  postingEntryId String? @unique
+  reversalEntryId String? @unique
+  reversedDate DateTime? @db.Date
+  reason String?
+  createdAt DateTime @default(now())
+  @@index([creditId,date])
+  @@index([invoiceId])
+  @@index([billId])
+}
+
+model CreditRefund {
+  id String @id @default(cuid())
+  creditId String
+  credit CreditBalance @relation(fields:[creditId],references:[id],onDelete:Restrict)
+  date DateTime @db.Date
+  amount Decimal @db.Decimal(15,2)
+  postingEntryId String @unique
+  reversalEntryId String? @unique
+  reversedDate DateTime? @db.Date
+  reason String
+  @@index([creditId,date])
+}
+
+model FinanceAction {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields:[workspaceId],references:[id],onDelete:Restrict)
+  requestId String
+  fingerprint String
+  result Json
+  createdAt DateTime @default(now())
+  @@unique([workspaceId,requestId])
+}
+
+model RecurringRun {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  requestId String
+  kind String
+  cutoffDate DateTime @db.Date
+  createdById String
+  result Json
+  createdAt DateTime @default(now())
+  occurrences RecurringOccurrence[]
+  @@unique([workspaceId, requestId])
+}
+
+model RecurringOccurrence {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  runId String
+  run RecurringRun @relation(fields: [runId], references: [id], onDelete: Restrict)
+  sourceType String
+  sourceId String
+  scheduledDate DateTime @db.Date
+  instanceId String
+  createdAt DateTime @default(now())
+  @@unique([workspaceId, sourceType, sourceId, scheduledDate])
+  @@index([workspaceId, instanceId])
+}
+
+model AccountingPeriod {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  startDate   DateTime @db.Date
+  endDate     DateTime @db.Date
+  targetDate  DateTime @db.Date
+  status      String @default("OPEN")
+  createdById String
+  closedById  String?
+  closedAt    DateTime?
+  proof       Json?
+  createdAt   DateTime @default(now())
+  reviews     PeriodAccountReview[]
+  @@unique([workspaceId, startDate, endDate])
+  @@index([workspaceId, status, endDate])
+}
+
+model PeriodAccountReview {
+  id          String @id @default(cuid())
+  periodId    String
+  period      AccountingPeriod @relation(fields: [periodId], references: [id], onDelete: Restrict)
+  accountId   String
+  status      String @default("OPEN")
+  ownerId     String
+  dueDate     DateTime @db.Date
+  support     String
+  reason      String
+  fingerprint String
+  reviewedById String
+  reviewedAt  DateTime @default(now())
+  @@unique([periodId, accountId])
+}
+
+model AuditEvent {
+  id          String @id @default(cuid())
+  workspaceId String
+  workspace   Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  actorId     String
+  action      String
+  entityId    String
+  reason      String?
+  data        Json
+  createdAt   DateTime @default(now())
+  @@index([workspaceId, createdAt])
+  @@index([workspaceId, entityId])
 }
 
 model OpeningBalanceBatch {
@@ -453,6 +844,8 @@ enum WorkspaceRole {
   OWNER
   ADMIN
   MEMBER
+  APPROVER
+  VIEWER
 }
 
 enum AuthProviderType {

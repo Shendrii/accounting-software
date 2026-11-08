@@ -3,12 +3,15 @@
 import { useEffect, useRef, useState } from 'react';
 import { usePathname } from 'next/navigation';
 import { LogOut, User } from 'lucide-react';
-import { clearSession, useCurrentUser, useIsAuthenticated } from '@/lib/auth';
+import { useCurrentUser, useIsAuthenticated } from '@/lib/auth';
+import { logout } from '@/lib/account-access';
 import { hideAppChrome } from '@/lib/public-paths';
 
 export function ProfileButton() {
   const pathname = usePathname();
   const [open, setOpen] = useState(false);
+  const [signingOut, setSigningOut] = useState(false);
+  const [logoutError, setLogoutError] = useState('');
   const signedIn = useIsAuthenticated();
   const user = useCurrentUser();
   const name = user?.name || '';
@@ -29,9 +32,9 @@ export function ProfileButton() {
 
   if (hideAppChrome(pathname, signedIn) || !signedIn) return null;
 
-  function onLogout() {
-    clearSession();
-    window.location.href = '/login';
+  async function onLogout() {
+    setSigningOut(true); setLogoutError('');
+    try { await logout(); } catch { setLogoutError('Sign-out could not reach the server. Try again.'); setSigningOut(false); }
   }
 
   return (
@@ -62,11 +65,13 @@ export function ProfileButton() {
           {/* Actions */}
           <button
             onClick={onLogout}
+            disabled={signingOut}
             className="w-full flex items-center gap-2.5 px-4 py-2.5 text-sm text-red-600 dark:text-red-400 hover:bg-red-50 dark:hover:bg-red-900/20 transition-colors"
           >
             <LogOut className="h-4 w-4" />
-            Log out
+            {signingOut ? 'Signing out…' : 'Log out'}
           </button>
+          {logoutError && <p role="alert" className="p-3 text-sm text-rose-800">{logoutError}</p>}
         </div>
       )}
     </div>

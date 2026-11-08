@@ -9,6 +9,7 @@
   "scripts": {
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
+    "test:readiness": "node --experimental-test-module-mocks scripts/test-readiness.mjs",
     "postinstall": "npm run db:generate",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",

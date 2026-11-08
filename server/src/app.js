@@ -19,6 +19,13 @@ import recurringRouter from './routes/recurring.js';
 import authRouter from './routes/auth.js';
 import workspacesRouter from './routes/workspaces.js';
 import workspaceSettingsRouter from './routes/workspaceSettings.js';
+import periodsRouter from './routes/periods.js';
+import auditRouter from './routes/audit.js';
+import settlementsRouter from './routes/settlements.js';
+import taxRouter from './routes/tax.js';
+import reportAnalysisRouter from './routes/reportAnalysis.js';
+import collectionsRouter from './routes/collections.js';
+import schedulesRouter from './routes/schedules.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireWorkspace } from './middleware/workspace.js';
 import { withRequestContext } from './lib/requestContext.js';
@@ -48,6 +55,7 @@ function parseCorsOrigins() {
 const corsOrigins = parseCorsOrigins();
 app.use(
   cors({
+    credentials: true,
     origin(origin, callback) {
       if (!origin) return callback(null, true);
       if (corsOrigins.length === 0) {
@@ -86,6 +94,13 @@ app.get('/api/health', (req, res) => {
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/workspaces', requireAuth, workspacesRouter);
 app.use('/api/workspace-settings', requireWorkspace, workspaceSettingsRouter);
+app.use('/api/periods', requireWorkspace, periodsRouter);
+app.use('/api/audit', requireWorkspace, auditRouter);
+app.use('/api/settlements', requireWorkspace, settlementsRouter);
+app.use('/api/tax', requireWorkspace, taxRouter);
+app.use('/api/report-analysis', requireWorkspace, reportAnalysisRouter);
+app.use('/api/collections', requireWorkspace, collectionsRouter);
+app.use('/api/schedules', requireWorkspace, schedulesRouter);
 app.use('/api/accounts', requireWorkspace, accountsRouter);
 app.use('/api/journal-entries', requireWorkspace, journalEntriesRouter);
 app.use('/api/receipts', requireWorkspace, receiptsRouter);

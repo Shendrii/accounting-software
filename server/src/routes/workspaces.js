@@ -1,9 +1,15 @@
 import crypto from 'node:crypto';
 import express from 'express';
 import prisma from '../db/prisma.js';
+import { emailAddress } from '../lib/authSession.js';
+import { withRequestContext, getRequestContext } from '../lib/requestContext.js';
+import { LedgerError, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
+import { audit } from '../lib/audit.js';
 import { isSmtpConfigured, sendInviteEmail } from '../lib/sendEmail.js';
 
 const router = express.Router();
+const teamTransaction = (req,workspaceId,callback) => withRequestContext({workspaceId,userId:req.user.id,sessionId:req.sessionId,sessionVersion:req.sessionVersion,method:req.method,requiredPermission:'manageTeam'},()=>ledgerTransaction(callback));
+const teamRoles=['ADMIN','APPROVER','MEMBER','VIEWER'];
 
 function slugifyWorkspace(name) {
   const base = name
@@ -28,6 +34,7 @@ router.get('/', async (req, res) => {
         type: m.workspace.type,
         currency: m.workspace.currency, country: m.workspace.country, setupCompletedAt: m.workspace.setupCompletedAt,
         role: m.role,
+        memberCanPost: m.workspace.memberCanPost, requireJournalApproval: m.workspace.requireJournalApproval,
         ownerUserId: m.workspace.ownerUserId,
       }))
     );
@@ -96,8 +103,10 @@ router.get('/:workspaceId/invitations', async (req, res) => {
 
 router.post('/invite', async (req, res) => {
   try {
-    const { workspaceId, email, role } = req.body;
-    if (!workspaceId || !email) return res.status(400).json({ error: 'workspaceId and email are required' });
+    const { workspaceId } = req.body; const email=emailAddress(req.body.email);const role=req.body.role??'MEMBER';
+    if (typeof workspaceId !== 'string' || !workspaceId || workspaceId.length > 120 || !email) return res.status(400).json({ error: 'workspaceId and email are required' });
+    if(!req.user.emailVerifiedAt)return res.status(403).json({error:'Verify your email before inviting team members.'});
+    if(!teamRoles.includes(role))return res.status(400).json({error:'Choose admin, reviewer, bookkeeper or read-only access. Ownership cannot be granted by invitation.'});
 
     const me = await prisma.workspaceMember.findFirst({
       where: { workspaceId, userId: req.user.id },
@@ -108,7 +117,9 @@ router.post('/invite', async (req, res) => {
 
     const workspace = await prisma.workspace.findUnique({ where: { id: workspaceId } });
 
-    const invite = await prisma.workspaceInvite.create({
+    const invite = await teamTransaction(req,workspaceId,async tx=>{
+      if(role==='ADMIN'&&getRequestContext().authorization.role!=='OWNER')throw new LedgerError('Only the owner can grant admin access.',403);
+      const created=await tx.workspaceInvite.create({
       data: {
         workspaceId,
         email,
@@ -117,6 +128,8 @@ router.post('/invite', async (req, res) => {
         expiresAt: new Date(Date.now() + 1000 * 60 * 60 * 24 * 7),
         invitedById: req.user.id,
       },
+      });
+      await audit(tx,workspaceId,'WORKSPACE_INVITED',created.id,{email,role});return created;
     });
 
     const clientBase = process.env.APP_CLIENT_URL?.replace(/\/$/, '') || 'http://localhost:3000';
@@ -142,19 +155,37 @@ router.post('/invite', async (req, res) => {
       inviteUrl,
       emailSent,
     });
-  } catch {
-    res.status(500).json({ error: 'Failed to create invite' });
+  } catch (error) {
+    sendLedgerError(res,error,'Failed to create invite.');
   }
+});
+
+router.put('/:workspaceId/members/:memberId', async (req,res) => {
+  try {
+    const {workspaceId,memberId}=req.params;const {role}=req.body;
+    if(!teamRoles.includes(role))throw new LedgerError('Choose admin, reviewer, bookkeeper or read-only access.',400);
+    const result=await teamTransaction(req,workspaceId,async tx=>{
+      const actor=getRequestContext().authorization.role;
+      const member=await tx.workspaceMember.findFirst({where:{id:memberId,workspaceId}});
+      if(!member)throw new LedgerError('Workspace member not found.',404);
+      if(member.role==='OWNER')throw new LedgerError('Workspace ownership cannot be changed here.',403);
+      if(actor!=='OWNER'&&(role==='ADMIN'||member.role==='ADMIN'))throw new LedgerError('Only the owner can change admin access.',403);
+      const updated=await tx.workspaceMember.update({where:{id:member.id},data:{role}});
+      await audit(tx,workspaceId,'MEMBER_ROLE_CHANGED',member.id,{userId:member.userId,before:member.role,after:role});return updated;
+    });res.json(result);
+  }catch(error){sendLedgerError(res,error,'Workspace role could not save.');}
 });
 
 router.post('/accept-invite', async (req, res) => {
   try {
+    if (!req.user.emailVerifiedAt) return res.status(403).json({ error: 'Verify your email before accepting a workspace invitation.' });
     const { token } = req.body;
     if (!token) return res.status(400).json({ error: 'token is required' });
 
     const invite = await prisma.workspaceInvite.findUnique({ where: { token } });
     if (!invite) return res.status(404).json({ error: 'Invite not found' });
     if (invite.acceptedAt) return res.status(400).json({ error: 'Invite already accepted' });
+    if (!teamRoles.includes(invite.role)) return res.status(400).json({ error: 'Ask the owner to reissue this invitation with a supported team role.' });
     if (invite.expiresAt < new Date()) return res.status(400).json({ error: 'Invite expired' });
     if (invite.email.toLowerCase() !== req.user.email.toLowerCase()) {
       return res.status(403).json({ error: 'Invite email does not match your account email' });

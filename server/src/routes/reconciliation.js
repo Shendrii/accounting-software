@@ -1,8 +1,13 @@
+import {restoreWorkspaceContext} from '../middleware/workspace.js';
 import express from 'express';
 import multer from 'multer';
-import { parse } from 'csv-parse/sync';
+import {parseStatement,importPreview,commitStatement} from '../lib/statementImport.js';
 import { Prisma } from '@prisma/client';
 import prisma from '../db/prisma.js';
+import { demand } from '../lib/permissions.js';
+import {audit} from '../lib/audit.js';
+import {once} from '../lib/settlements.js';
+import {groupMatch} from '../lib/bankMatches.js';
 import {
   Decimal, LedgerError, createPosting, decimalInput, decimalSum, ledgerAccounts, ledgerDate,
   ledgerTransaction, nextDay, sendLedgerError,
@@ -23,7 +28,7 @@ function bankAmount(line) {
 
 async function bankAccount(tx, workspaceId, accountId) {
   if (typeof accountId !== 'string' || !accountId) throw new LedgerError('Choose a bank account.');
-  const account = await tx.account.findFirst({ where: { id: accountId, workspaceId, type: 'ASSET', isBankAccount: true, isActive: true } });
+  const account = await tx.account.findFirst({ where: { id: accountId, workspaceId, role:{in:['BANK','CREDIT_CARD']}, isActive: true } });
   if (!account) throw new LedgerError('Choose an active bank account in this workspace.', 404);
   return account;
 }
@@ -81,7 +86,12 @@ async function statementReview(tx, workspaceId, input) {
   const openingAgrees = openingBook.eq(prior?.proof.adjustedBook ?? opening);
   const byId = new Map(candidates.map(line => [line.id, line]));
   const matched = new Set();
+  const groups=await tx.bankMatchGroup.findMany({where:{workspaceId,accountId,rows:{some:{bankTransactionId:{in:transactions.map(r=>r.id)}}}},include:{lines:true,rows:true}});
+  const transactionIds=new Set(transactions.map(r=>r.id));
+  const groupByRow=new Map(groups.flatMap(g=>g.rows.map(r=>[r.bankTransactionId,g])));
   const bankTransactions = transactions.map(row => {
+    const group=groupByRow.get(row.id);
+    if(group){const groupLines=group.lines.map(l=>byId.get(l.journalLineId));const valid=group.rows.every(r=>transactionIds.has(r.bankTransactionId))&&groupLines.every(Boolean)&&decimalSum(transactions.filter(r=>group.rows.some(gr=>gr.bankTransactionId===r.id)).map(r=>r.amount)).eq(decimalSum(groupLines.filter(Boolean).map(bankAmount)));if(valid)groupLines.forEach(l=>matched.add(l.id));return{...row,validMatch:valid,matchGroupId:group.id,matchLineIds:group.lines.map(l=>l.journalLineId),matchDescription:valid?groupLines.map(l=>l.journalEntry.description).join(' · '):null};}
     const line = row.isMatched ? byId.get(row.matchedLineId) : null;
     const valid = Boolean(line && bankAmount(line).eq(row.amount));
     if (valid) matched.add(line.id);
@@ -140,6 +150,7 @@ router.post('/review', async (req, res) => {
 
 router.post('/complete', async (req, res) => {
   try {
+    demand(req, 'post');
     const workspaceId = req.workspace.id;
     const { accountId, outstandingIds } = req.body;
     if (typeof accountId !== 'string' || !accountId) throw new LedgerError('Choose a bank account.');
@@ -169,8 +180,8 @@ router.post('/complete', async (req, res) => {
           workspaceId, accountId, statementDate: date, statementBalance: proof.statementBalance, status: 'COMPLETE',
           proof: {
             ...proof, completedById: req.user.id,
-            matches: bankTransactions.map(({ id, date, description, amount, matchedLineId, matchDescription }) => ({
-              id, date: date.toISOString(), description, amount: amount.toFixed(2), matchedLineId, matchDescription,
+            matches: bankTransactions.map(({ id, date, description, amount, matchedLineId, matchDescription,matchGroupId,matchLineIds }) => ({
+              id, date: date.toISOString(), description, amount: amount.toFixed(2), matchedLineId, matchDescription,...(matchGroupId&&{matchGroupId,matchLineIds}),
             })),
             outstanding: proof.outstanding.map(line => ({ ...line, date: line.date.toISOString() })),
           },
@@ -180,6 +191,7 @@ router.post('/complete', async (req, res) => {
         where: { workspaceId, accountId, id: { in: bankTransactions.map(row => row.id) } },
         data: { reconciliationId: record.id },
       });
+      await audit(tx,workspaceId,'BANK_RECONCILIATION_COMPLETED',record.id,{accountId,proof:record.proof});
       return record;
     });
     res.status(201).json(result);
@@ -211,8 +223,10 @@ router.post('/match', async (req, res) => {
       if (row.isMatched) throw new LedgerError('Undo the existing match before choosing another.', 409);
       const line = await tx.journalLine.findFirst({ where: { id: journalLineId, ...postedLines(workspaceId, row.accountId) } });
       if (!line) throw new LedgerError('Posted ledger line not found for this bank account.', 404);
+      if(await tx.bankMatchLine.findUnique({where:{journalLineId:line.id}}))throw new LedgerError('This ledger line is already in a grouped match.',409);
       if (!bankAmount(line).eq(row.amount)) throw new LedgerError('The ledger line must have the same amount and direction as the statement transaction.');
       await tx.bankTransaction.update({ where: { id: row.id, workspaceId }, data: { isMatched: true, matchedLineId: line.id } });
+      await audit(tx,workspaceId,'BANK_LINE_MATCHED',row.id,{journalLineId:line.id,amount:row.amount});
     });
     res.json({ success: true });
   } catch (error) {
@@ -225,13 +239,20 @@ router.post('/unmatch', async (req, res) => {
     const workspaceId = req.workspace.id;
     await ledgerTransaction(async tx => {
       const row = await reviewableTransaction(tx, workspaceId, req.body.bankTransactionId);
+      const group=await tx.bankMatchRow.findUnique({where:{bankTransactionId:row.id},include:{group:{include:{rows:{include:{bankTransaction:true}},lines:true}}}});
+      if(group){if(group.group.rows.some(r=>r.bankTransaction.reconciliationId))throw new LedgerError('This group belongs to a completed reconciliation.',409);await tx.bankTransaction.updateMany({where:{workspaceId,id:{in:group.group.rows.map(r=>r.bankTransactionId)}},data:{isMatched:false,matchedLineId:null}});await audit(tx,workspaceId,'BANK_GROUP_UNMATCHED',group.groupId,{group:group.group});await tx.bankMatchGroup.delete({where:{id:group.groupId}});return;}
       await tx.bankTransaction.update({ where: { id: row.id, workspaceId }, data: { isMatched: false, matchedLineId: null } });
+      await audit(tx,workspaceId,'BANK_LINE_UNMATCHED',row.id,{priorLineId:row.matchedLineId});
     });
     res.json({ success: true });
   } catch (error) {
     sendLedgerError(res, error, 'Failed to undo the match.');
   }
 });
+
+router.post('/match-group',async(req,res)=>{try{res.json(await ledgerTransaction(tx=>once(tx,req,'bank-match-group',()=>groupMatch(tx,req,reviewableTransaction))));}catch(e){sendLedgerError(res,e,'Grouped match could not save.');}});
+
+router.post('/transfer',async(req,res)=>{try{demand(req,'post');res.status(201).json(await ledgerTransaction(tx=>once(tx,req,'bank-transfer',async()=>{const {fromAccountId,toAccountId}=req.body;if(fromAccountId===toAccountId)throw new LedgerError('Select different transfer accounts.');const accounts=await ledgerAccounts(tx,req.workspace.id,[fromAccountId,toAccountId]);if([...accounts.values()].some(a=>!['CASH','BANK','CREDIT_CARD'].includes(a.role)))throw new LedgerError('Transfers require cash, bank or card accounts in this workspace.');const amount=decimalInput(req.body.amount,'Transfer amount');if(amount.lte(0)||typeof req.body.reference!=='string'||req.body.reference.trim().length<3)throw new LedgerError('Enter a positive amount and transfer reference.');return createPosting(tx,req.workspace.id,{date:ledgerDate(req.body.date),description:'Transfer · '+req.body.reference.trim(),referenceNo:req.body.reference.trim(),lines:[{accountId:toAccountId,debit:amount},{accountId:fromAccountId,credit:amount}]});})));}catch(e){sendLedgerError(res,e,'Transfer could not save.');}});
 
 router.post('/post-fee', async (req, res) => {
   try {
@@ -302,41 +323,8 @@ router.post('/import', async (req, res) => {
   }
 });
 
-router.post('/import-csv', upload.single('csv'), async (req, res) => {
-  try {
-    if (!req.file) throw new LedgerError('Choose a statement CSV file.');
-    let records;
-    try { records = parse(req.file.buffer, { columns: true, skip_empty_lines: true, trim: true, bom: true }); }
-    catch { throw new LedgerError('The statement CSV could not be read. Check its columns and rows.'); }
-    const headers = Object.keys(records[0] ?? {});
-    const find = (...names) => headers.find(header => names.includes(header.trim().toLowerCase()));
-    const dateCol = find('date', 'transaction date', 'txn date', 'trans date');
-    const amountCol = find('amount', 'amt');
-    const debitCol = find('debit', 'withdrawal', 'withdrawals');
-    const creditCol = find('credit', 'deposit', 'deposits');
-    const descCol = find('description', 'memo', 'narrative', 'details', 'note', 'desc');
-    if (!dateCol || !(amountCol || debitCol || creditCol)) throw new LedgerError('CSV needs a date and an amount or debit and credit columns.');
-    const clean = value => String(value ?? '').trim().replace(/^(-?)\$/, '$1').replaceAll(',', '');
-    const rows = records.map((row, index) => {
-      try {
-        const rawDate = row[dateCol];
-        const usDate = /^(\d{1,2})\/(\d{1,2})\/(\d{4})$/.exec(rawDate);
-        const date = usDate ? [usDate[3], usDate[1].padStart(2, '0'), usDate[2].padStart(2, '0')].join('-') : rawDate;
-        ledgerDate(date, 'Transaction date');
-        const amount = amountCol ? signedAmount(clean(row[amountCol]), 'Amount') :
-          decimalInput(clean(row[creditCol]) || 0, 'Credit').minus(decimalInput(clean(row[debitCol]) || 0, 'Debit'));
-        return { date, description: row[descCol] || 'Statement transaction', amount: amount.toFixed(2) };
-      } catch (error) {
-        if (error instanceof LedgerError) throw new LedgerError('CSV row ' + (index + 2) + '. ' + error.message);
-        throw error;
-      }
-    });
-    const imported = await importTransactions(req.workspace.id, req.body.accountId, rows);
-    res.status(201).json({ imported, suggestions: 0, total: rows.length });
-  } catch (error) {
-    sendLedgerError(res, error, 'Failed to import the statement CSV.');
-  }
-});
+router.post('/import-csv/preview',upload.single('csv'),restoreWorkspaceContext,async(req,res)=>{try{const parsed=parseStatement(req);await bankAccount(prisma,req.workspace.id,req.body.accountId);res.json(await importPreview(prisma,req,parsed));}catch(e){sendLedgerError(res,e,'Statement preview could not load.');}});
+router.post('/import-csv',upload.single('csv'),restoreWorkspaceContext,async(req,res)=>{try{const parsed=parseStatement(req);res.status(201).json(await ledgerTransaction(async tx=>{await bankAccount(tx,req.workspace.id,req.body.accountId);return commitStatement(tx,req,parsed);}));}catch(e){sendLedgerError(res,e,'Statement import could not finish.');}});
 
 // Existing readers use these routes to inspect available transactions and matches.
 router.get('/:accountId/suggestions', async (req, res) => {
@@ -363,7 +351,8 @@ router.get('/:accountId/suggestions', async (req, res) => {
 
 async function available(tx, workspaceId, accountId) {
   const rows = await tx.bankTransaction.findMany({ where: { workspaceId, accountId }, orderBy: { date: 'asc' } });
-  const matched = rows.filter(row => row.isMatched && row.matchedLineId).map(row => row.matchedLineId);
+  const grouped=await tx.bankMatchLine.findMany({where:{group:{workspaceId,accountId}},select:{journalLineId:true}});
+  const matched = [...rows.filter(row => row.isMatched && row.matchedLineId).map(row => row.matchedLineId),...grouped.map(l=>l.journalLineId)];
   const lines = await tx.journalLine.findMany({
     where: { ...postedLines(workspaceId, accountId), id: { notIn: matched } },
     include: journalDetail,

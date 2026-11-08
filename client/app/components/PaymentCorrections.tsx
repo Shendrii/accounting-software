@@ -11,7 +11,7 @@ export function PaymentCorrections({ kind, documentId, payments, onCorrected, on
   const { active } = useWorkspaces(); const money = useMoney();
   const [selected, setSelected] = useState<PaymentHistory | null>(null); const [busy, setBusy] = useState(false); const [error, setError] = useState('');
   const request = useRef<{ signature: string; id: string } | null>(null);
-  const canCorrect = active?.role === 'OWNER' || active?.role === 'ADMIN';
+  const canCorrect = ['OWNER','ADMIN','APPROVER'].includes(active?.role??'');
   async function submit(event: FormEvent<HTMLFormElement>) {
     event.preventDefault(); if (!selected || busy) return;
     const values = new FormData(event.currentTarget); const date = String(values.get('date')); const reason = String(values.get('reason')).trim();

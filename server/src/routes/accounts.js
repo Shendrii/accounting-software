@@ -2,6 +2,8 @@ import express from 'express';
 import prisma from '../db/prisma.js';
 import { LedgerError, accountBalance, ledgerBalances, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
 import { accountRole } from '../lib/accountRoles.js';
+import { demand } from '../lib/permissions.js';
+import { audit } from '../lib/audit.js';
 
 const router = express.Router();
 
@@ -34,6 +36,7 @@ router.get('/:id', async (req, res) => {
           orderBy: {
             createdAt: 'desc',
           },
+          take:25,
         },
       },
     });
@@ -51,6 +54,7 @@ router.get('/:id', async (req, res) => {
 // Create new account
 router.post('/', async (req, res) => {
   try {
+    demand(req, 'manageBooks');
     const { code, name, type, description, isActive, isBankAccount, role } = req.body;
 
     if (!code || !name || !type) {
@@ -58,8 +62,9 @@ router.post('/', async (req, res) => {
     }
     const usage = accountRole(role, type, isBankAccount);
 
-    const account = await prisma.account.create({
+    const account = await ledgerTransaction(async tx => { const created = await tx.account.create({
       data: {
+        workspaceId: req.workspace.id,
         code,
         name,
         type,
@@ -67,7 +72,7 @@ router.post('/', async (req, res) => {
         role: usage, isBankAccount: usage === 'BANK',
         isActive: isActive !== undefined ? isActive : true,
       },
-    });
+    }); await audit(tx,req.workspace.id,'ACCOUNT_CREATED',created.id,{after:created}); return created; });
 
     res.status(201).json(account);
   } catch (error) {
@@ -81,6 +86,7 @@ router.post('/', async (req, res) => {
 // Update account
 router.put('/:id', async (req, res) => {
   try {
+    demand(req, 'manageBooks');
     const { code, name, type, description, isActive, isBankAccount, role } = req.body;
 
     const where = { id: req.params.id, workspaceId: req.workspace.id };
@@ -97,10 +103,10 @@ router.put('/:id', async (req, res) => {
       })) {
         throw new LedgerError('The type of an account with posted activity cannot be changed.', 409);
       }
-      if (usage !== existing.role && existing.role !== 'GENERAL' && await tx.journalLine.findFirst({
+      if (usage !== existing.role && await tx.journalLine.findFirst({
         where: { accountId: existing.id, journalEntry: { workspaceId: where.workspaceId, status: 'POSTED' } }, select: { id: true },
       })) throw new LedgerError('The role of an account with posted activity cannot be changed. Create a separate account.', 409);
-      return tx.account.update({
+      const updated = await tx.account.update({
         where,
         data: {
           ...(code && { code }),
@@ -111,6 +117,8 @@ router.put('/:id', async (req, res) => {
           role: usage, isBankAccount: usage === 'BANK',
         },
       });
+      await audit(tx,where.workspaceId,'ACCOUNT_UPDATED',updated.id,{before:existing,after:updated});
+      return updated;
     });
 
     res.json({ ...account, balance: accountBalance(account, await ledgerBalances(prisma, where.workspaceId)) });
@@ -128,8 +136,14 @@ router.put('/:id', async (req, res) => {
 // Delete account
 router.delete('/:id', async (req, res) => {
   try {
-    await prisma.account.delete({
-      where: { id: req.params.id, workspaceId: req.workspace.id },
+    demand(req, 'manageBooks');
+    await ledgerTransaction(async tx => {
+      const where = { id:req.params.id, workspaceId:req.workspace.id };
+      const existing = await tx.account.findFirst({where});
+      if(!existing) throw new LedgerError('Account not found.',404);
+      if(await tx.journalLine.findFirst({where:{accountId:existing.id},select:{id:true}})) throw new LedgerError('This account has transaction history. Deactivate it instead.',409);
+      await tx.account.delete({where});
+      await audit(tx,req.workspace.id,'ACCOUNT_DELETED',existing.id,{before:existing});
     });
 
     res.status(204).send();
@@ -137,7 +151,8 @@ router.delete('/:id', async (req, res) => {
     if (error.code === 'P2025') {
       return res.status(404).json({ error: 'Account not found' });
     }
-    res.status(500).json({ error: error.message });
+    if(error.code === 'P2003') return res.status(409).json({error:'This account is in use. Deactivate it instead.'});
+    sendLedgerError(res,error,'Failed to delete the account.');
   }
 });
 

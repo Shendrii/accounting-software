@@ -1,3 +1,4 @@
+import {restoreWorkspaceContext} from '../middleware/workspace.js';
 import express from 'express';
 import multer from 'multer';
 import { fileURLToPath } from 'node:url';
@@ -5,7 +6,10 @@ import { createHash } from 'node:crypto';
 import prisma from '../db/prisma.js';
 import { parseReceiptWithGPT } from '../lib/parseReceipt.js';
 import { isAllowedReceiptImage, receiptImageToJpeg } from '../lib/receiptImage.js';
-import { LedgerError, createPosting, decimalInput, ledgerAccounts, ledgerDate, ledgerTransaction, sendLedgerError } from '../lib/ledger.js';
+import { LedgerError, createPosting, decimalInput, ledgerAccounts, ledgerDate, ledgerTransaction, reversePosting, sendLedgerError } from '../lib/ledger.js';
+import { demand } from '../lib/permissions.js';
+import { checkCorrectionMatch } from '../lib/paymentCorrection.js';
+import { audit } from '../lib/audit.js';
 import { purchaseAccount, requireAccountRole } from '../lib/accountRoles.js';
 import { checkPaidReceiptReference, createDraftBill, vendorReference } from '../lib/billDraft.js';
 import { confirmReceiptTotal, receiptAmounts } from '../lib/receiptReview.js';
@@ -65,7 +69,7 @@ async function legacyImage(imageUrl) {
 }
 
 // POST /api/receipts/upload - upload image, OCR + GPT, create receipt
-router.post('/upload', uploadImage, async (req, res) => {
+router.post('/upload', uploadImage, restoreWorkspaceContext, async (req, res) => {
   try {
     const jpeg = await receiptImageToJpeg(req.file.buffer).catch(() => null);
     if (!jpeg) return res.status(400).json({ error: 'Could not read this image. Try a JPEG, PNG, or WebP file.' });
@@ -109,7 +113,7 @@ router.post('/upload', uploadImage, async (req, res) => {
       }
     }
 
-    const receipt = await prisma.receipt.create({
+    const receipt = await ledgerTransaction(tx => tx.receipt.create({
       data: {
         imageUrl: '', imageHash,
         workspaceId: req.workspace.id,
@@ -117,7 +121,7 @@ router.post('/upload', uploadImage, async (req, res) => {
         status: 'PENDING',
         image: { create: { jpeg } },
       },
-    });
+    }));
     res.status(201).json(receipt);
   } catch (error) {
     console.error(error);
@@ -135,6 +139,7 @@ router.get('/', async (req, res) => {
       where,
       orderBy: { createdAt: 'desc' },
       include: {
+        correction: { include: { reversalEntry: true } }, replacement: { select: { id: true } },
         journalEntry: { include: { journalLines: { include: { account: true } } } },
         vendor: { select: { id: true, name: true } },
         bill: { select: { id: true, billNo: true } },
@@ -173,7 +178,7 @@ router.get('/:id/image', async (req, res) => {
   }
 });
 
-router.post('/:id/image', uploadImage, async (req, res) => {
+router.post('/:id/image', uploadImage, restoreWorkspaceContext, async (req, res) => {
   try {
     const receipt = await prisma.receipt.findFirst({
       where: { id: req.params.id, workspaceId: req.workspace.id },
@@ -202,6 +207,7 @@ router.get('/:id', async (req, res) => {
     const receipt = await prisma.receipt.findFirst({
       where: { id: req.params.id, workspaceId: req.workspace.id },
       include: {
+        correction: { include: { reversalEntry: true } }, replacement: { select: { id: true } },
         journalEntry: { include: { journalLines: { include: { account: true } } } },
         vendor: { select: { id: true, name: true } },
         bill: { select: { id: true, billNo: true } },
@@ -215,6 +221,7 @@ router.get('/:id', async (req, res) => {
 });
 
 const receiptDetail = {
+  correction: { include: { reversalEntry: true } }, replacement: { select: { id: true } },
   journalEntry: { include: { journalLines: { include: { account: true } } } },
   vendor: { select: { id: true, name: true } },
   bill: { select: { id: true, billNo: true, status: true } },
@@ -236,11 +243,11 @@ function receiptDate(data) {
 router.put('/:id', async (req, res) => {
   try {
     const where = receiptWhere(req);
-    const { extractedData, status, vendorId, category, billId } = req.body;
+    const { extractedData, status, vendorId, category, billId, postingDate } = req.body;
     const receipt = await ledgerTransaction(async tx => {
       const current = await getReceipt(tx, where);
       if (status !== undefined) throw new LedgerError('Use the receipt review actions to change status.');
-      if (current.status !== 'PENDING' && (extractedData !== undefined || billId !== undefined || vendorId !== undefined)) {
+      if (current.status !== 'PENDING' && (extractedData !== undefined || billId !== undefined || vendorId !== undefined || postingDate !== undefined)) {
         throw new LedgerError('Reviewed receipt details, vendor, and bill links are read-only.', 409);
       }
       if (vendorId && (typeof vendorId !== 'string' || !await tx.vendor.findFirst({
@@ -263,6 +270,7 @@ router.put('/:id', async (req, res) => {
           ...(vendorId !== undefined && { vendorId: vendorId || null }),
           ...(category !== undefined && { category: category || null }),
           ...(billId !== undefined && { billId: billId || null }),
+          ...(postingDate !== undefined && { postingDate: postingDate ? ledgerDate(postingDate, 'Accounting posting date') : null }),
         },
       });
     });
@@ -320,7 +328,9 @@ router.post('/:id/approve', async (req, res) => {
         throw new LedgerError('This document has an unpaid balance. Create or attach a bill, then record the actual payment from the bill.');
       }
       const data = current.extractedData;
-      const date = receiptDate(data);
+      const documentDate = receiptDate(data);
+      const date = current.postingDate ?? documentDate;
+      if (date < documentDate) throw new LedgerError('The accounting posting date cannot precede the source document date.');
       const amount = amounts.total;
       const reference = vendorReference(data?.invoiceNumber);
       if (current.vendorId && reference) {
@@ -391,6 +401,43 @@ router.post('/:id/reject', async (req, res) => {
   } catch (error) {
     sendLedgerError(res, error, 'Failed to reject the receipt.');
   }
+});
+
+router.post('/:id/replacement',async(req,res)=>{try{demand(req,'correct');const result=await ledgerTransaction(async tx=>{const current=await getReceipt(tx,receiptWhere(req));if(current.replacement)return current;if(current.status!=='REVERSED'||!current.correction)throw new LedgerError('Correct the reviewed source before creating a replacement draft.',409);const image=await tx.receiptImage.findUnique({where:{receiptId:current.id}});const draft=await tx.receipt.create({data:{workspaceId:req.workspace.id,imageUrl:current.imageUrl,extractedData:current.extractedData,vendorId:current.vendorId,category:current.category,replacesReceiptId:current.id,postingDate:current.correction.date,...(image&&{image:{create:{jpeg:image.jpeg}}})}});await audit(tx,req.workspace.id,'RECEIPT_REPLACEMENT_CREATED',current.id,{replacementId:draft.id});return getReceipt(tx,receiptWhere(req));});res.status(201).json(result);}catch(e){sendLedgerError(res,e,'Replacement draft could not save.');}});
+
+router.post('/:id/correct', async (req, res) => {
+  try {
+    demand(req, 'correct');
+    const date = ledgerDate(req.body.date, 'Correction date'); const reason = typeof req.body.reason === 'string' ? req.body.reason.trim() : '';
+    const { requestId, createReplacement } = req.body;
+    if (reason.length < 5 || reason.length > 1000 || typeof requestId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(requestId) || typeof createReplacement !== 'boolean') throw new LedgerError('Enter a correction date, a reason of 5–1,000 characters, and confirm whether a replacement draft is needed.');
+    const result = await ledgerTransaction(async tx => {
+      const where = receiptWhere(req); const current = await getReceipt(tx, where);
+      if (current.correction) {
+        const old = current.correction;
+        if (old.requestId !== requestId || old.reason !== reason || old.date.valueOf() !== date.valueOf() || old.createReplacement !== createReplacement) throw new LedgerError('This document already has a different correction.', 409);
+        return current;
+      }
+      if (current.status !== 'APPROVED') throw new LedgerError('Only reviewed documents can be corrected.', 409);
+      let reversal = null;
+      if (current.journalEntry) {
+        if (date < ledgerDate(current.journalEntry.date.toISOString())) throw new LedgerError('The correction cannot precede the original purchase.');
+        await checkCorrectionMatch(tx, where.workspaceId, current.journalEntry, date);
+        reversal = await reversePosting(tx, where.workspaceId, current.journalEntry, date, 'Receipt correction: ' + reason);
+      }
+      if (createReplacement) {
+        const image = await tx.receiptImage.findUnique({ where: { receiptId: current.id } });
+        await tx.receipt.create({ data: { workspaceId: where.workspaceId, imageUrl: current.imageUrl, extractedData: current.extractedData,
+          vendorId: current.vendorId, category: current.category, replacesReceiptId: current.id, postingDate: date,
+          ...(image && { image: { create: { jpeg: image.jpeg } } }) } });
+      }
+      await tx.receiptCorrection.create({ data: { receiptId: current.id, requestId, date, reason, createReplacement,
+        kind: reversal ? 'PURCHASE_REVERSAL' : 'EVIDENCE_SUPERSEDED', reversalEntryId: reversal?.id, createdById: req.user.id } });
+      await tx.receipt.update({ where, data: { status: 'REVERSED' } });
+      await audit(tx, where.workspaceId, 'RECEIPT_CORRECTED', current.id, { originalEntryId: current.journalEntryId, originalBillId: current.billId, reversalEntryId: reversal?.id, date, createReplacement, requestId, currency: req.workspace.currency }, reason);
+      return getReceipt(tx, where);
+    }); res.json(result);
+  } catch (error) { sendLedgerError(res, error, 'Receipt correction could not save.'); }
 });
 
 export default router;

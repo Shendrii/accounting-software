@@ -1,0 +1,3 @@
+import {API_BASE_URL,apiFetch} from './api';
+export interface TaxCode{id:string;code:string;label:string;purpose:string;accountId:string|null;rate:string|null;effectiveFrom:string;effectiveTo:string|null;registration:string|null;isActive:boolean}
+export async function taxRequest<T>(path:string,body?:Record<string,unknown>,method='POST'):Promise<T>{const r=await apiFetch(API_BASE_URL+'/api/tax'+path,body?{method,headers:{'Content-Type':'application/json'},body:JSON.stringify(body)}:undefined);const data=await r.json();if(!r.ok)throw new Error(data.error||'Tax details could not load.');return data;}

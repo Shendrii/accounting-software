@@ -11,7 +11,6 @@ export async function agingReport(tx, workspace, query) {
   const options = pageOptions(query);
   const invoice = kind === 'receivables';
   const table = Prisma.raw(invoice ? '"Invoice"' : '"Bill"');
-  const paymentTable = Prisma.raw(invoice ? '"InvoicePayment"' : '"BillPayment"');
   const paymentKey = Prisma.raw(invoice ? '"invoiceId"' : '"billId"');
   const contactTable = Prisma.raw(invoice ? '"Customer"' : '"Vendor"');
   const contactKey = Prisma.raw(invoice ? '"customerId"' : '"vendorId"');
@@ -22,16 +21,15 @@ export async function agingReport(tx, workspace, query) {
   const [report] = await tx.$queryRaw`
     WITH payment_totals AS (
       SELECT p.${paymentKey} AS document_id,
-        SUM(CASE WHEN r."id" IS NOT NULL AND r."status" = 'POSTED' AND r."date" < ${cutoff}::timestamp THEN 0 ELSE p."amount" END) AS paid
-      FROM ${paymentTable} p JOIN ${table} d ON d."id" = p.${paymentKey}
-      JOIN "JournalEntry" j ON j."id" = p."journalEntryId" AND j."workspaceId" = ${workspace.id} AND j."status" = 'POSTED' AND j."date" < ${cutoff}::timestamp
-      LEFT JOIN "JournalEntry" r ON r."id" = p."reversalEntryId" AND r."workspaceId" = ${workspace.id}
-      WHERE d."workspaceId" = ${workspace.id} GROUP BY p.${paymentKey}
+        SUM(p."amount") AS paid
+      FROM "SettlementApplication" p JOIN ${table} d ON d."id" = p.${paymentKey}
+      WHERE d."workspaceId" = ${workspace.id} AND p."date" < ${cutoff}::timestamp
+        AND (p."reversedDate" IS NULL OR p."reversedDate" >= ${cutoff}::timestamp) GROUP BY p.${paymentKey}
     ), documents AS (
       SELECT d."id", d.${reference} AS reference, c."id" AS "partyId", c."name" AS "partyName",
         d."date", d."dueDate", d."total", COALESCE(p.paid, 0) AS paid,
         (CASE WHEN v."id" IS NOT NULL THEN 0 ELSE d."total" END - COALESCE(p.paid, 0)) AS remaining,
-        control."accountId", d."isOpeningBalance"
+        control."accountId", d."isOpeningBalance", 'DOCUMENT'::text AS "recordType"
       FROM ${table} d JOIN ${contactTable} c ON c."id" = d.${contactKey} AND c."workspaceId" = ${workspace.id}
       JOIN "JournalEntry" j ON j."id" = d."postingEntryId" AND j."workspaceId" = ${workspace.id} AND j."status" = 'POSTED' AND j."date" < ${cutoff}::timestamp
       LEFT JOIN "JournalEntry" v ON v."reversalOfId" = j."id" AND v."workspaceId" = ${workspace.id} AND v."status" = 'POSTED' AND v."date" < ${cutoff}::timestamp
@@ -42,6 +40,15 @@ export async function agingReport(tx, workspace, query) {
         ORDER BY l."id" LIMIT 1
       ) control ON true
       WHERE d."workspaceId" = ${workspace.id}
+      UNION ALL
+      SELECT c.id,c.reference,c."partyId",c."partyName",c.date,c.date,c.amount,0,
+        CASE WHEN r.id IS NOT NULL THEN 0 ELSE -c.amount
+          + COALESCE((SELECT sum(a.amount) FROM "CreditAllocation" a WHERE a."creditId"=c.id AND a.date < ${cutoff}::timestamp AND (a."reversedDate" IS NULL OR a."reversedDate">= ${cutoff}::timestamp)),0)
+          + COALESCE((SELECT sum(f.amount) FROM "CreditRefund" f WHERE f."creditId"=c.id AND f.date < ${cutoff}::timestamp AND (f."reversedDate" IS NULL OR f."reversedDate">= ${cutoff}::timestamp)),0) END,
+        c."accountId",false,'CREDIT'
+      FROM "CreditBalance" c JOIN "JournalEntry" j ON j.id=c."postingEntryId" AND j.status='POSTED' AND j.date < ${cutoff}::timestamp
+      LEFT JOIN "JournalEntry" r ON r.id=c."reversalEntryId" AND r.status='POSTED' AND r.date < ${cutoff}::timestamp
+      WHERE c."workspaceId"=${workspace.id} AND c.kind=${invoice?'AR':'AP'} AND c.source <> 'DEPOSIT'
     ), aged AS (
       SELECT *, (${asOf}::date - ${agingDate}::date)::integer AS age,
         CASE WHEN remaining < 0 THEN 'credit' WHEN ${asOf}::date - ${agingDate}::date <= 0 THEN 'current'
@@ -77,7 +84,7 @@ export async function agingReport(tx, workspace, query) {
       ) party), '[]'::jsonb) AS parties,
       COALESCE((SELECT jsonb_agg(item ORDER BY "dueDate", "id") FROM (
         SELECT "id", reference, "partyId", "partyName", "date"::date::text AS "date", "dueDate"::date::text AS "dueDate",
-          "total"::text AS "originalAmount", paid::text AS "paidAsOf", remaining::text AS balance, age, bucket, "accountId", "isOpeningBalance"
+          "total"::text AS "originalAmount", paid::text AS "paidAsOf", remaining::text AS balance, age, bucket, "accountId", "isOpeningBalance", "recordType"
         FROM aged ORDER BY "dueDate", "id" LIMIT ${options.pageSize} OFFSET ${options.offset}
       ) item), '[]'::jsonb) AS items,
       COALESCE((SELECT jsonb_agg(jsonb_build_object('accountId', "id", 'code', "code", 'name', "name", 'ledgerBalance', ledger::text,

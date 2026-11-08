@@ -1,5 +1,9 @@
 'use client';
+import {useWorkspaces} from '@/app/components/WorkspaceProvider';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { useMoney } from '@/lib/use-money';
+import {decimalUnits,decimalText} from '@/lib/money';
+import DocumentTaxFields from '@/app/components/DocumentTaxFields';
 
 import { useEffect, useState } from 'react';
 import { useRouter } from 'next/navigation';
@@ -10,6 +14,7 @@ import { toast } from '@/lib/toast';
 import { DocumentLines, type DocumentLine } from '@/app/components/DocumentLines';
 import { WorkspaceHeading, WorkspacePanel } from '@/app/components/WorkspaceUI';
 import { LegacyRedirect } from '@/app/components/LegacyRedirect';
+import RecurringScheduleFields from '@/app/components/RecurringScheduleFields';
 import { isPurchaseAccount } from '@/lib/account-roles';
 
 const emptyLine = (): DocumentLine => ({
@@ -20,7 +25,7 @@ const emptyLine = (): DocumentLine => ({
   accountId: '',
 });
 
-export function NewBillPage() {
+function BillForm() {
   const money = useMoney();
   const router = useRouter();
   const [vendors, setVendors] = useState<Vendor[]>([]);
@@ -35,8 +40,9 @@ export function NewBillPage() {
   });
   const [lines, setLines] = useState<DocumentLine[]>([emptyLine()]);
   const [notes, setNotes] = useState('');
+  const [tax,setTax]=useState('0.00'),[taxCodeId,setTaxCode]=useState('');
   const [isRecurring, setIsRecurring] = useState(false);
-  const [recurrenceInterval, setRecurrenceInterval] = useState('monthly');
+  const [schedule, setSchedule] = useState({recurrenceInterval:'monthly',nextDueDate:'',recurrenceAnchorDay:1});
   const [saving, setSaving] = useState(false);
   const [initLoading, setInitLoading] = useState(true);
   const [error, setError] = useState<string | null>(null);
@@ -53,15 +59,14 @@ export function NewBillPage() {
       const next = [...prev];
       next[index] = { ...next[index], [field]: value };
       if (field === 'quantity' || field === 'unitPrice') {
-        const qty = parseFloat(field === 'quantity' ? value : next[index].quantity) || 0;
-        const price = parseFloat(field === 'unitPrice' ? value : next[index].unitPrice) || 0;
-        next[index].amount = (qty * price).toFixed(2);
+        const qty=decimalUnits(next[index].quantity,4),price=decimalUnits(next[index].unitPrice);
+        next[index].amount=decimalText((qty*price+BigInt(5000))/BigInt(10000));
       }
       return next;
     });
   }
 
-  const total = lines.reduce((s, l) => s + (parseFloat(l.amount) || 0), 0);
+  const total=lines.reduce((s,l)=>s+decimalUnits(l.amount),BigInt(0))+decimalUnits(tax);
 
   async function handleSubmit(e: React.FormEvent) {
     e.preventDefault();
@@ -75,15 +80,16 @@ export function NewBillPage() {
         vendorInvoiceNo,
         date,
         dueDate,
-        notes,
+        notes,tax,taxCodeId,
         isRecurring,
-        recurrenceInterval: isRecurring ? recurrenceInterval : undefined,
-        nextDueDate: isRecurring ? dueDate : undefined,
+        recurrenceInterval: isRecurring ? schedule.recurrenceInterval : undefined,
+        nextDueDate: isRecurring ? schedule.nextDueDate : undefined,
+        recurrenceAnchorDay: isRecurring ? schedule.recurrenceAnchorDay : undefined,
         lines: lines.map((l): BillLineInput => ({
           description: l.description,
-          quantity: parseFloat(l.quantity) || 0,
-          unitPrice: parseFloat(l.unitPrice) || 0,
-          amount: parseFloat(l.amount) || 0,
+          quantity:l.quantity,
+          unitPrice:l.unitPrice,
+          amount:l.amount,
           accountId: l.accountId || undefined,
         })),
       });
@@ -177,8 +183,8 @@ export function NewBillPage() {
                 </div>
               </div>
             </div>
-            <WorkspacePanel title="Total" description={money.currency}>
-              <p className="p-4 text-2xl font-semibold tabular-nums sm:p-5">{money.format(total.toFixed(2))}</p>
+            <WorkspacePanel title="Total" description={money.currency}><div className="p-4"><DocumentTaxFields purpose="INPUT" codeId={taxCodeId} onCode={setTaxCode} amount={tax} onAmount={setTax}/></div>
+              <p className="p-4 text-2xl font-semibold tabular-nums sm:p-5">{money.format(decimalText(total))}</p>
             </WorkspacePanel>
           </div>
 
@@ -212,24 +218,7 @@ export function NewBillPage() {
                 Make this a recurring bill
               </label>
             </div>
-            {isRecurring && (
-              <div>
-                <label className="block text-sm font-medium text-zinc-700 dark:text-zinc-300 mb-1">Repeat Frequency</label>
-                <select
-                  value={recurrenceInterval}
-                  onChange={(e) => setRecurrenceInterval(e.target.value)}
-                  className="w-full sm:w-auto px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-900 text-sm focus:outline-none focus:ring-2 focus:ring-blue-500"
-                >
-                  <option value="weekly">Weekly</option>
-                  <option value="monthly">Monthly</option>
-                  <option value="quarterly">Quarterly</option>
-                  <option value="yearly">Yearly</option>
-                </select>
-                <p className="text-xs text-zinc-500 mt-1">
-                  A new draft bill will be auto-created on each due date using the same lines and vendor.
-                </p>
-              </div>
-            )}
+            {isRecurring && <RecurringScheduleFields value={schedule} onChange={setSchedule} disabled={saving} />}
           </div>
 
           <div className="flex justify-end gap-3">
@@ -253,6 +242,8 @@ export function NewBillPage() {
     </div>
   );
 }
+
+export function NewBillPage(){const{active}=useWorkspaces();if(!workspacePermissions(active).prepare)return <div className="workspace-page"><div className="workspace-content space-y-4"><p className="text-sm">Your workspace role allows viewing records. Ask an owner for preparation access to create drafts.</p><Link className="workspace-button" href="/purchases/bills">Return to records</Link></div></div>;return <BillForm key={active?.id}/>;}
 
 export default function LegacyNewBillPage() {
   return <LegacyRedirect to="/purchases/bills/new" />;

@@ -4,6 +4,14 @@ import { useMoney } from '@/lib/use-money';
 import { useEffect, useRef, useState, type FormEvent, type ReactNode } from 'react';
 import { useParams } from 'next/navigation';
 import Link from 'next/link';
+import DraftDocumentEditor from '@/app/components/DraftDocumentEditor';
+import {taxRequest,type TaxCode} from '@/lib/tax-api';
+import {useWorkspaceData} from '@/lib/use-workspace-data';
+import {useCallback} from 'react';
+import RecordAudit from '@/app/components/RecordAudit';
+import AppliedCredits from '@/app/components/AppliedCredits';
+import {useWorkspaces} from '@/app/components/WorkspaceProvider';
+import {workspacePermissions} from '@/lib/workspace-permissions';
 import { PaymentCorrections } from '@/app/components/PaymentCorrections';
 import BackToWorklist from '@/app/components/BackToWorklist';
 import { Download, Loader2, Mail } from 'lucide-react';
@@ -42,7 +50,8 @@ function AccountSelect({ name, label, accounts }: { name: string; label: string;
 }
 
 export function InvoiceDetailPage() {
-  const money = useMoney();
+  const money = useMoney();const taxCodes=useWorkspaceData(useCallback(()=>taxRequest<TaxCode[]>('/codes'),[]));const[editing,setEditing]=useState(false);
+  const {active}=useWorkspaces();const access=workspacePermissions(active);
   const { id } = useParams<{ id: string }>();
   const [invoice, setInvoice] = useState<Invoice | null>(null);
   const [accounts, setAccounts] = useState<Account[]>([]);
@@ -121,7 +130,7 @@ export function InvoiceDetailPage() {
         setInvoice({ ...invoice, emailSentAt: sent.emailSentAt });
         toast.success('Invoice emailed');
       } else {
-        setInvoice(await voidInvoice(invoice.id, value('date') || undefined));
+        setInvoice(await voidInvoice(invoice.id, value('date') || undefined,value('reason')));
         toast.success('Invoice voided');
       }
       setModal(null);
@@ -144,18 +153,19 @@ export function InvoiceDetailPage() {
 
   const posted = invoice.postingEntry;
   const isVoid = invoice.status === 'VOID';
-  const canPost = !posted && (invoice.status === 'DRAFT' || invoice.status === 'SENT');
-  const canPay = Boolean(posted) && invoice.status === 'SENT';
-  const canVoid = !invoice.isOpeningBalance && (invoice.status === 'DRAFT' || invoice.status === 'SENT') && !decimalUnits(invoice.amountPaid);
+  const canPost = access.post && !posted && (invoice.status === 'DRAFT' || invoice.status === 'SENT');
+  const canPay = access.post&&Boolean(posted)&&['SENT','PAID'].includes(invoice.status)&&decimalUnits(invoice.balanceDue)>BigInt(0);
+  const canVoid = (invoice.status==='DRAFT'?access.prepare:access.correct)&&!invoice.isOpeningBalance && (invoice.status === 'DRAFT' || invoice.status === 'SENT') && !decimalUnits(invoice.amountPaid);
   const hasTax = decimalUnits(invoice.tax) > BigInt(0);
   const missingRevenue = invoice.lines?.some(line => !line.accountId && decimalUnits(line.amount) > BigInt(0));
   const receivableId = posted?.journalLines.find(line => decimalUnits(line.debit) > BigInt(0))?.accountId;
   const receivableAccounts = accounts.filter(account => account.type === 'ASSET' && account.role === 'ACCOUNTS_RECEIVABLE');
   const depositAccounts = accounts.filter(account => isPaymentAccount(account));
+  const configuredTax=taxCodes.data?.find(c=>c.id===invoice.taxCodeId);
   const taxAccounts = accounts.filter(account => account.type === 'LIABILITY' && account.role === 'SALES_TAX');
-  const status = isVoid ? 'Void' : invoice.status === 'PAID' ? 'Paid' : invoice.status === 'DRAFT' ? 'Draft'
+  const status = isVoid ? 'Void' : invoice.status === 'PAID' ? 'Settled' : invoice.status === 'DRAFT' ? 'Draft'
     : !posted ? 'Awaiting posting' : decimalUnits(invoice.amountPaid) ? 'Partially paid' : 'Open';
-  const statusClass = status === 'Paid' ? 'bg-emerald-50 text-emerald-800' : status === 'Partially paid' || status === 'Awaiting posting'
+  const statusClass = status === 'Settled' ? 'bg-emerald-50 text-emerald-800' : status === 'Partially paid' || status === 'Awaiting posting'
     ? 'bg-amber-50 text-amber-900' : isVoid ? 'bg-red-50 text-red-800' : 'bg-blue-50 text-blue-800';
   const preview: PostingLine[] = [
     { label: 'Accounts receivable', debit: invoice.total },
@@ -164,7 +174,7 @@ export function InvoiceDetailPage() {
   ];
   const metrics = [
     ['Invoice total', invoice.total],
-    ['Paid to date', invoice.amountPaid],
+    ['Settled · payments and credits', invoice.amountPaid],
     [invoice.status === 'DRAFT' ? 'Balance when posted' : 'Balance due', invoice.balanceDue],
   ];
   const modalTitle = modal && ({ post: 'Post invoice', payment: 'Record payment', email: 'Send invoice email', void: 'Void invoice', journal: 'Journal entry' }[modal.kind]);
@@ -182,7 +192,7 @@ export function InvoiceDetailPage() {
       <AccountSelect name="receivable" label="Accounts receivable" accounts={receivableAccounts} />
       <p className="text-xs text-slate-600">Posting records money owed by the customer. It does not increase cash.</p>
       {missingRevenue && <AccountSelect name="revenue" label="Revenue account for uncategorized lines" accounts={accounts.filter(account => account.type === 'REVENUE')} />}
-      {hasTax && <AccountSelect name="tax" label="Sales tax liability account" accounts={taxAccounts} />}
+      {hasTax&&(configuredTax?<div className="text-sm"><input type="hidden" name="tax" value={configuredTax.accountId??''}/><p>Tax code <strong>{configuredTax.code}</strong> · {accounts.find(a=>a.id===configuredTax.accountId)?.name??'Configured tax account'}</p>{!configuredTax.isActive&&<p className="mt-1 text-amber-900">This code is inactive. Edit the draft and choose an effective code.</p>}</div>:<AccountSelect name="tax" label="Manual tax liability account" accounts={taxAccounts}/>)}
       {invoice.status === 'SENT' && <label className="flex items-start gap-2 rounded-lg bg-amber-50 p-3 text-sm text-amber-900">
         <input className="mt-1" type="checkbox" name="reviewed" required />
         I checked the ledger and confirmed that this sale has no existing posting.
@@ -210,7 +220,7 @@ export function InvoiceDetailPage() {
     </label>;
   } else if (modal?.kind === 'void') {
     fields = posted ? <>
-      <p className="text-sm text-slate-600">Void {invoice.invoiceNo} and create a reversing entry linked to its original journal.</p>
+      <p className="text-sm text-slate-600">Void {invoice.invoiceNo} and create a reversing entry linked to its original journal.</p><label className="grid gap-1 text-sm font-semibold">Void reason<textarea className={field} name="reason" minLength={5} maxLength={1000} required/></label>
       <label className="block text-sm font-medium">Reversal date
         <input className={field} name="date" type="date" required min={minPaymentDay} defaultValue={localDay() < minPaymentDay ? minPaymentDay : localDay()} />
       </label>
@@ -223,10 +233,10 @@ export function InvoiceDetailPage() {
         <WorkspaceHeading section="Sales / Invoices" title={invoice.invoiceNo}
           description={<>{invoice.customer?.name ?? 'Customer'} · Invoice date {formatDate(invoice.date)} · Due {formatDate(invoice.dueDate)}</>}
           actions={<>
-            {canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
+            {access.prepare&&invoice.status==='DRAFT'&&!posted&&<button className={button} onClick={()=>setEditing(true)}>Edit draft invoice</button>}{canPost && <button type="button" className={primary} onClick={() => open({ kind: 'post' })}>Post invoice</button>}
             {canPay && <button type="button" className={primary} onClick={() => open({ kind: 'payment' })}>Record payment</button>}
             <button type="button" onClick={download} className={button}><Download className="size-4" aria-hidden="true" /> {invoice.isOpeningBalance ? 'Opening statement PDF' : 'PDF'}</button>
-            {!invoice.isOpeningBalance && !isVoid && (posted || invoice.status !== 'DRAFT') && (
+            {access.prepare&&!invoice.isOpeningBalance && !isVoid && posted && (
               <button type="button" onClick={() => open({ kind: 'email' })} className={button}><Mail className="size-4" aria-hidden="true" /> Send email</button>
             )}
             <BackToWorklist fallback="/sales/invoices" label="Invoices" className={button} />
@@ -274,10 +284,12 @@ export function InvoiceDetailPage() {
         </div>
         <section className={panel}>
           <h2 className="font-semibold text-slate-900">Payment history</h2>
-          {invoice.payments?.length ? <PaymentCorrections kind="invoice" documentId={invoice.id} payments={invoice.payments} onCorrected={async () => { setInvoice(await getInvoice(id)); }}
+          <AppliedCredits kind="invoice" allocations={invoice.creditAllocations}/>{invoice.payments?.length ? <PaymentCorrections kind="invoice" documentId={invoice.id} payments={invoice.payments} onCorrected={async () => { setInvoice(await getInvoice(id)); }}
             onInspect={paymentId => { const payment = invoice.payments?.find(item => item.id === paymentId); if (payment) open({ kind: 'journal', entry: payment.journalEntry }); }} /> : <p className="mt-2 text-sm text-slate-600">No itemized payments recorded.</p>}
         </section>
 
+        {editing&&invoice.status==='DRAFT'&&<DraftDocumentEditor kind="invoice" document={invoice} accounts={accounts} onDismiss={()=>setEditing(false)} onSaved={saved=>{setInvoice(saved as Invoice);setEditing(false);}}/>}
+        <RecordAudit entityId={invoice.id}/>
         {modal && <AccountingDialog title={modalTitle ?? ''} busy={busy} onDismiss={() => setModal(null)}>
           {modal.kind === 'journal' ? <>
             <p className="mb-2 text-sm text-slate-600">{modal.entry.description} · {formatDate(modal.entry.date)}</p>

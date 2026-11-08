@@ -10,9 +10,9 @@ export async function salesSummary(client, workspaceId, day) {
   const [summary] = await client.$queryRaw`
     WITH payments AS (
       SELECT p."invoiceId", SUM(p."amount") AS paid
-      FROM "InvoicePayment" p
+      FROM "SettlementApplication" p
       JOIN "Invoice" i ON i."id" = p."invoiceId"
-      WHERE i."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL
+      WHERE i."workspaceId" = ${workspaceId} AND p."reversedDate" IS NULL
       GROUP BY p."invoiceId"
     ), documents AS (
       SELECT i."id", i."customerId", i."invoiceNo", i."status", i."postingEntryId", i."date", i."dueDate", i."total", CASE WHEN i."status" = 'PAID' AND i."postingEntryId" IS NULL
@@ -21,7 +21,7 @@ export async function salesSummary(client, workspaceId, day) {
       WHERE i."workspaceId" = ${workspaceId}
     ), balances AS (
       SELECT d.*, CASE WHEN d."status" = 'VOID' THEN 0 ELSE d."total" - d.paid END AS remaining,
-        (d."status" = 'SENT' AND d."postingEntryId" IS NOT NULL AND d."total" > d.paid) AS open
+        (d."status" IN ('SENT','PAID') AND d."postingEntryId" IS NOT NULL AND d."total" > d.paid) AS open
       FROM documents d
     )
     SELECT
@@ -58,17 +58,17 @@ export async function purchaseSummary(client, workspaceId, day) {
   const [summary] = await client.$queryRaw`
     WITH payments AS (
       SELECT p."billId", SUM(p."amount") AS paid
-      FROM "BillPayment" p
+      FROM "SettlementApplication" p
       JOIN "Bill" b ON b."id" = p."billId"
-      WHERE b."workspaceId" = ${workspaceId} AND p."reversalEntryId" IS NULL
+      WHERE b."workspaceId" = ${workspaceId} AND p."reversedDate" IS NULL
       GROUP BY p."billId"
     ), documents AS (
       SELECT b."id", b."vendorId", b."billNo", b."status", b."postingEntryId", b."date", b."dueDate", b."total", COALESCE(p.paid, 0) AS paid,
-        (b."status" = 'RECEIVED' AND b."postingEntryId" IS NOT NULL AND b."total" > COALESCE(p.paid, 0)) AS open
+        (b."status" IN ('RECEIVED','PAID') AND b."postingEntryId" IS NOT NULL AND b."total" > COALESCE(p.paid, 0)) AS open
       FROM "Bill" b LEFT JOIN payments p ON p."billId" = b."id"
       WHERE b."workspaceId" = ${workspaceId}
     ), balances AS (
-      SELECT d.*, CASE WHEN d."status" = 'RECEIVED' AND d."postingEntryId" IS NOT NULL
+      SELECT d.*, CASE WHEN d."status" IN ('RECEIVED','PAID') AND d."postingEntryId" IS NOT NULL
         THEN d."total" - d.paid ELSE 0 END AS remaining
       FROM documents d
     )
@@ -85,7 +85,7 @@ export async function purchaseSummary(client, workspaceId, day) {
           SELECT b."id", b."billNo", b."status", b."postingEntryId",
             b."date" AT TIME ZONE 'UTC' AS "date", b."dueDate" AT TIME ZONE 'UTC' AS "dueDate",
             b."total"::text AS "total",
-            CASE WHEN b."status" = 'PAID' AND b.paid = 0 THEN b."total" ELSE b.paid END::text AS "amountPaid",
+            CASE WHEN b."status" = 'PAID' AND b."postingEntryId" IS NULL AND b.paid = 0 THEN b."total" ELSE b.paid END::text AS "amountPaid",
             b.remaining::text AS "balanceDue",
             jsonb_build_object('id', v."id", 'name', v."name") AS vendor
           FROM balances b JOIN "Vendor" v ON v."id" = b."vendorId" AND v."workspaceId" = ${workspaceId}
@@ -115,6 +115,9 @@ export async function closeChecklist(client, workspaceId, day) {
       (SELECT COALESCE(SUM(l."debit"), 0) = COALESCE(SUM(l."credit"), 0)
         FROM "JournalLine" l JOIN "JournalEntry" j ON j."id" = l."journalEntryId"
         WHERE j."workspaceId" = ${workspaceId} AND j."status" = 'POSTED') AS "trialBalanceBalanced",
+      (SELECT COUNT(*)::integer FROM "Account" a WHERE a."workspaceId" = ${workspaceId} AND a."isActive" AND a."role"::text IN ('BANK','CREDIT_CARD')
+        AND NOT EXISTS (SELECT 1 FROM "Reconciliation" r WHERE r."accountId" = a."id" AND r."workspaceId" = ${workspaceId} AND r."status" = 'COMPLETE' AND r."proof" IS NOT NULL)) AS "unverifiedBankAccounts",
+      (SELECT MAX("endDate") FROM "AccountingPeriod" WHERE "workspaceId" = ${workspaceId} AND "status" = 'CLOSED') AS "closedThrough",
       (SELECT "statementDate" FROM "Reconciliation"
         WHERE "workspaceId" = ${workspaceId} AND "status" = 'COMPLETE' AND "proof" IS NOT NULL
         ORDER BY "statementDate" DESC LIMIT 1) AS "lastReconciliationAt"

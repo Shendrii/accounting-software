@@ -1,9 +1,11 @@
 import { createHash, randomUUID } from 'node:crypto';
 import { parse } from 'csv-parse/sync';
+import { demand, assertPermission } from './permissions.js';
+import { audit } from './audit.js';
 import { Decimal, LedgerError, checkBankPostingDate, decimalInput, decimalSum, ledgerAccounts, ledgerDate, journalLines, updateBalanceCache } from './ledger.js';
 
 export function requireBooksAdmin(req) {
-  if (!['OWNER', 'ADMIN'].includes(req.workspace.role)) throw new LedgerError('Only workspace owners and admins can change the books setup or correct payments.', 403);
+  demand(req, 'manageBooks');
 }
 
 export async function hasFinancialRecords(tx, workspaceId) {
@@ -129,6 +131,7 @@ export async function openingPreview(tx, workspaceId, input) {
 export const openingFingerprint = input => createHash('sha256').update(JSON.stringify(input)).digest('hex');
 
 export async function postOpening(tx, workspaceId, userId, input) {
+  assertPermission('manageBooks');
   if (typeof input.requestId !== 'string' || !/^[a-zA-Z0-9_-]{8,100}$/.test(input.requestId)) throw new LedgerError('A valid opening request ID is required.');
   const fingerprint = openingFingerprint({ balances: rows(input, 'balances'), receivables: rows(input, 'receivables'), payables: rows(input, 'payables') });
   const existing = await tx.openingBalanceBatch.findUnique({ where: { workspaceId } });
@@ -140,7 +143,7 @@ export async function postOpening(tx, workspaceId, userId, input) {
   if (!preview.canPost) throw new LedgerError('Opening debits and credits, and every AR/AP supporting schedule, must agree exactly.');
   const batch = await tx.openingBalanceBatch.create({ data: { workspaceId, requestId: input.requestId, fingerprint, asOfDate: ledgerDate(preview.asOf),
     currency: preview.currency, createdById: userId, snapshot: preview } });
-  if (!preview.balances.length) return batch;
+  if (!preview.balances.length) { await audit(tx, workspaceId, 'ZERO_OPENING_CONFIRMED', batch.id, { currency: preview.currency, asOf: preview.asOf, totals: preview.totals }); return batch; }
   await ledgerAccounts(tx, workspaceId, preview.balances.map(row => row.accountId));
   const code = 'OPENING-CLEARING';
   if (await tx.account.findFirst({ where: { workspaceId, code } })) throw new LedgerError('The reserved OPENING-CLEARING code is already in use. Rename that unused account before importing.');
@@ -171,8 +174,9 @@ export async function postOpening(tx, workspaceId, userId, input) {
   const accountMap = await ledgerAccounts(tx, workspaceId, allLines.map(line => line.accountId));
   await checkBankPostingDate(tx, workspaceId, ledgerDate(preview.asOf), accountMap, true);
   // Bulk inserts keep a reviewed opening batch atomic without one round trip per document.
-  await tx.journalEntry.createMany({ data: plans.map(({ lines, ...plan }) => ({ ...plan, workspaceId, date: ledgerDate(preview.asOf), openingBatchId: batch.id, status: 'POSTED' })) });
+  await tx.journalEntry.createMany({ data: plans.map(({ lines, ...plan }) => ({ ...plan, workspaceId, date: ledgerDate(preview.asOf), openingBatchId: batch.id, status: 'DRAFT', createdById: userId })) });
   await tx.journalLine.createMany({ data: allLines });
+  await tx.journalEntry.updateMany({where:{openingBatchId:batch.id,workspaceId},data:{status:'POSTED',postedById:userId,postedAt:new Date()}});
   for (const kind of ['invoice', 'bill']) if (documents[kind].length) {
     await tx[kind].createMany({ data: documents[kind] });
     await tx[kind + 'Line'].createMany({ data: documentLines[kind] });
@@ -180,5 +184,6 @@ export async function postOpening(tx, workspaceId, userId, input) {
   await updateBalanceCache(tx, workspaceId, allLines, accountMap);
   const balance = await tx.journalLine.aggregate({ where: { accountId: clearing.id, journalEntry: { workspaceId, status: 'POSTED' } }, _sum: { debit: true, credit: true } });
   if (!new Decimal(balance._sum.debit ?? 0).eq(balance._sum.credit ?? 0)) throw new LedgerError('Opening clearing did not return to zero. No entries were posted.');
+  await audit(tx, workspaceId, 'OPENING_BALANCES_POSTED', batch.id, { currency: preview.currency, asOf: preview.asOf, totals: preview.totals, entries: plans.map(plan => plan.id) });
   return batch;
 }

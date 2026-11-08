@@ -45,7 +45,7 @@ npm run db:seed
 
 1. Set **the same** `JWT_ACCESS_SECRET` on the Render web service; rotate if leaked.
 2. Set `CORS_ORIGINS` to your Vercel production URL(s), comma-separated.
-3. Set `APP_CLIENT_URL` to your Vercel URL so Google OAuth can redirect back with a session in the URL hash.
+3. Set `APP_CLIENT_URL` to your Vercel URL so Google OAuth can redirect back with a one-use ticket bound to the browser's sign-in verifier. Raw session fragments are rejected; authenticated requests require a live database-backed session.
 4. **Google OAuth:** Authorized redirect URI = `{API}/api/auth/google/callback` (your Render URL).
 5. Enable **trust proxy** is handled in Express for correct rate-limit behavior behind Render’s proxy.
 

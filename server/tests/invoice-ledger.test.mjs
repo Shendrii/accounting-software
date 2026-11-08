@@ -94,8 +94,8 @@ test('posted invoices, partial collections, and manual journals keep one consist
   await api(taxPath + '/post', 'POST', postingOptions, 400);
   const taxed = await api(taxPath + '/post', 'POST', { ...postingOptions, taxAccountId: tax.id });
   assert.equal(taxed.postingEntry.journalLines.find(line => line.accountId === tax.id).credit, '5');
-  await api(taxPath + '/void', 'POST', { date: day });
-  await api(taxPath + '/void', 'POST', { date: day });
+  await api(taxPath + '/void', 'POST', { date: day, reason:'Reviewed cancellation supported by fixture evidence' });
+  await api(taxPath + '/void', 'POST', { date: day, reason:'Reviewed cancellation supported by fixture evidence' });
   const original = await api('/journal-entries/' + taxed.postingEntryId);
   assert.ok(original.reversal.id);
 

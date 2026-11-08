@@ -17,7 +17,7 @@ export function WorkspaceAvatar({ name, type }: { name: string; type?: AuthWorks
 }
 
 export function WorkspaceRole({ role }: { role: AuthWorkspace['role'] }) {
-  return <span className="capitalize">{role.toLowerCase()}</span>;
+  return <span className="capitalize">{{ OWNER: 'Owner', ADMIN: 'Admin', MEMBER: 'Bookkeeper', APPROVER: 'Reviewer', VIEWER: 'Read only' }[role]}</span>;
 }
 
 export function WorkspaceActiveBadge() {

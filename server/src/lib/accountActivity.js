@@ -57,7 +57,7 @@ export async function accountActivity(prisma, workspaceId, query) {
     const fixed = value => new Decimal(value).toFixed(2);
     return { account, startDate: options.start, endDate: options.end, currency: getRequestContext().currency ?? 'USD', basis: 'Accrual',
       opening: fixed(result.opening), debit: fixed(result.debit), credit: fixed(result.credit), closing: fixed(result.closing),
-      items: result.items.map(row => { const entry = entriesById.get(row.entryId); return { ...row, debit: fixed(row.debit), credit: fixed(row.credit), balance: fixed(row.balance), sources: sources(entry?.reversalOf ?? entry) }; }),
+      items: result.items.map(row => { const entry = entriesById.get(row.entryId); return { ...row, debit: fixed(row.debit), credit: fixed(row.credit), balance: fixed(row.balance), sources: [...sources(entry?.reversalOf ?? entry),{id:row.entryId,label:row.reversalOfId?'Reversal journal':'Journal entry',href:'/ledger/entries/'+row.entryId}] }; }),
       total: result.total, page: options.page, pageSize: options.pageSize, totalPages: Math.max(1, Math.ceil(result.total / options.pageSize)) };
   }, { isolationLevel: 'RepeatableRead' });
 }
