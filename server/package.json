@@ -10,7 +10,7 @@
     "dev": "nodemon src/server.js",
     "start": "node src/server.js",
     "test:readiness": "node --experimental-test-module-mocks scripts/test-readiness.mjs",
-    "postinstall": "npm run db:generate",
+    "postinstall": "npm run db:generate && node --input-type=module -e \"if (process.env.RENDER === 'true') await import('./src/lib/aiEmbeddings.js').then(({ loadEmbeddingModel }) => loadEmbeddingModel())\"",
     "db:generate": "prisma generate",
     "db:migrate": "prisma migrate dev",
     "db:migrate:deploy": "prisma migrate deploy",
@@ -23,6 +23,7 @@
   "description": "",
   "dependencies": {
     "@getbrevo/brevo": "^5.0.4",
+    "@huggingface/transformers": "3.8.1",
     "@prisma/client": "^6.0.0",
     "bcryptjs": "^3.0.3",
     "cookie-parser": "^1.4.7",

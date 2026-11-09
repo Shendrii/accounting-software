@@ -29,6 +29,7 @@ import schedulesRouter from './routes/schedules.js';
 import { requireAuth } from './middleware/auth.js';
 import { requireWorkspace } from './middleware/workspace.js';
 import { withRequestContext } from './lib/requestContext.js';
+import { wakeDocumentIndexer } from './lib/aiDocumentIndex.js';
 
 dotenv.config();
 
@@ -88,6 +89,16 @@ app.get('/', (req, res) => {
 
 app.get('/api/health', (req, res) => {
   res.json({ message: 'Server is running' });
+});
+
+app.use(['/api/invoices', '/api/bills', '/api/receipts', '/api/customers', '/api/vendors',
+  '/api/recurring', '/api/workspace-settings'], (req, res, next) => {
+  if (['POST', 'PUT', 'PATCH', 'DELETE'].includes(req.method)) {
+    res.once('finish', () => {
+      if (res.statusCode >= 200 && res.statusCode < 300) void wakeDocumentIndexer();
+    });
+  }
+  next();
 });
 
 // API Routes

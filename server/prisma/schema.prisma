@@ -77,6 +77,20 @@ model JournalEntry {
   @@index([workspaceId, status, date])
 }
 
+model AiDocumentEmbedding {
+  workspaceId   String
+  sourceType    String
+  sourceId      String
+  revision      BigInt @default(autoincrement())
+  nextAttemptAt DateTime? @default(now()) @db.Timestamptz(3)
+  passage       String?
+  embedding     Unsupported("vector(384)")?
+  embeddingModel String?
+  workspace     Workspace @relation(fields: [workspaceId], references: [id], onDelete: Cascade)
+
+  @@id([workspaceId, sourceType, sourceId])
+}
+
 model Receipt {
   id             String        @id @default(cuid())
   workspaceId    String
@@ -467,6 +481,7 @@ model Workspace {
   accounts         Account[]
   journalEntries   JournalEntry[]
   receipts         Receipt[]
+  aiDocumentEmbeddings AiDocumentEmbedding[]
   customers        Customer[]
   vendors          Vendor[]
   invoices         Invoice[]

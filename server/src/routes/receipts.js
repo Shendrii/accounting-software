@@ -261,6 +261,7 @@ router.put('/:id', async (req, res) => {
         const date = receiptDate(extractedData).toISOString().slice(0, 10);
         extractedData.invoiceDate = date;
         extractedData.date = date;
+        extractedData.rawText = current.extractedData?.rawText ?? '';
         if (extractedData.invoiceNumber != null) extractedData.invoiceNumber = vendorReference(extractedData.invoiceNumber) ?? '';
       }
       return tx.receipt.update({

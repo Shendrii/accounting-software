@@ -1,5 +1,6 @@
 import { Prisma } from '@prisma/client';
 import { Decimal, ledgerDate, nextDay } from './ledger.js';
+import { embeddingModelVersion } from './aiEmbeddings.js';
 
 const ignoredWords = new Set(`a about an and are as at be between by can could did do does find for from get give had has have how i in is it look lookup me my of on or our please record records search see show tell that the their them these this those to up us was were what when where which who will with would you your invoice invoices bill bills receipt receipts customer customers vendor vendors supplier suppliers document documents reference number no balance due amount total paid cost dated date status related recent latest list old older details detail`.split(/\s+/));
 const months = 'january february march april may june july august september october november december'.split(' ');
@@ -94,12 +95,13 @@ function sourceLink(kind, id) {
 }
 
 const shortText = value => value?.slice(0, 160) || null;
+const documentKinds = ['invoice', 'bill', 'receipt'];
 
 export async function retrieveRecords(client, workspaceId, query) {
   const { references, terms, kinds, listRequested } = query;
   const range = references.length ? undefined : query.range;
   if (!references.length && !terms.length && !range && !listRequested) return [];
-  const searches = (kinds.length ? kinds : ['invoice', 'bill', 'receipt']).map(kind => recordQuery(kind, workspaceId, range));
+  const searches = (kinds.length ? kinds : documentKinds).map(kind => recordQuery(kind, workspaceId, range));
   const exact = references.length
     ? Prisma.sql`lower(trim(reference)) = ANY(${references}::text[]) OR lower(trim(alternate)) = ANY(${references}::text[])`
     : Prisma.sql`false`;
@@ -108,12 +110,31 @@ export async function retrieveRecords(client, workspaceId, query) {
   // Exact references take precedence over names and partial keyword matches.
   const match = references.length ? exact : terms.length ? Prisma.sql`${text} @@ ${keywords}` : Prisma.sql`true`;
   const rank = !references.length && terms.length ? Prisma.sql`ts_rank(${text}, ${keywords})` : Prisma.sql`0`;
+  return readMatches(client, Prisma.sql`
+    WITH records AS (${Prisma.join(searches, ' UNION ALL ')})
+    SELECT *, ${rank} AS rank FROM records WHERE ${match}
+    ORDER BY rank DESC, COALESCE("documentDate", "uploadedOn") DESC NULLS LAST, kind, id LIMIT 6
+  `, range);
+}
+
+export async function retrieveNearestRecords(client, workspaceId, { kinds, range }, embedding) {
+  const searches = (kinds.length ? kinds : documentKinds).map(kind => recordQuery(kind, workspaceId, range));
+  const vector = Prisma.sql`${JSON.stringify(embedding)}::vector`;
+  return readMatches(client, Prisma.sql`
+    WITH records AS (${Prisma.join(searches, ' UNION ALL ')})
+    SELECT r.*, e.passage, 1 - (e.embedding <=> ${vector}) AS rank
+    FROM "AiDocumentEmbedding" e
+    JOIN records r ON r.id = e."sourceId" AND r.kind = e."sourceType"
+    WHERE e."workspaceId" = ${workspaceId} AND e.embedding IS NOT NULL
+      AND e."embeddingModel" = ${embeddingModelVersion}
+      AND (e.embedding <=> ${vector}) <= 0.50
+    ORDER BY e.embedding <=> ${vector}, r.kind, r.id LIMIT 6
+  `, range);
+}
+
+async function readMatches(client, matches, range) {
   const rows = await client.$queryRaw`
-    WITH records AS (${Prisma.join(searches, ' UNION ALL ')}),
-    matches AS (
-      SELECT *, ${rank} AS rank FROM records WHERE ${match}
-      ORDER BY rank DESC, COALESCE("documentDate", "uploadedOn") DESC NULLS LAST, kind, id LIMIT 6
-    )
+    WITH matches AS (${matches})
     SELECT m.*, COALESCE(p.settled, 0)::text AS settled, detail.items
     FROM matches m
     LEFT JOIN LATERAL (
@@ -141,6 +162,7 @@ export async function retrieveRecords(client, workspaceId, query) {
     const label = row.kind === 'receipt' ? [reference, party, date].filter(Boolean).join(' · ') : reference;
     return [{
       source: { label, href: sourceLink(row.kind, row.id) },
+      ...(row.passage && { passage: row.passage }),
       facts: {
         kind: row.kind, reference, relatedReference: shortText(row.alternate), party, date, total,
         status: row.status, category: shortText(row.category), uploadedOn: row.uploadedOn,

@@ -55,6 +55,8 @@ const server=http.createServer((req,res)=>{
   if(!app){res.writeHead(503);res.end();return;}app(req,res);
 });
 try{
+  const { loadEmbeddingModel } = await import('../src/lib/aiEmbeddings.js');
+  await loadEmbeddingModel();
   process.env.OCR_SERVICE_URL='http://127.0.0.1:'+await listen(ocr);
   const root='http://127.0.0.1:'+await listen(server);
   process.env.GOOGLE_CALLBACK_URL=root+'/api/auth/google/callback';
@@ -62,11 +64,12 @@ try{
   const tests=(await readdir(new URL('../tests/',import.meta.url))).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>'tests/'+name);
   const env={...process.env};
   for(const key of ['ACCOUNTING_TEST_API','ACCOUNTING_AUTH_TEST_API','ACCOUNTING_AI_TEST_API','LEDGER_TEST_API','WORKFLOWS_TEST_API','PERFORMANCE_TEST_API'])env[key]=root;
-  console.log('Running against disposable localhost books with stubbed Google, email, AI and OCR.');
+  console.log('Running against disposable localhost books with the local embedding model and stubbed Google, email, chat and OCR.');
   const child=spawn(process.execPath,['--test',...tests],{cwd,env,stdio:'inherit'});
   process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
 }finally{
-  globalThis.fetch=originalFetch;
   server.closeAllConnections();ocr.closeAllConnections();server.close();ocr.close();
+  const {wakeDocumentIndexer}=await import('../src/lib/aiDocumentIndex.js');await wakeDocumentIndexer();
+  globalThis.fetch=originalFetch;
   const {prismaUnscoped}=await import('../src/db/prisma.js');await prismaUnscoped.$disconnect();
 }
