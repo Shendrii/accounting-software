@@ -1188,13 +1188,18 @@ export async function getInsights(): Promise<InsightsData> {
 
 // ==================== AI CHAT API ====================
 
-export async function sendAiMessage(message: string, context?: { tab: string; item?: string }): Promise<{ reply: string }> {
+export interface AiSource {
+  label: string;
+  href: string;
+}
+
+export async function sendAiMessage(message: string): Promise<{ reply: string; sources?: AiSource[] }> {
   const response = await fetch(`${API_URL}/api/ai/chat`, {
     method: 'POST',
     headers: { 'Content-Type': 'application/json' },
-    body: JSON.stringify({ message, context }),
+    body: JSON.stringify({ message }),
   });
-  return handleResponse<{ reply: string }>(response);
+  return handleResponse<{ reply: string; sources?: AiSource[] }>(response);
 }
 
 // ==================== RECURRING API ====================

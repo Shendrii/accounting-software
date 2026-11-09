@@ -13,10 +13,12 @@ if(!address||!['localhost','127.0.0.1'].includes(address.hostname)||!/^\/(readin
   throw new Error('Set ACCOUNTING_TEST_DATABASE_URL to a migrated disposable localhost readiness_* or accountrix_test_* database.');
 }
 const cwd=fileURLToPath(new URL('../',import.meta.url)),emails=[];
+const aiCalls = [];
 process.env.DATABASE_URL=database;
 process.env.JWT_ACCESS_SECRET='disposable-readiness-test-secret';
 process.env.NODE_ENV='test';process.env.AUTH_RATE_LIMIT_MAX='2000';
 process.env.OPENAI_API_KEY='';process.env.APP_CLIENT_URL='http://127.0.0.1:43188';
+process.env.GROQ_API_KEY='disposable-rag-provider';
 process.env.CORS_ORIGINS='http://127.0.0.1:43188';
 process.env.GOOGLE_CLIENT_ID='disposable-client';process.env.GOOGLE_CLIENT_SECRET='disposable-secret';
 mock.module(fileURLToPath(new URL('../src/lib/sendEmail.js',import.meta.url)),{namedExports:{
@@ -24,6 +26,15 @@ mock.module(fileURLToPath(new URL('../src/lib/sendEmail.js',import.meta.url)),{n
   sendAccountEmail:async data=>{emails.push(data);},
   sendInvoiceEmail:async()=>({messageId:'stub'}),sendInviteEmail:async()=>({messageId:'stub'}),
 }});
+mock.module('openai', { defaultExport: class TestAiProvider {
+  chat = { completions: { create: async ({ messages }) => {
+    const input = JSON.parse(messages[1].content);
+    aiCalls.push({ instructions: messages[0].content, ...input });
+    if (input.question.includes('provider unavailable')) throw Object.assign(new Error('Fixture quota'), { status: 429 });
+    const content = input.question.includes('invalid citation') ? 'Unsupported answer. [999]' : 'Answer from the fixture record. [1]';
+    return { choices: [{ message: { content } }] };
+  } } };
+} });
 let googleProfile={sub:'fixture-google',email:'fixture-google@example.test',email_verified:true,name:'Google fixture'};
 const originalFetch=globalThis.fetch;
 globalThis.fetch=async(url,options)=>String(url)==='https://oauth2.googleapis.com/token'
@@ -36,6 +47,7 @@ const ocr=http.createServer((req,res)=>{req.resume();req.on('end',()=>{res.setHe
 let app;
 const server=http.createServer((req,res)=>{
   if(req.url==='/__test/mail'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(emails));}
+  if(req.url==='/__test/ai'){res.setHeader('Content-Type','application/json');return res.end(JSON.stringify(aiCalls));}
   if(req.url==='/__test/google'&&req.method==='POST'){
     let body='';req.on('data',part=>{body+=part;if(body.length>10000)req.destroy();});
     req.on('end',()=>{try{googleProfile=JSON.parse(body);res.setHeader('Content-Type','application/json');res.end('{}');}catch{res.writeHead(400);res.end();}});return;
@@ -49,8 +61,8 @@ try{
   ({default:app}=await import('../src/app.js'));
   const tests=(await readdir(new URL('../tests/',import.meta.url))).filter(name=>name.endsWith('.test.mjs')).sort().map(name=>'tests/'+name);
   const env={...process.env};
-  for(const key of ['ACCOUNTING_TEST_API','ACCOUNTING_AUTH_TEST_API','LEDGER_TEST_API','WORKFLOWS_TEST_API','PERFORMANCE_TEST_API'])env[key]=root;
-  console.log('Running against disposable localhost books; Google, email and OCR are stubbed.');
+  for(const key of ['ACCOUNTING_TEST_API','ACCOUNTING_AUTH_TEST_API','ACCOUNTING_AI_TEST_API','LEDGER_TEST_API','WORKFLOWS_TEST_API','PERFORMANCE_TEST_API'])env[key]=root;
+  console.log('Running against disposable localhost books with stubbed Google, email, AI and OCR.');
   const child=spawn(process.execPath,['--test',...tests],{cwd,env,stdio:'inherit'});
   process.exitCode=await new Promise((resolve,reject)=>{child.once('error',reject);child.once('exit',code=>resolve(code??1));});
 }finally{

@@ -1,23 +1,25 @@
 'use client';
 
 import { useState, useRef, useEffect } from 'react';
+import Link from 'next/link';
 import { usePathname } from 'next/navigation';
 import { Bot, Send, X, Loader2, Sparkles } from 'lucide-react';
-import { sendAiMessage } from '@/lib/api';
-import { useIsAuthenticated } from '@/lib/auth';
+import { sendAiMessage, type AiSource } from '@/lib/api';
+import { useActiveWorkspaceId, useCurrentUser, useIsAuthenticated } from '@/lib/auth';
 import { hideLiveAiChat, isPreviewPath } from '@/lib/public-paths';
 import { portfolioAiThread } from '@/lib/portfolio-demo-data';
 
 interface Message {
   role: 'user' | 'assistant';
   content: string;
+  sources?: AiSource[];
 }
 
 const SUGGESTIONS = [
   'What was my profit last month?',
   'Which vendor do I owe the most?',
   'How many overdue invoices do I have?',
-  'Am I spending more than last month?',
+  'Show my latest receipts',
 ];
 
 function contextLabel(pathname: string): string {
@@ -28,6 +30,12 @@ function contextLabel(pathname: string): string {
 }
 
 export function AIChatPanel() {
+  const workspaceId = useActiveWorkspaceId();
+  const user = useCurrentUser();
+  return <WorkspaceChat key={JSON.stringify([user?.id, workspaceId])} />;
+}
+
+function WorkspaceChat() {
   const pathname = usePathname();
   const authenticated = useIsAuthenticated();
   const demo = pathname ? portfolioAiThread(pathname) : null;
@@ -71,11 +79,8 @@ export function AIChatPanel() {
         ]);
         return;
       }
-      const { reply } = await sendAiMessage(msg, {
-        tab: contextLabel(pathname),
-        item: pathname,
-      });
-      setMessages((prev) => [...prev, { role: 'assistant', content: reply }]);
+      const { reply, sources } = await sendAiMessage(msg);
+      setMessages((prev) => [...prev, { role: 'assistant', content: reply, sources }]);
     } catch (e: unknown) {
       const errMsg = e instanceof Error ? e.message : 'Something went wrong.';
       setMessages((prev) => [...prev, { role: 'assistant', content: `⚠️ ${errMsg}` }]);
@@ -121,11 +126,11 @@ export function AIChatPanel() {
           </div>
 
           {/* Messages */}
-          <div className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[280px] max-h-[400px]">
+          <div role="log" aria-label="Ask AI conversation" className="flex-1 overflow-y-auto p-4 space-y-3 min-h-[280px] max-h-[400px]">
             {messages.length === 0 && (
               <div className="space-y-3">
                 <p className="text-xs text-zinc-500 dark:text-zinc-400 text-center">
-                  Ask me about your finances. I have access to live data from your books.
+                  Find invoices, bills, and receipts by reference, name, or date.
                 </p>
                 <div className="grid grid-cols-1 gap-2">
                   {SUGGESTIONS.map((s) => (
@@ -149,13 +154,27 @@ export function AIChatPanel() {
                   </div>
                 )}
                 <div
-                  className={`max-w-[80%] rounded-2xl px-3 py-2 text-sm whitespace-pre-wrap ${
+                  className={`max-w-[80%] min-w-0 rounded-2xl px-3 py-2 text-sm [overflow-wrap:anywhere] ${
                     msg.role === 'user'
                       ? 'bg-blue-600 text-white rounded-br-sm'
                       : 'bg-zinc-100 dark:bg-zinc-800 text-zinc-900 dark:text-zinc-100 rounded-bl-sm'
                   }`}
                 >
-                  {msg.content}
+                  <p className="whitespace-pre-wrap">{msg.content}</p>
+                  {!!msg.sources?.length && (
+                    <div className="mt-3 border-t border-zinc-300 pt-2 text-xs">
+                      <p className="font-semibold">Sources</p>
+                      <ol className="list-decimal pl-4">
+                        {msg.sources.map((source, index) => (
+                          <li key={`${source.href}-${index}`}>
+                            <Link className="inline-flex min-h-8 items-center text-blue-800 underline underline-offset-2 dark:text-blue-200" href={source.href}>
+                              {source.label}
+                            </Link>
+                          </li>
+                        ))}
+                      </ol>
+                    </div>
+                  )}
                 </div>
               </div>
             ))}
@@ -182,7 +201,9 @@ export function AIChatPanel() {
               value={input}
               onChange={(e) => setInput(e.target.value)}
               onKeyDown={handleKeyDown}
-              placeholder="Ask a question…"
+              placeholder="Ask by reference, name, or date…"
+              aria-label="Question for Ask AI"
+              maxLength={1000}
               disabled={loading}
               className="flex-1 text-sm px-3 py-2 rounded-lg border border-zinc-200 dark:border-zinc-700 bg-white dark:bg-zinc-800 text-zinc-900 dark:text-zinc-50 placeholder-zinc-400 focus:outline-none focus:ring-2 focus:ring-blue-400 disabled:opacity-50"
             />
