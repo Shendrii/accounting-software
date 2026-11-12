@@ -26,7 +26,7 @@ function parseName(raw) {
   return match ? match[1].trim() : 'Accounting';
 }
 
-async function brevoSend({ from, fromName, to, subject, html, attachments = [] }) {
+async function brevoSend({ from, fromName, to, subject, html, attachments = [], signal }) {
   const apiKey = process.env.BREVO_API_KEY;
   const senderEmail = parseEmail(from);
   const senderName = fromName || parseName(from);
@@ -51,6 +51,7 @@ async function brevoSend({ from, fromName, to, subject, html, attachments = [] }
       'content-type': 'application/json',
     },
     body: JSON.stringify(body),
+    signal,
   });
 
   if (!res.ok) {
@@ -75,7 +76,7 @@ function isSmtpConfigured() {
   return Boolean(user && pass);
 }
 
-function createTransporter() {
+function createTransporter(options = {}) {
   const { user, pass } = smtpAuth();
   if (!user || !pass) {
     throw new Error('SMTP is not configured: set SMTP_USER and SMTP_PASS');
@@ -94,6 +95,7 @@ function createTransporter() {
     lookup: (hostname, options, callback) => {
       dnsLookup(hostname, { ...options, family: 4 }, callback);
     },
+    ...options,
   });
 }
 
@@ -101,6 +103,12 @@ function createTransporter() {
 
 export function isEmailConfigured() {
   return isBrevoConfigured() || isSmtpConfigured();
+}
+
+export async function sendInvoiceReminderEmail({ to, subject, message }) {
+  const html = '<div style="font-family:sans-serif;white-space:pre-wrap">' + escapeHtml(message) + '</div>';
+  if (isBrevoConfigured()) return brevoSend({ from: process.env.SMTP_FROM || process.env.BREVO_FROM || process.env.SMTP_USER || '', to, subject, html, signal: AbortSignal.timeout(20000) });
+  return createTransporter({ connectionTimeout: 15000, greetingTimeout: 15000, socketTimeout: 20000 }).sendMail({ from: process.env.SMTP_FROM || process.env.MAIL_FROM || smtpAuth().user, to, subject, text: message, html });
 }
 
 export async function sendAccountEmail({ to, purpose, url }) {

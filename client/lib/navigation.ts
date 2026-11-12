@@ -1,6 +1,7 @@
 import type { LucideIcon } from 'lucide-react';
 import {
   BookOpenCheck,
+  ListChecks,
   Landmark,
   ReceiptText,
   Settings,
@@ -16,6 +17,7 @@ export type NavigationItem = {
 };
 
 export const navigationClusters: Array<{ label: string; items: NavigationItem[] }> = [
+  { label: 'Practice', items: [{ name: 'Client work queue', href: '/practice', icon: ListChecks }] },
   {
     label: 'Daily work',
     items: [

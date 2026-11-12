@@ -1,4 +1,5 @@
 'use client';
+import ReportExport from '@/app/components/ReportExport';
 import { Suspense, useCallback } from 'react';
 import Link from 'next/link';
 import { getAgingReport } from '@/lib/books-api';
@@ -17,14 +18,6 @@ function AgingContent() {
   const load = useCallback(() => getAgingReport({ kind, asOf, agingBy, page, pageSize }), [kind, asOf, agingBy, page, pageSize]);
   const { data, loading, error, retry } = useWorkspaceData(load);
   const fmt=money.format;
-  function exportPage() {
-    if (!data) return;
-    const rows = [['As of', 'Currency', 'Aging by', 'Party', 'Reference', 'Document date', 'Due date', 'Original amount', 'Settlements net of corrections', 'Open balance', 'Age bucket'],
-      ...data.items.map(row => [data.asOf, data.currency, data.agingBy, row.partyName, row.reference, row.date, row.dueDate, row.originalAmount, row.paidAsOf, row.balance, bucketLabels[row.bucket]])];
-    const cell = (value: string) => '"' + (/^[=+@\t\r]/.test(value) ? "'" + value : value).replaceAll('"', '""') + '"';
-    const url = URL.createObjectURL(new Blob([rows.map(row => row.map(cell).join(',')).join('\r\n')], { type: 'text/csv' }));
-    const link = document.createElement('a'); link.href = url; link.download = kind + '-aging-' + asOf + '-page-' + page + '.csv'; link.click(); URL.revokeObjectURL(url);
-  }
   return <div className="workspace-page"><div className="workspace-content space-y-5">
     <WorkspaceHeading section="Reports" title="Receivables and payables aging" description="See what remained open at a date, then prove it agrees with the ledger." actions={<Link href="/reports" className="workspace-button">Financial statements</Link>} />
     <nav className="workspace-tabs" aria-label="Aging reports">{(['receivables', 'payables'] as const).map(value => <button type="button" key={value} className="workspace-tab" aria-current={kind === value ? 'page' : undefined} onClick={() => update({ kind: value, page: '1' })}>{value === 'receivables' ? 'Accounts receivable' : 'Accounts payable'}</button>)}</nav>
@@ -47,7 +40,7 @@ function AgingContent() {
         <p className="flex flex-wrap justify-between gap-3 p-4 text-sm"><span>{kind === 'receivables' ? 'Open invoices' : 'Open bills'} {fmt(data.totals.debits)} · Credits {fmt(data.totals.credits)}</span><strong>Net open balance {fmt(data.totals.net)}</strong></p>
       </WorkspacePanel>
       <WorkspacePanel title={kind === 'receivables' ? 'Customer balances' : 'Supplier balances'} description="Balances owed and offsetting credits are shown separately; credits are not hidden inside an aging bucket."><div className="workspace-table-wrap"><table className="workspace-table workbench-table"><thead><tr><th scope="col">{kind === 'receivables' ? 'Customer' : 'Supplier'}</th>{Object.entries(bucketLabels).filter(([key]) => key !== 'credit').map(([key, label]) => <th scope="col" key={key} className="workspace-number">{label}</th>)}<th scope="col" className="workspace-number">Credits</th><th scope="col" className="workspace-number">Net balance</th></tr></thead><tbody>{data.parties.map(row => <tr key={row.partyId}><td data-label="Party">{row.partyName}<span className="block text-xs text-slate-600">{row.documents} open documents</span></td>{Object.entries(bucketLabels).filter(([key]) => key !== 'credit').map(([key, label]) => <td key={key} data-label={label} className="workspace-number">{fmt(row.buckets[key])}</td>)}<td data-label="Credits" className="workspace-number">{fmt(row.credits)}</td><td data-label="Net balance" className="workspace-number">{fmt(row.balance)}</td></tr>)}</tbody></table></div>{!data.parties.length && <p className="p-4 text-sm text-slate-600">No verified open documents at this date.</p>}</WorkspacePanel>
-      <WorkspacePanel title="Open document detail" action={<button type="button" className="workspace-button" onClick={exportPage} disabled={!data.items.length}>Export this page CSV</button>}>
+      <WorkspacePanel title="Open document detail" action={<ReportExport report="aging" params={{kind,asOf,agingBy}} label="Complete aging"/>}>
         <div className="workspace-table-wrap"><table className="workspace-table workbench-table"><thead><tr><th scope="col">Document</th><th scope="col">Party</th><th scope="col">Document date</th><th scope="col">Due date</th><th scope="col">Age</th><th scope="col" className="workspace-number">Open balance</th></tr></thead><tbody>{data.items.map(row => <tr key={row.id}><td data-label="Document"><Link className="workspace-text-action" href={row.recordType==='CREDIT'?(kind==='receivables'?'/sales/credits':'/purchases/credits')+'?record='+row.id:(kind === 'receivables' ? '/sales/invoices/' : '/purchases/bills/') + row.id}>{row.reference}</Link>{row.isOpeningBalance && <span className="block text-xs text-slate-600">Opening balance</span>}</td><td data-label="Party">{row.partyName}</td><td data-label="Document date">{row.date}</td><td data-label="Due date">{row.dueDate}</td><td data-label="Age">{bucketLabels[row.bucket]}</td><td data-label="Open balance" className="workspace-number">{fmt(row.balance)}</td></tr>)}</tbody></table></div>
         <WorklistPagination data={data} loading={loading} onPage={value => update({ page: String(value) })} onPageSize={value => update({ pageSize: value, page: '1' })} />
       </WorkspacePanel>

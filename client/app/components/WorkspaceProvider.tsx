@@ -17,7 +17,7 @@ type WorkspaceContextValue = {
   loading: boolean;
   error: boolean;
   retry: () => void;
-  selectWorkspace: (workspace: AuthWorkspace) => void;
+  selectWorkspace: (workspace: AuthWorkspace, destination?: string) => void;
   openCreate: () => void;
 };
 
@@ -63,8 +63,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   const workspaces = query.data ?? [];
   const active = workspaces.find(workspace => workspace.id === activeId);
 
-  function navigateToWorkspace(workspace: Pick<AuthWorkspace, 'id' | 'name'>, created = false) {
-    const destination = created ? '/settings/setup' : switchDestination();
+  function navigateToWorkspace(workspace: Pick<AuthWorkspace, 'id' | 'name'>, created = false, requestedDestination?: string) {
+    const destination = requestedDestination ?? (created ? '/settings/setup' : switchDestination());
     setSwitching(true);
     try {
       sessionStorage.setItem(flashKey, (created ? 'Created and switched to ' : 'Switched to ') + workspace.name);
@@ -98,8 +98,8 @@ export function WorkspaceProvider({ children }: { children: ReactNode }) {
   return (
     <WorkspaceContext.Provider value={{
       workspaces, active, loading: query.loading, error: query.error, retry: query.retry,
-      selectWorkspace: workspace => {
-        if (workspace.id !== activeId) navigateToWorkspace(workspace);
+      selectWorkspace: (workspace, destination) => {
+        if (workspace.id !== activeId || destination) navigateToWorkspace(workspace, false, destination);
       },
       openCreate: () => setCreating(true),
     }}>

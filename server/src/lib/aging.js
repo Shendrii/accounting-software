@@ -2,13 +2,13 @@ import { Prisma } from '@prisma/client';
 import { Decimal, LedgerError, ledgerDate, nextDay } from './ledger.js';
 import { pageOptions } from './workbenchQueries.js';
 
-export async function agingReport(tx, workspace, query) {
+export async function agingReport(tx, workspace, query, exportAll = false) {
   const kind = query.kind ?? 'receivables';
   const basis = query.agingBy ?? 'dueDate';
   if (!['receivables', 'payables'].includes(kind) || !['dueDate', 'invoiceDate'].includes(basis)) throw new LedgerError('Choose receivables or payables, and a valid aging date basis.');
   const asOf = ledgerDate(query.asOf ?? new Date().toISOString(), 'Aging date').toISOString().slice(0, 10);
   const cutoff = nextDay(asOf).toISOString();
-  const options = pageOptions(query);
+  const options = exportAll ? { page: 1, pageSize: 10000, offset: 0 } : pageOptions(query);
   const invoice = kind === 'receivables';
   const table = Prisma.raw(invoice ? '"Invoice"' : '"Bill"');
   const paymentKey = Prisma.raw(invoice ? '"invoiceId"' : '"billId"');
@@ -92,6 +92,7 @@ export async function agingReport(tx, workspace, query) {
       (SELECT COUNT(*)::integer FROM documents WHERE "accountId" IS NULL) AS "unmappedDocuments",
       (SELECT COUNT(*)::integer FROM ${table} WHERE "workspaceId" = ${workspace.id} AND "postingEntryId" IS NULL AND "status"::text IN ('SENT', 'RECEIVED', 'PAID') AND "date" < ${cutoff}::timestamp) AS "unverifiedDocuments"
   `;
+  if (exportAll && report.total > 10000) throw new LedgerError('This complete aging report exceeds 10,000 open items. Request a reviewed data extract; no partial export was produced.', 409);
   const money = value => new Decimal(value).toFixed(2);
   const controls = report.controls.map(row => ({ ...row, ledgerBalance: money(row.ledgerBalance), subledgerBalance: money(row.subledgerBalance), difference: money(row.difference) }));
   const ledger = controls.reduce((sum, row) => sum.plus(row.ledgerBalance), new Decimal(0));

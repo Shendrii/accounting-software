@@ -35,7 +35,7 @@ export async function requireWorkspace(req, res, next) {
     if (session.role === 'VIEWER' && !['GET','HEAD','OPTIONS'].includes(req.method)) return res.status(403).json({ error: 'This workspace role is read-only.' });
 
     req.user = { id: session.id, email: session.email, name: session.name };
-    req.workspace = { id: session.workspaceId, name: session.workspaceName, type: session.type, role: session.role, currency: session.currency, country: session.country, setupCompletedAt: session.setupCompletedAt, memberCanPost: session.memberCanPost, requireJournalApproval: session.requireJournalApproval };
+    req.workspace = { id: session.workspaceId, name: session.workspaceName, type: session.type, role: session.role, currency: session.currency, legalName: session.legalName, country: session.country, setupCompletedAt: session.setupCompletedAt, memberCanPost: session.memberCanPost, requireJournalApproval: session.requireJournalApproval };
     req.accountingContext={ userId: session.id, sessionId: identity.sessionId, sessionVersion: identity.version, method: req.method, workspaceId: session.workspaceId, currency: session.currency, legalName: session.legalName ?? session.workspaceName };
     withRequestContext(req.accountingContext, () => next());
   } catch (error) {

@@ -103,10 +103,10 @@ export function WorkspaceRow({ icon: Icon, title, detail, href, action }: {
 
 export function WorkflowTabs({ area, active }: {
   area: 'sales' | 'purchases';
-  active: 'summary' | 'invoices' | 'customers' | 'bills' | 'vendors' | 'documents' | 'credits' | 'collections';
+  active: 'summary' | 'invoices' | 'customers' | 'bills' | 'vendors' | 'documents' | 'credits' | 'collections' | 'recurring' | 'reminders';
 }) {
   const tabs = area === 'sales'
-    ? [['invoices', 'Invoices', '/sales/invoices'], ['credits','Credits & deposits','/sales/credits'], ['collections','Collections','/sales/collections'], ['customers', 'Customers', '/sales/customers']]
+    ? [['invoices', 'Invoices', '/sales/invoices'], ['recurring','Recurring','/sales/recurring'], ['reminders','Reminders','/sales/reminders'], ['credits','Credits & deposits','/sales/credits'], ['collections','Collections','/sales/collections'], ['customers', 'Customers', '/sales/customers']]
     : [['documents', 'Document inbox', '/purchases/documents'], ['bills', 'Bills', '/purchases/bills'], ['credits','Credits & prepayments','/purchases/credits'], ['collections','Supplier follow-up','/purchases/follow-up'], ['vendors', 'Vendors', '/purchases/vendors']];
   return (
     <nav aria-label={area === 'sales' ? 'Sales views' : 'Purchases views'} className="workspace-tabs">

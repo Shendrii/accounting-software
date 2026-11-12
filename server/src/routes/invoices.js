@@ -1,4 +1,5 @@
 import express from 'express';
+import { createDraftInvoice, checkCustomer, draftLines, totals } from '../lib/invoiceDraft.js';
 import { reversePaymentHandler } from '../lib/paymentCorrection.js';
 import prisma from '../db/prisma.js';
 import {audit} from '../lib/audit.js';
@@ -36,52 +37,6 @@ async function getInvoice(tx, where) {
   const invoice = await tx.invoice.findFirst({ where, include: detail });
   if (!invoice) throw new LedgerError('Invoice not found.', 404);
   return invoice;
-}
-
-async function generateInvoiceNo(tx, workspaceId) {
-  const now = new Date();
-  const month = String(now.getMonth() + 1).padStart(2, '0');
-  const prefix = 'INV-' + now.getFullYear() + month + '-';
-  const last = await tx.invoice.findFirst({
-    where: { workspaceId, invoiceNo: { startsWith: prefix } },
-    orderBy: { invoiceNo: 'desc' },
-  });
-  const seq = last ? parseInt(last.invoiceNo.split('-')[2], 10) + 1 : 1;
-  return prefix + String(seq).padStart(4, '0');
-}
-
-async function checkCustomer(tx, workspaceId, id) {
-  const customer = typeof id === 'string' && await tx.customer.findFirst({ where: { id, workspaceId } });
-  if (!customer) throw new LedgerError('Choose a customer from this workspace.');
-}
-
-async function draftLines(tx, workspaceId, input) {
-  if (!Array.isArray(input) || input.length === 0) throw new LedgerError('Enter at least one invoice line.');
-  const lines = input.map(line => {
-    if (typeof line?.description !== 'string' || !line.description.trim()) {
-      throw new LedgerError('Enter a description for each line.');
-    }
-    const quantity = decimalInput(line.quantity, 'Quantity', 4);
-    const unitPrice = decimalInput(line.unitPrice, 'Unit price');
-    if (quantity.isZero()) throw new LedgerError('Quantity must be greater than zero.');
-    const amount = quantity.times(unitPrice).toDecimalPlaces(2, Decimal.ROUND_HALF_UP);
-    return {
-      description: line.description.trim(), quantity, unitPrice,
-      amount: decimalInput(amount, 'Line amount'), accountId: line.accountId || null,
-    };
-  });
-  const accountIds = lines.map(line => line.accountId).filter(Boolean);
-  const accounts = await ledgerAccounts(tx, workspaceId, accountIds);
-  if ([...accounts.values()].some(account => account.type !== 'REVENUE')) {
-    throw new LedgerError('Choose revenue accounts for invoice lines.');
-  }
-  return lines;
-}
-
-function totals(subtotal, tax) {
-  const total = decimalInput(subtotal.plus(tax), 'Invoice total');
-  if (total.isZero()) throw new LedgerError('Invoice total must be greater than zero.');
-  return { subtotal, tax, total };
 }
 
 router.get('/', async (req, res) => {
@@ -125,33 +80,9 @@ router.get('/:id', async (req, res) => {
 
 router.post('/', async (req, res) => {
   try {
-    const workspaceId = req.workspace.id;
-    const { customerId, date, dueDate, notes, tax } = req.body;
-    const invoiceDate = ledgerDate(date, 'Invoice date');
-    const due = ledgerDate(dueDate, 'Due date');
-    if (due < invoiceDate) throw new LedgerError('Due date cannot precede the invoice date.');
-    const taxAmount = decimalInput(tax ?? 0, 'Tax');
-    const invoice = await ledgerTransaction(async tx => {
-      await checkCustomer(tx, workspaceId, customerId);
-      const code=await taxCode(tx,workspaceId,req.body.taxCodeId,'OUTPUT',invoiceDate);
-      if(code?.purpose==='EXEMPT'&&taxAmount.gt(0))throw new LedgerError('An exempt tax code cannot have a tax amount.');
-      const lines = await draftLines(tx, workspaceId, req.body.lines);
-      const created=await tx.invoice.create({
-        data: {
-          workspaceId, invoiceNo: await generateInvoiceNo(tx, workspaceId), customerId,
-          date: invoiceDate, dueDate: due, notes,
-          taxCodeId:code?.id,invoiceDetails:invoiceDetails(req.body.invoiceDetails),
-          ...totals(decimalSum(lines.map(line => line.amount)), taxAmount),
-          lines: { create: lines },
-        },
-        include: detail,
-      });
-      await audit(tx,workspaceId,'INVOICE_DRAFT_CREATED',created.id,{after:created});return created;
-    });
+    const invoice = await ledgerTransaction(tx => createDraftInvoice(tx, req.workspace.id, req.body, detail));
     res.status(201).json(result(invoice));
-  } catch (error) {
-    sendLedgerError(res, error, 'Failed to create the invoice.');
-  }
+  } catch (error) { sendLedgerError(res, error, 'Failed to create the invoice.'); }
 });
 
 router.put('/:id', async (req, res) => {

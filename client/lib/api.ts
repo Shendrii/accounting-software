@@ -694,6 +694,13 @@ export interface InvoicePayment extends PaymentHistory {
 }
 
 export interface Invoice {
+  nextOccurrences?: string[];
+  scheduleError?: string;
+  isRecurring?: boolean;
+  recurrenceInterval?: string | null;
+  recurrenceAnchorDay?: number | null;
+  nextDueDate?: string | null;
+  remindersEnabled?: boolean;
   taxCodeId?:string|null;
   invoiceDetails?:{buyerTaxId?:string;buyerAddress?:string;serialReference?:string};
   legalSnapshot?:Record<string,string>;

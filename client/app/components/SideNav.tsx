@@ -68,7 +68,7 @@ export default function SideNav() {
             aria-expanded={menuOpen} aria-controls="workspace-sidebar" onClick={() => setMenuOpen(true)}>
             <Menu className="size-5" aria-hidden="true" />
           </button>
-          <Link href="/" className="hidden rounded text-slate-600 hover:text-blue-800 sm:inline">Workspace</Link>
+          <Link href="/" className="hidden rounded text-slate-600 hover:text-blue-800 sm:inline">{pathname.startsWith('/practice') ? 'All clients' : 'Workspace'}</Link>
           <ChevronRight className="hidden size-3.5 shrink-0 text-slate-400 sm:inline" aria-hidden="true" />
           <span className="truncate font-semibold text-slate-950">{section?.name ?? 'Dashboard'}</span>
         </div>

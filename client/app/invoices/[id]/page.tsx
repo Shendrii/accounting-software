@@ -8,6 +8,7 @@ import DraftDocumentEditor from '@/app/components/DraftDocumentEditor';
 import {taxRequest,type TaxCode} from '@/lib/tax-api';
 import {useWorkspaceData} from '@/lib/use-workspace-data';
 import {useCallback} from 'react';
+import InvoiceAutomation from '@/app/components/InvoiceAutomation';
 import RecordAudit from '@/app/components/RecordAudit';
 import AppliedCredits from '@/app/components/AppliedCredits';
 import {useWorkspaces} from '@/app/components/WorkspaceProvider';
@@ -289,7 +290,7 @@ export function InvoiceDetailPage() {
         </section>
 
         {editing&&invoice.status==='DRAFT'&&<DraftDocumentEditor kind="invoice" document={invoice} accounts={accounts} onDismiss={()=>setEditing(false)} onSaved={saved=>{setInvoice(saved as Invoice);setEditing(false);}}/>}
-        <RecordAudit entityId={invoice.id}/>
+        <InvoiceAutomation key={invoice.id} invoice={invoice} onSaved={() => { void getInvoice(id).then(setInvoice).catch(cause => setError(cause instanceof Error ? cause.message : 'Invoice could not refresh.')); }}/><RecordAudit entityId={invoice.id}/>
         {modal && <AccountingDialog title={modalTitle ?? ''} busy={busy} onDismiss={() => setModal(null)}>
           {modal.kind === 'journal' ? <>
             <p className="mb-2 text-sm text-slate-600">{modal.entry.description} · {formatDate(modal.entry.date)}</p>

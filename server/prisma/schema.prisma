@@ -212,6 +212,12 @@ model Invoice {
   postingEntryId String?       @unique
   postingEntry   JournalEntry? @relation("InvoicePosting", fields: [postingEntryId], references: [id], onDelete: Restrict)
   emailSentAt    DateTime?
+  isRecurring    Boolean @default(false)
+  recurrenceInterval String?
+  recurrenceAnchorDay Int?
+  nextDueDate DateTime?
+  remindersEnabled Boolean @default(false)
+  reminders InvoiceReminder[]
   isOpeningBalance Boolean      @default(false)
   payments       InvoicePayment[]
   creditAllocations CreditAllocation[]
@@ -222,6 +228,7 @@ model Invoice {
   @@unique([workspaceId, invoiceNo])
   @@index([workspaceId, date, id])
   @@index([workspaceId, status, dueDate])
+  @@index([workspaceId, isRecurring, nextDueDate])
 }
 
 model InvoicePayment {
@@ -471,6 +478,7 @@ model Workspace {
   requireJournalApproval Boolean @default(false)
   periods          AccountingPeriod[]
   auditEvents      AuditEvent[]
+  invoiceReminders InvoiceReminder[]
   recurringRuns    RecurringRun[]
   recurringOccurrences RecurringOccurrence[]
   ownerUser        User              @relation("WorkspaceOwner", fields: [ownerUserId], references: [id], onDelete: Cascade)
@@ -866,4 +874,27 @@ enum WorkspaceRole {
 enum AuthProviderType {
   LOCAL
   GOOGLE
+}
+
+model InvoiceReminder {
+  id String @id @default(cuid())
+  workspaceId String
+  workspace Workspace @relation(fields: [workspaceId], references: [id], onDelete: Restrict)
+  invoiceId String
+  invoice Invoice @relation(fields: [invoiceId], references: [id], onDelete: Restrict)
+  requestId String
+  reminderDate DateTime @db.Date
+  recipient String
+  subject String
+  message String
+  balance Decimal @db.Decimal(15, 2)
+  currency String @db.VarChar(3)
+  status String @default("SENDING")
+  providerMessageId String?
+  createdById String
+  createdAt DateTime @default(now())
+  sentAt DateTime?
+  @@unique([workspaceId, requestId])
+  @@unique([invoiceId, reminderDate])
+  @@index([workspaceId, invoiceId, createdAt])
 }

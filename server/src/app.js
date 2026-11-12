@@ -1,3 +1,5 @@
+import practiceRouter from './routes/practice.js';
+import invoiceRemindersRouter from './routes/invoiceReminders.js';
 import express from 'express';
 import cors from 'cors';
 import dotenv from 'dotenv';
@@ -104,6 +106,8 @@ app.use(['/api/invoices', '/api/bills', '/api/receipts', '/api/customers', '/api
 // API Routes
 app.use('/api/auth', authLimiter, authRouter);
 app.use('/api/workspaces', requireAuth, workspacesRouter);
+app.use('/api/practice', requireAuth, practiceRouter);
+app.use('/api/invoice-reminders', requireWorkspace, invoiceRemindersRouter);
 app.use('/api/workspace-settings', requireWorkspace, workspaceSettingsRouter);
 app.use('/api/periods', requireWorkspace, periodsRouter);
 app.use('/api/audit', requireWorkspace, auditRouter);

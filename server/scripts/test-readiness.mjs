@@ -24,6 +24,7 @@ process.env.GOOGLE_CLIENT_ID='disposable-client';process.env.GOOGLE_CLIENT_SECRE
 mock.module(fileURLToPath(new URL('../src/lib/sendEmail.js',import.meta.url)),{namedExports:{
   isEmailConfigured:()=>true,isSmtpConfigured:()=>true,
   sendAccountEmail:async data=>{emails.push(data);},
+  sendInvoiceReminderEmail:async data=>{emails.push({...data,purpose:'INVOICE_REMINDER'});if(data.to==='unconfirmed@example.test')throw new Error('Synthetic provider timeout');return {messageId:'reminder-stub'};},
   sendInvoiceEmail:async()=>({messageId:'stub'}),sendInviteEmail:async()=>({messageId:'stub'}),
 }});
 mock.module('openai', { defaultExport: class TestAiProvider {
